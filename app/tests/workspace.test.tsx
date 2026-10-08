@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Workspace } from '../src/components/Workspace.js';
 import type { TaskRow } from '../src/bridge.js';
@@ -80,16 +80,18 @@ describe('one task workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
     fireEvent.click(screen.getByRole('button', { name: '方法库' }));
     expect(props.onMethods).toHaveBeenCalledOnce();
-    press(screen.getByRole('button', { name: '任务工具' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '数据台' }));
+    fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
+    fireEvent.click(screen.getByRole('button', { name: '数据台' }));
     expect(props.onData).toHaveBeenCalledOnce();
   });
 
-  it('starts every task tool with a line icon that stays out of its name', async () => {
-    render(<Workspace {...props} onArchive={vi.fn()} onTrash={vi.fn()} />);
-    press(screen.getByRole('button', { name: '任务工具' }));
+  it('keeps only what acts on the open task in its menu, each with a line icon that stays out of its name', async () => {
+    render(<Workspace {...props} onRename={vi.fn()} onArchive={vi.fn()} onTrash={vi.fn()} />);
+    press(screen.getByRole('button', { name: '这个任务' }));
+    const menu = await screen.findByRole('menu');
+    expect(menu.textContent).toContain(tasks[0].title);
     const items = await screen.findAllByRole('menuitem');
-    expect(items.map((item) => item.textContent)).toEqual(['方法库', '数据台', '任务记录与旧版流程', '归档任务', '移入回收站']);
+    expect(items.map((item) => item.textContent)).toEqual(['改名', '归档任务', '移入回收站']);
     for (const item of items) {
       const icon = item.firstElementChild as SVGElement;
       expect(icon.tagName.toLowerCase(), item.textContent!).toBe('svg');
@@ -102,7 +104,7 @@ describe('one task workspace', () => {
   it('moves a task to the trash from a plain menu item, since it can be restored', async () => {
     const onTrash = vi.fn();
     render(<Workspace {...props} onArchive={vi.fn()} onTrash={onTrash} />);
-    press(screen.getByRole('button', { name: '任务工具' }));
+    press(screen.getByRole('button', { name: '这个任务' }));
     const trash = await screen.findByRole('menuitem', { name: '移入回收站' });
     expect(trash.getAttribute('data-variant')).toBe('default');
     fireEvent.click(trash);
@@ -114,7 +116,7 @@ describe('one task workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
     fireEvent.click(screen.getByRole('button', { name: '已归档' }));
     expect(props.onLifecycleView).toHaveBeenCalledWith('archived');
-    press(screen.getByRole('button', { name: '任务工具' }));
+    press(screen.getByRole('button', { name: '这个任务' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: '归档任务' }));
   });
 
@@ -124,13 +126,14 @@ describe('one task workspace', () => {
     const sidebar = screen.getByRole('dialog', { name: '财务任务' });
     expect(screen.getByRole('heading', { name: '任务' })).toBeTruthy();
     expect(sidebar.querySelector('.workspace-search input')).toBe(screen.getByRole('searchbox', { name: '搜索任务' }));
-    expect(sidebar.querySelector('.workspace-sidebar-footer .workspace-library')).toBe(screen.getByRole('button', { name: '方法库' }));
+    const tools = within(sidebar).getByRole('navigation', { name: '更多工具' });
+    expect([...tools.querySelectorAll('.workspace-library')].map((item) => item.textContent)).toEqual(['方法库', '数据台', '任务记录与旧版流程']);
   });
 
   it('shows a failed archive in the menu and lets the same task retry', async () => {
     const onArchive = vi.fn().mockRejectedValueOnce(new Error('任务暂时被占用，请重试。')).mockResolvedValueOnce(undefined);
     render(<Workspace {...props} onArchive={onArchive} />);
-    press(screen.getByRole('button', { name: '任务工具' }));
+    press(screen.getByRole('button', { name: '这个任务' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: '归档任务' }));
     expect((await screen.findByRole('alert')).textContent).toBe('任务暂时被占用，请重试。');
     expect(screen.getByText(tasks[0].title, { selector: 'h1' })).toBeTruthy();

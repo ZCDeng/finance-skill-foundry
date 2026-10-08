@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { Archive, BookOpen, Check, Columns2, Ellipsis, FileClock, FolderOpen, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, RotateCcw, Search, Sheet, Trash2, X, XCircle } from 'lucide-react';
+import { Archive, BookOpen, Check, Columns2, Ellipsis, FileClock, FolderOpen, MessageSquare, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RotateCcw, Search, Sheet, Trash2, X, XCircle } from 'lucide-react';
 import type { TaskLifecycleFilter, TaskRow } from '../bridge.js';
 import './workspace.css';
 import { Button } from './ui/button.js';
@@ -11,6 +11,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu.js';
 import {
@@ -267,9 +269,12 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
             onClick={() => pick(row.id)}><span>{row.title}</span><small>{joinParts([row.period ? <PeriodWords value={row.period} /> : null, lifecycleLabels[row.lifecycle_status ?? 'active']])}</small></button>)}
           {shownTasks.length === 0 ? <p className="fnd-muted">{query ? '没有找到相关任务' : lifecycleView === 'archived' ? '没有已归档的任务' : lifecycleView === 'trashed' ? '回收站是空的' : '从一个问题开始第一项分析'}</p> : null}
         </div>
-        <div className="workspace-sidebar-footer">
+        {/* Places to go, kept apart from what can be done to the open task (the header's 这个任务 menu). */}
+        <nav className="workspace-sidebar-footer" aria-label="更多工具">
           <button className="workspace-library" onClick={() => { openMethods(); if (!wide) closeSidebar(); }}><BookOpen size={16} aria-hidden />方法库</button>
-        </div>
+          <button className="workspace-library" onClick={() => { onData(); if (!wide) closeSidebar(); }}><Sheet size={16} aria-hidden />数据台</button>
+          <button className="workspace-library" onClick={() => { onHistory(); if (!wide) closeSidebar(); }}><FileClock size={16} aria-hidden />任务记录与旧版流程</button>
+        </nav>
       </aside>
       <section className="workspace-main" aria-label="任务工作区" inert={overlay ? true : undefined}>
         <header className="workspace-header">
@@ -291,20 +296,25 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
             <Button size="icon" variant="ghost" aria-label="对话专注" title="对话专注" aria-pressed={effective === 'conversation'} onClick={() => setFocus('conversation')}><MessageSquare size={17} aria-hidden /></Button>
             <Button size="icon" variant="ghost" aria-label="成果专注" title="成果专注" aria-pressed={effective === 'results'} onClick={() => setFocus('results')}><FolderOpen size={17} aria-hidden /></Button>
           </div> : null}
-          <DropdownMenu open={toolsOpen} onOpenChange={setToolsOpen}>
+          {/* Only what acts on the open task, named on the menu's first line so it is clear which task it is. */}
+          {task ? <DropdownMenu open={toolsOpen} onOpenChange={setToolsOpen}>
             <DropdownMenuTrigger asChild>
-              <Button type="button" size="icon" variant="ghost" aria-label="任务工具" title="任务工具">
+              <Button type="button" size="icon" variant="ghost" aria-label="这个任务" title="这个任务的操作">
                 <Ellipsis size={19} aria-hidden />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" aria-label="任务工具菜单">
-              <DropdownMenuItem onSelect={() => openMethods()}><BookOpen size={15} strokeWidth={1.5} aria-hidden />方法库</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => onData()}><Sheet size={15} strokeWidth={1.5} aria-hidden />数据台</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => onHistory()}><FileClock size={15} strokeWidth={1.5} aria-hidden />任务记录与旧版流程</DropdownMenuItem>
-              {task && lifecycleStatus === 'active' && onArchive ? <DropdownMenuItem disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('archive'); }}><Archive size={15} strokeWidth={1.5} aria-hidden />归档任务</DropdownMenuItem> : null}
-              {task && lifecycleStatus !== 'active' && onRestore ? <DropdownMenuItem disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('restore'); }}><RotateCcw size={15} strokeWidth={1.5} aria-hidden />恢复任务</DropdownMenuItem> : null}
-              {task && lifecycleStatus !== 'trashed' && onTrash ? <DropdownMenuItem disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('trash'); }}><Trash2 size={15} strokeWidth={1.5} aria-hidden />移入回收站</DropdownMenuItem> : null}
-              {task && lifecycleStatus === 'trashed' && onPurge ? <DropdownMenuItem variant="destructive" disabled={Boolean(lifecycleBusy)} onSelect={() => {
+            <DropdownMenuContent align="end" aria-label="这个任务的操作">
+              <DropdownMenuLabel className="max-w-72 truncate font-normal text-[var(--fnd-muted)]" title={task.title}>{task.title}</DropdownMenuLabel>
+              {onRename && lifecycleStatus === 'active' ? <DropdownMenuItem onSelect={() => {
+                setTitle(task.title); setTitleError('');
+                // After the menu has closed, so its focus return does not pull focus off the name field.
+                setTimeout(() => setRenaming(true), 0);
+              }}><Pencil size={15} strokeWidth={1.5} aria-hidden />改名</DropdownMenuItem> : null}
+              {lifecycleStatus === 'active' && onArchive ? <DropdownMenuItem disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('archive'); }}><Archive size={15} strokeWidth={1.5} aria-hidden />归档任务</DropdownMenuItem> : null}
+              {lifecycleStatus !== 'active' && onRestore ? <DropdownMenuItem disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('restore'); }}><RotateCcw size={15} strokeWidth={1.5} aria-hidden />恢复任务</DropdownMenuItem> : null}
+              {(lifecycleStatus !== 'trashed' && onTrash) || (lifecycleStatus === 'trashed' && onPurge) ? <DropdownMenuSeparator /> : null}
+              {lifecycleStatus !== 'trashed' && onTrash ? <DropdownMenuItem disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('trash'); }}><Trash2 size={15} strokeWidth={1.5} aria-hidden />移入回收站</DropdownMenuItem> : null}
+              {lifecycleStatus === 'trashed' && onPurge ? <DropdownMenuItem variant="destructive" disabled={Boolean(lifecycleBusy)} onSelect={() => {
                 const target = { kind: 'purge' as const, id: task.id, title: task.title };
                 setConfirmError('');
                 // Open after the menu has closed, so the menu's focus return does not land on the dialog.
@@ -312,7 +322,7 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
               }}><XCircle size={15} strokeWidth={1.5} aria-hidden />永久删除</DropdownMenuItem> : null}
               {lifecycleError ? <p role="alert" className="max-w-72 px-2 py-1 text-sm break-words">{lifecycleError}</p> : null}
             </DropdownMenuContent>
-          </DropdownMenu>
+          </DropdownMenu> : null}
         </header>
         <div className="workspace-panes">
           <section className="workspace-conversation" aria-label={guiding ? '使用指南' : '持续对话'} hidden={!guiding && (!task || effective === 'results')}>
