@@ -87,6 +87,8 @@ def test_cf26_packs_registry_excludes_sell_side_skills() -> None:
     cash = (method_root() / "cash" / "SKILL.md").read_text(encoding="utf-8")
     assert "receivables_aging" in cash
     assert "cash_13_weeks" in cash
+    assert "collection_health" in cash and "生死线" not in cash.split("## Collection health")[0]
+    assert "never counts in the close" in cash
     assert "payment" in cash.lower() or "支付" in cash
 
 

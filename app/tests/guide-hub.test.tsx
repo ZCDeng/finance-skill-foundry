@@ -16,12 +16,13 @@ const WORDS = [
 it('finds something for every word on the list', () => {
   expect(WORDS.length).toBeGreaterThanOrEqual(30);
   const missing = WORDS.filter((word) => searchArticles(word).length === 0);
-  // 收缴率 is the one business word the guide does not explain; it should say so rather than guess.
-  expect(missing).toEqual(['收缴率']);
+  // 收缴率 was the one business word the guide did not explain; 回款与现金 explains it now.
+  expect(missing).toEqual([]);
 });
 
 it('matches every word typed, not any', () => {
-  expect(searchArticles('期间 累计').map((row) => row.id)).toEqual(['scope']);
+  expect(searchArticles('期间 累计').map((row) => row.id)).toEqual(['collection-health', 'scope']);
+  expect(searchArticles('收缴率 风险雷达').map((row) => row.id)).toEqual(['collection-health']);
   expect(searchArticles('期间 不存在的词')).toEqual([]);
 });
 
@@ -35,8 +36,8 @@ it('says plainly when a search finds nothing', () => {
   render(<GuideHub onOpen={vi.fn()} onClose={vi.fn()} />);
   // The live region is there before anything is typed, so the change is announced.
   expect(screen.getByRole('status').textContent).toBe('');
-  fireEvent.change(screen.getByLabelText('搜索使用指南'), { target: { value: '收缴率' } });
-  expect(screen.getByRole('status').textContent).toBe('没有找到「收缴率」相关的说明。');
+  fireEvent.change(screen.getByLabelText('搜索使用指南'), { target: { value: '汇率' } });
+  expect(screen.getByRole('status').textContent).toBe('没有找到「汇率」相关的说明。');
 });
 
 it('moves the workspace to the place an article describes, without running anything', () => {
