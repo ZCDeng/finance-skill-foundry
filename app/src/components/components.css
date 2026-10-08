@@ -1128,6 +1128,7 @@ details[open] > .fnd-disclosure-summary > .fnd-disclosure-summary__icon {
 .fnd-table td.fnd-num, .fnd-table th.fnd-num { text-align: right; }
 
 .fnd-help-link { width: 22px; height: 22px; color: var(--fnd-muted); }
+.fnd-ask-link { gap: 4px; height: auto; padding: 2px 0; }
 .fnd-guide-hub { display: grid; grid-template-rows: auto auto auto 1fr; gap: 12px; height: 100%; min-height: 0; padding: 16px; overflow: hidden; }
 .fnd-guide-hub__head { display: flex; align-items: center; justify-content: space-between; }
 .fnd-guide-hub__head h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; }

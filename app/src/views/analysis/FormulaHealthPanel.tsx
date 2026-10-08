@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Info, TriangleAlert } from 'lucide-react';
 import { bridge, type Answer, type DatasetSnapshot, type WorkbookHealth, type WorkbookHealthIssue, type WorkbookHealthSample } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
-import { HelpLink } from '../guide/GuideHub.js';
+import { AskLink, HelpLink } from '../guide/GuideHub.js';
 import { WorkbookBrowser } from './WorkbookBrowser.js';
 import { errorText, unwrap } from './shared.js';
 
@@ -116,6 +116,7 @@ export function FormulaHealthDetails({ taskId, dataset, health }: { taskId: stri
       </div>}
       <p className="analysis-note analysis-formula-health-close">
         这些是提示，不影响导入和计算；是否需要修改由你判断。<HelpLink article="formula-health" label="工作簿公式体检" />
+        <AskLink ask="formula-health" label="让助手解释这些提示" />
       </p>
     </div>
   );

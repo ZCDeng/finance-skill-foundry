@@ -45,7 +45,8 @@ it('says what the assistant can and cannot do in every one of its six areas', ()
   const list = article.body.find((block) => block.kind === 'list');
   expect(list && list.kind === 'list' ? list.items.map((item) => item.split('：')[0]) : [])
     .toEqual(['开始与资料体检', '月结与管理报表', '预算与差异分析', '对账', '凭证草稿', '回款与现金']);
-  const text = JSON.stringify(article.body);
+  // What the reader sees: the words, not the ids the blocks carry.
+  const text = article.body.map((block) => 'text' in block ? block.text : 'items' in block ? block.items.join('') : 'label' in block ? block.label : '').join('');
   expect(text).toContain('不能确认控制、处置差异、过账或付款');
   // English skill ids are for the model, not for the reader.
   expect(text).not.toMatch(/\b(setup|close|bva|cash|reconciliation|journal-entry|financial-statements|variance-analysis)\b/);

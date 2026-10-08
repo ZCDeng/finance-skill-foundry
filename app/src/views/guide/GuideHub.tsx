@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, BookOpen, CircleHelp, Search, X } from 'lucide-react';
+import { ArrowRight, BookOpen, CircleHelp, MessageSquare, Search, X } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { NativeSelect, NativeSelectOption } from '../../components/ui/native-select.js';
 import { GUIDE_ARTICLES, GUIDE_SECTIONS, searchArticles, type GuideArticle, type GuideTarget } from './articles.js';
 import { QuickStartChecklist } from './QuickStartChecklist.js';
+import { ASK_PROMPTS, askAssistant, type AskId } from './ask.js';
 
 /** Window event that opens the guide at one article, from a 「?」 next to the thing it explains. */
 export const GUIDE_EVENT = 'fnd:guide';
@@ -17,6 +18,15 @@ export function openGuide(article?: string) {
 export function HelpLink({ article, label }: { article: string; label: string }) {
   return <Button variant="ghost" size="icon" type="button" className="fnd-help-link size-[22px]" aria-label={`使用指南：${label}`} title={`使用指南：${label}`}
     onClick={() => openGuide(article)}><CircleHelp size={14} strokeWidth={1.5} aria-hidden /></Button>;
+}
+
+/**
+ * A 「让助手…」 button: puts the question into the conversation for the manager to edit and send.
+ * The question is its title, so what lands in the composer is readable before pressing.
+ */
+export function AskLink({ ask, label, disabled }: { ask: AskId; label: string; disabled?: boolean }) {
+  return <Button variant="link" size="sm" type="button" className="fnd-ask-link" disabled={disabled} title={ASK_PROMPTS[ask]}
+    onClick={() => askAssistant(ask)}><MessageSquare size={14} strokeWidth={1.5} aria-hidden />{label}</Button>;
 }
 
 /** The four quality words the 文稿质量检查 panel shows, drawn so no step reads as implying the next. */
@@ -112,6 +122,12 @@ export function GuideHub({ article: requested, request = 0, canOpen = true, task
               <Button variant="outline" type="button" onClick={() => onOwnData?.()}>使用自己的资料</Button>
               {startError ? <p role="alert" className="analysis-message analysis-message--error">{startError}</p> : null}
             </div>;
+            if (block.kind === 'ask') return <span key={index} className="fnd-guide-hub__open">
+              <AskLink ask={block.ask} label={block.label} disabled={!canOpen} />
+              {/* Said once, after the last of a run of these buttons. */}
+              {article.body[index + 1]?.kind === 'ask' ? null
+                : <span className="analysis-note">{canOpen ? '只填进对话框，改好再发送。' : '先打开一个可编辑的任务，才能问助手。'}</span>}
+            </span>;
             return <span key={index} className="fnd-guide-hub__open">
               <Button variant="outline" type="button" disabled={!canOpen} onClick={() => onOpen(block.target)}>
                 {block.label}<ArrowRight size={14} strokeWidth={1.5} aria-hidden /></Button>
