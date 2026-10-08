@@ -1103,16 +1103,6 @@ textarea.fnd-field {
   padding: 16px 18px;
 }
 
-/*
- * The lock digests, folded away.
- *
- * One sha per table in the window -- twenty-five of them in a real close. It is
- * the line that makes every figure reproducible, so it is kept whole and put
- * behind a disclosure rather than truncated.
- */
-.fnd-doc__locks[open] > summary {
-  margin-bottom: 10px;
-}
 
 /*
  * The one summary line every in-place disclosure draws (DESIGN.md 折叠段落).

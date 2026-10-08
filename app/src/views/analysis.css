@@ -51,7 +51,6 @@
 .analysis-source-refresh > summary .analysis-note { display: block; margin-top: 4px; }
 .analysis-source-refresh:not([open]) { gap: 0; padding-bottom: 12px; }
 .analysis-source-refresh:not([open]) > summary .analysis-note::after { content: ' · 点击展开刷新'; }
-.analysis-source-refresh[open] > summary { margin-bottom: 2px; }
 .analysis-source-text { font: inherit; font-size: var(--fnd-size-small); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 440px; overflow: auto; overscroll-behavior: contain; }
 .analysis-table { font-size: var(--fnd-size-body); line-height: var(--fnd-leading-body); min-width: 100%; border-collapse: collapse; border: 0; }
 .analysis-table caption { text-align: left; color: var(--fnd-muted); padding: 0 0 8px; }
@@ -228,7 +227,6 @@
 .analysis-finance-setup-head { position: sticky; top: -24px; z-index: 2; flex-direction: row; align-items: flex-start; gap: 12px; padding: 14px 16px 12px; border-bottom: 1px solid var(--fnd-line); border-radius: 12px 12px 0 0; background: var(--fnd-surface); }
 .analysis-finance-setup-head .analysis-note { margin-top: 2px; }
 .analysis-finance-setup-body { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 16px; }
-.analysis-source-refresh[open] > summary + .analysis-fieldset { margin-top: 20px; }
 .analysis-source-refresh > .analysis-fieldset + .analysis-actions,
 .analysis-finance-setup-body > .analysis-fieldset + .analysis-actions { margin-top: 16px; }
 .analysis-finance-variance { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
