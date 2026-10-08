@@ -18,7 +18,11 @@ const YEARS_AROUND = 10;
  */
 function Calendar({ className, classNames, formatters, labels, components, captionLayout = 'dropdown', startMonth, endMonth, ...props }: ComponentProps<typeof DayPicker>) {
   const defaults = getDefaultClassNames();
+  // The default reach also stretches to the shown and selected dates, so a stored date years back is still on the dropdown.
+  const shown = [props.month, props.defaultMonth, 'selected' in props ? props.selected : undefined].filter((d): d is Date => d instanceof Date).map((d) => d.getFullYear());
   const thisYear = new Date().getFullYear();
+  const firstYear = Math.min(thisYear - YEARS_AROUND, ...shown);
+  const lastYear = Math.max(thisYear + YEARS_AROUND, ...shown);
   return (
     <DayPicker
       data-slot="calendar"
@@ -26,8 +30,8 @@ function Calendar({ className, classNames, formatters, labels, components, capti
       weekStartsOn={1}
       showOutsideDays={false}
       captionLayout={captionLayout}
-      startMonth={startMonth ?? new Date(thisYear - YEARS_AROUND, 0, 1)}
-      endMonth={endMonth ?? new Date(thisYear + YEARS_AROUND, 11, 1)}
+      startMonth={startMonth ?? new Date(firstYear, 0, 1)}
+      endMonth={endMonth ?? new Date(lastYear, 11, 1)}
       className={cn('fnd-calendar', className)}
       formatters={{
         formatCaption: (date) => `${date.getFullYear()} 年 ${date.getMonth() + 1} 月`,

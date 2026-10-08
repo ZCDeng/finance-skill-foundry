@@ -136,6 +136,14 @@ describe('financial web controls', () => {
     expect(onDate).toHaveBeenLastCalledWith(`${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`);
   });
 
+  it('opens on a stored date older than the default ten-year reach', () => {
+    render(<DateInput label="历史日期" value="1998-03-12" onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '历史日期打开日期选择' }));
+    const dialog = screen.getByRole('dialog', { name: '历史日期日期选择' });
+    expect((within(dialog).getByRole('combobox', { name: '选择年份' }) as HTMLSelectElement).value).toBe('1998');
+    expect(within(dialog).getByRole('button', { name: /1998年3月12日.*已选/ })).toBeTruthy();
+  });
+
   it('validates true ranges without using them for cash cutoff semantics', () => {
     const onPeriods = vi.fn();
     render(<PeriodRangeInput label="适用期间范围" start="2026-10" end="2026-09" onChange={onPeriods} />);
