@@ -266,7 +266,7 @@ it('states the 可用结论 under the headline, apart from it, with reasons and 
   expect(within(books as HTMLElement).getByText('银行流水.xlsx').parentElement!.textContent).toBe('银行流水.xlsx：无法判断');
   expect(conclusion.className).toContain('analysis-close-conclusion--not_usable');
   // Only the level word carries the warning colour; the label stays in ink.
-  expect(conclusion.querySelector('h4 .analysis-close-conclusion-level')!.textContent).toBe('不可用');
+  expect(conclusion.querySelector('h3 .analysis-close-conclusion-level')!.textContent).toBe('不可用');
   expect(conclusion.textContent).not.toMatch(/完成|通过/);
   // Only the headline is announced as status.
   expect(screen.getAllByRole('status')[0].textContent).toBe('需要复核：计算完成，但有 5 项来源冲突');

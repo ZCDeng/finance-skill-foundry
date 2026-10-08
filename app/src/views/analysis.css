@@ -111,7 +111,6 @@
 .analysis-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 .analysis-draft-fields { gap: 18px; }
 .analysis-prepublish { display: flex; flex-direction: column; gap: 16px; padding-top: 24px; border-top: 1px solid var(--fnd-line); }
-.analysis-prepublish > .analysis-section-heading h3 { font-size: var(--fnd-size-reading); }
 .analysis-number { text-align: right !important; font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums; }
 .analysis-table th:not([scope='rowgroup']) { position: sticky; top: 0; background: var(--fnd-bg); }
 .analysis-workspace ::selection { background: var(--fnd-selection-surface); color: var(--fnd-ink); }
@@ -257,8 +256,7 @@
 .analysis-source-refs__panel { max-width: min(32em, calc(100vw - 48px)); padding: 12px 14px; font-size: var(--fnd-size-small); line-height: 1.7; overflow-wrap: anywhere; }
 .analysis-source-refs__panel ol { margin: 0; padding-left: 20px; }
 .analysis-table-scroll-hint { position: sticky; left: 0; margin-top: 8px; }
-.analysis-quality { border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); padding: 16px; display: flex; flex-direction: column; gap: 16px; background: color-mix(in srgb, var(--fnd-surface) 88%, transparent); }
-.analysis-quality h4 { margin: 0; font-size: 15px; }
+.analysis-quality { display: flex; flex-direction: column; gap: 16px; }
 .analysis-quality-summary { margin: 0; color: var(--fnd-ink); }
 .analysis-quality ul { margin: 0; padding-left: 20px; font-size: var(--fnd-size-small); }
 .analysis-quality .analysis-requirement-gaps { margin: 0; padding-left: 18px; display: grid; gap: 8px; }
@@ -323,8 +321,7 @@
 .analysis-account-map-table thead th { background: var(--fnd-selection-surface); color: var(--fnd-ink); font-weight: 600; }
 .analysis-account-map-table td:last-child { width: 1%; white-space: nowrap; }
 .analysis-controls-card { display: grid; gap: 12px; }
-.analysis-controls-card h4 { font-size: var(--fnd-size-h3); line-height: 24px; }
-.analysis-controls-card .analysis-section-heading h5 { margin: 0; font-size: var(--fnd-size-body); line-height: var(--fnd-leading-body); }
+.analysis-controls-card h3 { display: inline-flex; align-items: center; gap: 6px; }
 .analysis-controls-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
 .analysis-controls-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fnd-size-body); }
 .analysis-controls-status, .analysis-controls-state { font-size: var(--fnd-size-small); padding: 0 6px; border: 1px solid var(--fnd-line, currentColor); border-radius: 4px; }
@@ -332,12 +329,12 @@
 .analysis-controls-issue { display: grid; gap: 6px; padding: 10px 0; border-top: 1px solid var(--fnd-line, rgba(0,0,0,.08)); }
 .analysis-controls-issue-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
 .analysis-controls-decide { display: grid; gap: 8px; }
-.analysis-tieout { display: grid; gap: 12px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); padding: 16px; }
+/* Flat inside 勾稽控制 (DESIGN.md 分区与标题层级): no second box, a rule above it instead. */
+.analysis-tieout { display: grid; gap: 12px; padding-top: 12px; border-top: 1px solid var(--fnd-line); }
 .analysis-tieout-fields { gap: 12px; }
-.analysis-tieout legend { display: inline-flex; align-items: center; gap: 6px; padding: 0 4px; font-weight: var(--fnd-weight-strong); }
+.analysis-tieout legend { display: inline-flex; align-items: center; gap: 6px; padding: 0; font-size: var(--fnd-size-body); line-height: var(--fnd-leading-body); font-weight: var(--fnd-weight-strong); }
 .analysis-tieout-places { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
 .analysis-tieout-place { display: grid; gap: 8px; align-content: start; }
-.analysis-tieout-place h5 { margin: 0; font-size: var(--fnd-size-body); }
 .analysis-tieout-place label, .analysis-tieout-label { display: grid; gap: 4px; color: var(--fnd-muted); font-size: var(--fnd-size-small); }
 .analysis-tieout-result { display: grid; gap: 2px; padding: 10px 12px; border-left: 2px solid var(--fnd-line-hover); font-family: var(--fnd-font-prose); font-variant-numeric: tabular-nums; }
 .analysis-tieout-result p { margin: 0; }
@@ -396,7 +393,7 @@
 .analysis-controls-finding-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px 12px; align-items: end; }
 .analysis-close-conclusion { display: grid; gap: 6px; }
 .analysis-close-conclusion-head { display: flex; align-items: center; gap: 8px; }
-.analysis-close-conclusion-head h4 { margin: 0; font-size: var(--fnd-size-reading); line-height: 24px; font-weight: var(--fnd-weight-strong); }
+.analysis-close-conclusion-head h3 { margin: 0; line-height: 24px; }
 .analysis-close-conclusion-head svg { flex: none; }
 .analysis-close-conclusion .analysis-note { margin: 0; }
 .analysis-close-conclusion-reasons, .analysis-close-conclusion-books { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: var(--fnd-size-body); overflow-wrap: anywhere; }
@@ -449,10 +446,9 @@
 }
 
 /* Report number review (外部报告复核): counts in words with an icon, one list per result. */
-.analysis-report-review { display: grid; gap: 12px; padding: 14px 16px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); }
+.analysis-report-review { display: grid; gap: 12px; }
 .analysis-report-review h4 { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; }
 .analysis-report-review-action, .analysis-report-review-draft { display: grid; gap: 10px; }
-.analysis-report-review-draft > h4 { margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; }
 .analysis-report-review-intro { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
 .analysis-report-review-intro .analysis-note { margin: 0; flex: 1 1 280px; }
 .analysis-report-review-headline { display: flex; align-items: center; gap: 6px; margin: 0; font-size: var(--fnd-size-reading); font-weight: var(--fnd-weight-strong); }
