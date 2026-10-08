@@ -18,6 +18,8 @@ import re
 from decimal import Decimal
 from typing import Any
 
+from openpyxl.utils import column_index_from_string, get_column_letter
+
 from foundry.analysis_data import MAX_COLUMNS, MAX_ROWS, _column_letter
 from foundry.errors import FoundryError
 from foundry.workbook_bindings import open_workbook_bytes
@@ -119,12 +121,13 @@ def _propose_sheet(sheet, name: str) -> dict[str, Any]:
     grid = _read_grid(sheet)
     if not grid:
         return _excluded(name, "empty_sheet")
+    grid, bands = _join_two_row_headers(grid, _merged_ranges(sheet))
     presentation = _is_presentation_sheet(name, grid)
     cover = presentation and _is_presentation_sheet(name, grid, COVER_MARKERS)
     candidates = _header_candidates(grid)
     if not candidates:
         return _excluded(name, "presentation_sheet" if presentation else "no_header")
-    blocks = _table_blocks(grid, candidates)
+    blocks = _table_blocks(grid, candidates, bands)
     if not blocks:
         return _excluded(name, "presentation_sheet" if presentation else "no_header")
     selected = max(blocks, key=lambda block: (block["score"], -block["header_row"]))
@@ -137,6 +140,8 @@ def _propose_sheet(sheet, name: str) -> dict[str, Any]:
         "decision": "table",
         "reason": None,
         "header_row": header_row,
+        # The row above a two-row header, already read into the column names.
+        "header_band_row": header_row - 1 if header_row - 1 in bands else None,
         "title_rows": title_rows,
         "columns": columns,
         "amount_pairs": pairs,
@@ -309,6 +314,70 @@ def _read_grid(sheet) -> dict[int, dict[str, Any]]:
     return grid
 
 
+def _merged_ranges(sheet) -> list[tuple[int, int, int, int]]:
+    """(first row, last row, first column, last column) of each merged range."""
+    return [(item.min_row, item.max_row, item.min_col, item.max_col) for item in sheet.merged_cells.ranges]
+
+
+def _join_two_row_headers(
+    grid: dict[int, dict[str, Any]], merges: list[tuple[int, int, int, int]],
+) -> tuple[dict[int, dict[str, Any]], set[int]]:
+    """Read a two-row header as one: 「本月」 over 「实际」「预算」 becomes 「本月实际」「本月预算」.
+
+    A band row sits directly on a row of labels, spans two or more of them, and is not the whole
+    width (a title merged across the table is not a band). The span is the band cell's merged range;
+    a sheet that merges nothing shows its bands by leaving the cells to their right blank, which is
+    trusted only when the lower row repeats a label, as 实际/预算 under each period do. A label merged
+    down through both rows (组织) keeps its own name. The band row leaves the grid, so it is neither
+    a title row nor a header of its own; the set returned names the band rows that were joined.
+    """
+    joined = dict(grid)
+    bands: set[int] = set()
+    for number in sorted(grid):
+        if number > MAX_HEADER_SCAN_ROWS or number in bands or number - 1 in bands:
+            continue
+        upper, lower = grid.get(number), grid.get(number + 1)
+        if not upper or not lower or len(upper) < MIN_HEADER_COLUMNS or len(lower) < MIN_HEADER_COLUMNS:
+            continue
+        texts = [*upper.values(), *lower.values()]
+        if not all(isinstance(value, str) and normalize_header(value) for value in texts):
+            continue
+        # 「期间：2026年8月」「单位：万元」 above a header are scope lines, not bands.
+        if any(re.search(r"[:：]", str(value)) for value in upper.values()):
+            continue
+        lower_columns = sorted(column_index_from_string(letter) for letter in lower)
+        spans: dict[str, tuple[int, int]] = {}
+        row_merges = [m for m in merges if m[0] == number and m[1] == number and m[3] > m[2]]
+        if row_merges:
+            for first_row, _last, first, last in row_merges:
+                letter = get_column_letter(first)
+                if letter in upper:
+                    spans[letter] = (first, last)
+        else:
+            labels = [normalize_header(value) for value in lower.values()]
+            if len(set(labels)) == len(labels):
+                continue
+            starts = sorted(column_index_from_string(letter) for letter in upper)
+            for index, first in enumerate(starts):
+                stop = starts[index + 1] - 1 if index + 1 < len(starts) else lower_columns[-1]
+                if first in lower_columns:
+                    spans[get_column_letter(first)] = (first, stop)
+        covered = {letter: [c for c in lower_columns if first <= c <= last] for letter, (first, last) in spans.items()}
+        covered = {letter: columns for letter, columns in covered.items() if len(columns) >= 2}
+        if not covered or any(len(columns) == len(lower_columns) for columns in covered.values()):
+            continue
+        band_of = {get_column_letter(c): normalize_header(upper[letter]) for letter, columns in covered.items() for c in columns}
+        combined: dict[str, Any] = {}
+        for letter in sorted({*upper, *lower}, key=column_index_from_string):
+            top = band_of.get(letter) or (normalize_header(upper[letter]) if letter in upper else "")
+            bottom = normalize_header(lower[letter]) if letter in lower else ""
+            combined[letter] = top + bottom if bottom and top and not bottom.startswith(top) else bottom or top
+        joined[number + 1] = combined
+        del joined[number]
+        bands.add(number)
+    return joined, bands
+
+
 def normalize_header(text: Any) -> str:
     """Header text with line breaks and full-width spaces removed for matching."""
     return re.sub(r"[\s　]+", "", str(text or ""))
@@ -459,8 +528,16 @@ def _numeric_coverage(
     }
 
 
-def _table_blocks(grid: dict[int, dict[str, Any]], candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Explicit block rectangles derived from adjacent candidate headers."""
+def _table_blocks(
+    grid: dict[int, dict[str, Any]], candidates: list[dict[str, Any]], bands: set[int] = frozenset(),
+) -> list[dict[str, Any]]:
+    """Explicit block rectangles derived from adjacent candidate headers.
+
+    A block under a two-row header starts at its band row, so the table above ends before the band:
+    the snapshot reads the workbook itself, where the band row is still there to be taken as data."""
+    def start(header_row: int) -> int:
+        return header_row - 1 if header_row - 1 in bands else header_row
+
     blocks: list[dict[str, Any]] = []
     ordered = sorted(candidates, key=lambda item: item["header_row"])
     max_row = max(grid)
@@ -469,11 +546,11 @@ def _table_blocks(grid: dict[int, dict[str, Any]], candidates: list[dict[str, An
         if not labels:
             continue
         next_header = ordered[index + 1]["header_row"] if index + 1 < len(ordered) else None
-        end_row = (next_header - 1) if next_header is not None else max_row
+        end_row = (start(next_header) - 1) if next_header is not None else max_row
         block = {
             "id": f"block_{len(blocks) + 1}",
             "header_row": candidate["header_row"],
-            "start_row": candidate["header_row"],
+            "start_row": start(candidate["header_row"]),
             "end_row": end_row,
             "start_column": labels[0],
             "end_column": labels[-1],
