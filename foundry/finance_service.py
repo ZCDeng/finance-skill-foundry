@@ -2144,12 +2144,18 @@ class FinanceStore:
         )
         auto = [match for match in matches if match.get("auto_apply")]
         if auto:
-            self._confirm_declaration(
-                record,
-                [sheet for sheet in sheets if sheet["sheet"] in {m["sheet"] for m in auto}],
-                source=TEMPLATE,
-                triggered_by=source or self.actor,
-            )
+            try:
+                self._confirm_declaration(
+                    record,
+                    [sheet for sheet in sheets if sheet["sheet"] in {m["sheet"] for m in auto}],
+                    source=TEMPLATE,
+                    triggered_by=source or self.actor,
+                )
+            except FoundryError:
+                # A remembered shape that this file cannot fill (a sheet of the same shape holding #REF!,
+                # say) leaves the proposal to the manager, who sees the reason on confirming; the import
+                # itself stands.
+                pass
         return record
 
     def structure_proposal_list(self, spec):
@@ -2271,10 +2277,12 @@ class FinanceStore:
                 raise FoundryError(
                     f"cannot confirm {sheet.get('sheet') or 'this sheet'}: {refusal}"
                 )
+        # Read every sheet before filing any, for the same reason: a sheet holding #REF! refuses here.
+        derived = [self.analysis.derive_table_snapshot(dataset_id, sheet) for sheet in wanted]
         snapshots = {}
-        for sheet in wanted:
+        for sheet, reading in zip(wanted, derived):
             snapshot = self.analysis.add_table_snapshot(
-                dataset_id, sheet, name=sheet["sheet"]
+                dataset_id, sheet, name=sheet["sheet"], derived=reading
             )
             snapshots[sheet["sheet"]] = snapshot["id"]
         if not snapshots:

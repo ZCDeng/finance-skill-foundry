@@ -1,0 +1,20 @@
+{
+  "pack": "huachen",
+  "version": 1,
+  "date": "2026-10-08",
+  "company": "华宸物业（虚构）",
+  "period": "2026-08",
+  "generator": "tests/fixtures/demo_pack/build_demo.py",
+  "practice": [
+    "华宸物业_2026年08月_月结财务套表_GL-AP-AR-CF.xlsx",
+    "华宸物业_2026年度_全面预算与合同台账.xlsx",
+    "华宸物业_2026年08月_明细长表.xlsx",
+    "华宸物业_2026年08月_公式体检样本.xlsx",
+    "华宸物业_2026年08月_经营分析会纪要.md"
+  ],
+  "next_month": [
+    "华宸物业_2026年09月_月结财务套表_GL-AP-AR-CF.xlsx"
+  ],
+  "report": "华宸物业_2026年08月_经理汇报稿.docx",
+  "notes": "演示说明.md"
+}
