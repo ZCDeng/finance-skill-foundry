@@ -74,6 +74,12 @@
     line-height: 20px;
   }
 
+  /* 小节标题 (DESIGN.md 分区与标题层级): body size at the heading weight, wherever it sits. */
+  h4 {
+    font-size: var(--fnd-size-body);
+    line-height: var(--fnd-leading-body);
+  }
+
   p {
     margin: 0;
   }

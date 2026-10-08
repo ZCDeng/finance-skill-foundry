@@ -431,6 +431,11 @@
   padding: 0;
 }
 
+/* In the strip the fold is one control among others, so its chevron stays inside the row instead of hanging left. */
+.fnd-taskbar__technical .fnd-disclosure-summary {
+  margin-inline-start: 0;
+}
+
 /* The frame floats and draws the menu surface; the list inside scrolls, so its scroll fade dims the rows
    and not the shadow (a mask would cut the shadow off with everything outside the box). */
 .fnd-taskbar__technical .analysis-technical[open] .analysis-technical-frame {
@@ -1174,20 +1179,20 @@ textarea.fnd-field {
 /*
  * The one summary line every in-place disclosure draws (DESIGN.md 折叠段落).
  * Native <details> keeps the open state; the row is body text with a Lucide
- * chevron on the left that turns a quarter when the section opens. The row is
- * shifted 8px left, so the chevron's 16px box sits on the same left edge as
- * the content it opens and the hover surface reaches into the gutter. Pages
- * only space a disclosure, they never restyle its summary.
+ * chevron on the left that turns a quarter when the section opens. The chevron
+ * hangs in the left gutter, so the summary's words, the content it opens and
+ * the section headings around it all start on one left edge. Pages only space
+ * a disclosure, they never restyle its summary.
  */
 .fnd-disclosure-summary {
   position: relative;
   display: block;
   list-style: none;
   width: fit-content;
-  /* Pulled 8px into the gutter so the chevron's box starts on the content edge below. */
-  max-width: calc(100% + 8px);
-  margin-inline-start: -8px;
-  padding: 5px 8px 5px 32px;
+  /* Pulled 24px into the gutter: the chevron's box sits at -20..-4, the words start on the content edge. */
+  max-width: calc(100% + 24px);
+  margin-inline-start: -24px;
+  padding: 5px 8px 5px 24px;
   border-radius: var(--fnd-radius-mark);
   color: var(--fnd-ink);
   font-size: var(--fnd-size-body);
@@ -1205,7 +1210,7 @@ textarea.fnd-field {
 .fnd-disclosure-summary__icon {
   position: absolute;
   top: 8px;
-  left: 8px;
+  left: 4px;
   transition: transform var(--fnd-transition);
 }
 
@@ -1223,6 +1228,7 @@ details[open] > .fnd-disclosure-summary > .fnd-disclosure-summary__icon {
 
 .fnd-disclosure-summary[data-tone='quiet'] > .fnd-disclosure-summary__icon {
   top: 5px;
+  left: 6px;
   width: 14px;
   height: 14px;
 }
@@ -1230,8 +1236,9 @@ details[open] > .fnd-disclosure-summary > .fnd-disclosure-summary__icon {
 /*
  * What the disclosure borrows from shadcn's Accordion, kept on native <details>
  * so find-in-page still opens a fold. The content grows and shrinks on the
- * shell transition (none with reduced motion); the clip margin keeps rings
- * and the summary's 8px gutter visible while it does.
+ * shell transition (none with reduced motion); the clip margin keeps focus
+ * rings visible while it does. A fold inside it steps in 24px, so the inner
+ * chevron's gutter is inside this box and is never clipped.
  */
 details:has(> .fnd-disclosure-summary) {
   interpolate-size: allow-keywords;
@@ -1265,22 +1272,18 @@ details:has(> .fnd-disclosure-summary) + details:has(> .fnd-disclosure-summary) 
 }
 
 /*
- * Levels. A fold inside another fold's content steps in 24px, so its chevron
- * sits under the parent's words; its own content keeps a 1px rule under that
- * chevron and starts under its words. A third level is already under the
- * second's words, so it does not step again.
+ * Levels. A fold inside another fold's content steps in 24px: its chevron
+ * hangs in that step, under the start of the parent's words, and its words and
+ * content start 24px in. The content keeps a 1px rule under the chevron. Every
+ * level steps the same way; DESIGN.md caps folds at three levels.
  */
 details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary) {
   margin-inline-start: 24px;
 }
 
-details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary) {
-  margin-inline-start: 0;
-}
-
 details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary)::details-content {
-  margin-inline-start: 7px;
-  padding-inline-start: 16px;
+  margin-inline-start: -12px;
+  padding-inline-start: 11px;
   border-inline-start: 1px solid var(--fnd-line);
 }
 
