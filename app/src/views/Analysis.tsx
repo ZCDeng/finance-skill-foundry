@@ -72,10 +72,10 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     setSelectedDraft(draftRequest.draftId);
   }, [draftRequest, task?.id]);
   const [scopeRequest, setScopeRequest] = useState<ScopeRequest>({ count: 0 });
-  const [scopeRefresh, setScopeRefresh] = useState(0);
+  const [scopeRefresh, setScopeRefresh] = useState({ version: 0, quiet: false });
   const [materialsRefresh, setMaterialsRefresh] = useState(0);
   // One scope per task, edited from the 资料 page and the finance settings alike.
-  const analysisScope = useAnalysisScope(task?.id, task?.title ?? '', state?.datasets ?? [], scopeRefresh);
+  const analysisScope = useAnalysisScope(task?.id, task?.title ?? '', state?.datasets ?? [], scopeRefresh.version, scopeRefresh.quiet);
   // Held here, not in the workbench: it unmounts when the tab changes, and a run
   // it started keeps going. One entry per task, so a run in another task neither
   // shows here nor unlocks this one.
@@ -103,7 +103,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   }, [onSectionChange]);
   useEffect(() => { if (section) setTab(section === 'materials' ? 'datasets' : section); }, [section]);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
-  const refresh = useCallback(async (taskId: string, options?: { scope?: boolean }) => {
+  const refresh = useCallback(async (taskId: string, options?: { scope?: boolean | 'quiet' }) => {
     // A completed operation may belong to a task the manager has left. It must
     // not invalidate an in-flight read for the newly selected task.
     if (currentTask.current !== taskId) return;
@@ -113,7 +113,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     const value = unwrap(await api.analysisState(taskId));
     if (active.current && currentTask.current === taskId && request === readVersion.current) {
       setState(value);
-      if (options?.scope) setScopeRefresh((version) => version + 1);
+      if (options?.scope) setScopeRefresh(({ version }) => ({ version: version + 1, quiet: options.scope === 'quiet' }));
       window.dispatchEvent(new Event('fnd:task-changed'));
     }
   }, []);
@@ -144,7 +144,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     if (!visible || previous.visible || previous.taskId !== task?.id || !task) return;
     const taskId = task.id;
     setLoading(true);
-    void refresh(taskId, { scope: true }).catch((failure: unknown) => {
+    void refresh(taskId, { scope: 'quiet' }).catch((failure: unknown) => {
       if (active.current && currentTask.current === taskId) setError(errorText(failure));
     }).finally(() => { if (active.current && currentTask.current === taskId) setLoading(false); });
   }, [visible, task?.id, refresh]);
@@ -155,7 +155,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       if (!operation.current && document.visibilityState !== 'hidden') {
-        try { await refresh(taskId, { scope: true }); }
+        try { await refresh(taskId, { scope: 'quiet' }); }
         catch { /* Keep the last readable results. Explicit refresh reports actionable failures. */ }
       }
       if (!cancelled) timer = setTimeout(() => void poll(), 5000);
