@@ -1,17 +1,16 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Button } from '../../components/ui/button.js';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../../components/ui/collapsible.js';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 /**
- * Open state for 设置与高级. `setOpen` opens or closes without taking focus
- * (the first visit opening them, a run closing them); `openWithFocus` is a
- * person asking for them, so focus moves in. Once a person has opened the
- * panel, any close hands focus back to where they were, so a run closing it
- * never leaves focus on the page body.
+ * Open state for the 范围与计算 fold. `setOpen` opens or closes without taking
+ * focus (the first visit opening it, a run closing it); `openWithFocus` is a
+ * person asking for it from elsewhere (调整范围), so focus moves in. Once a
+ * person has opened the fold, any close hands focus back to where they were,
+ * so a run closing it never leaves focus on the page body.
  */
 export function useSettingsPanel(initialOpen = false) {
   const [open, setOpen] = useState(initialOpen);
-  const trigger = useRef<HTMLButtonElement>(null);
+  const trigger = useRef<HTMLElement>(null);
   const restoreFocusTo = useRef<HTMLElement | null>(null);
   const focusAfterOpen = useRef(false);
   const openWithFocus = useCallback(() => {
@@ -27,21 +26,35 @@ export function useSettingsPanel(initialOpen = false) {
 export type SettingsPanelState = ReturnType<typeof useSettingsPanel>;
 
 /**
- * The one 设置与高级 panel: an in-flow disclosure (shadcn Collapsible) that
- * replaces its own entry while open. It stays in the page rather than floating,
- * because it holds searchable selects with popovers of their own and the run
- * outcome below it must stay readable.
+ * 设置与高级 (DESIGN.md 分区与标题层级): one section heading with its note on
+ * the line below, then the folds it groups, all drawn the same way. Status
+ * lines a run leaves go between the heading and the folds, so a run that
+ * closes a fold still leaves its outcome in view.
  */
-export function SettingsPanel({ state, summary, note, scrollIntoView = false, children }: {
+export function SettingsGroup({ note, children }: { note: string; children: ReactNode }) {
+  const heading = useId();
+  return <section className="analysis-settings-group" aria-labelledby={heading}>
+    <div className="analysis-settings-group__head"><h3 id={heading}>设置与高级</h3><p className="analysis-note">{note}</p></div>
+    {children}
+  </section>;
+}
+
+/**
+ * The fold where a person picks the data and scope and calculates: a native
+ * <details> like every other fold, kept open by the caller's state so a run
+ * can close it and 调整范围 can open it. Its content is mounted only while
+ * open, so a closed fold leaves no hidden form behind.
+ */
+export function SettingsPanel({ state, label, summary, scrollIntoView = false, children }: {
   state: SettingsPanelState;
-  /** Shown on the closed entry. */
-  summary: string;
-  /** Shown under the heading while open. */
-  note: string;
+  /** The fold's name, also the name of the region it opens. */
+  label: string;
+  /** Shown after the name on the summary line. */
+  summary?: string;
   scrollIntoView?: boolean;
   children: ReactNode;
 }) {
-  const { open, openWithFocus, close, trigger, restoreFocusTo, focusAfterOpen } = state;
+  const { open, setOpen, close, trigger, restoreFocusTo, focusAfterOpen } = state;
   const content = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) {
@@ -52,24 +65,23 @@ export function SettingsPanel({ state, summary, note, scrollIntoView = false, ch
       target?.focus({ preventScroll: true });
       return;
     }
-    if (scrollIntoView) content.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+    if (scrollIntoView && focusAfterOpen.current) content.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
     if (focusAfterOpen.current) {
       focusAfterOpen.current = false;
       content.current?.focus({ preventScroll: true });
     }
   }, [open]);
-  return <Collapsible open={open} onOpenChange={(next) => { if (next) openWithFocus(); else close(); }} className="analysis-finance-setup">
-    {!open ? <CollapsibleTrigger asChild>
-      <button ref={trigger} type="button" className="analysis-finance-setup-trigger" aria-label="打开设置与高级">
-        <div className="analysis-section-heading"><h3>设置与高级</h3><span className="analysis-note">{summary}</span></div>
-      </button>
-    </CollapsibleTrigger> : null}
-    {/* Mounted only while open: a closed panel leaves no hidden dialog behind. */}
-    {open ? <CollapsibleContent ref={content} className="analysis-finance-setup-dialog" role="dialog" aria-modal="false" aria-label="设置与高级" tabIndex={-1}
-      onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); close(); } }}>
-      <div className="analysis-finance-setup-head analysis-section-heading"><div><h3>设置与高级</h3><p className="analysis-note">{note}</p></div>
-        <Button variant="outline" type="button" aria-label="关闭设置与高级" onClick={close}>关闭</Button></div>
-      <div className="analysis-finance-setup-body">{children}</div>
-    </CollapsibleContent> : null}
-  </Collapsible>;
+  return <details className="analysis-details analysis-finance-setup" open={open} onToggle={(event) => {
+    const next = event.currentTarget.open;
+    if (next === open) return;
+    // A person opening the fold from its own line keeps focus there, and gets it back there when a run closes it.
+    if (next) restoreFocusTo.current = trigger.current;
+    setOpen(next);
+  }}>
+    <DisclosureSummary ref={trigger}>{label}{summary ? <span className="analysis-note"> · {summary}</span> : null}</DisclosureSummary>
+    {open ? <div ref={content} className="analysis-finance-setup-body" role="region" aria-label={label} tabIndex={-1}
+      onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); restoreFocusTo.current ??= trigger.current; close(); } }}>
+      {children}
+    </div> : null}
+  </details>;
 }

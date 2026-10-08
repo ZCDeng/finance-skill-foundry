@@ -239,10 +239,7 @@ export function RollforwardPanel({ taskId, datasets, runs, busy, onApplied }: {
   };
 
   return <section className="analysis-rollforward" aria-label="滚动到下月">
-    <div className="analysis-section-heading"><div>
-      <span className="fnd-with-help"><h3>滚动到下月</h3><HelpLink article="rollforward" label="滚动到下月" /></span>
-      <p className="analysis-note">把本月的数写进上月套表的副本。只写普通单元格，公式、合并单元格、受保护的格子只列出来，由你在 Excel 里处理；上月的原工作簿不会改动。</p>
-    </div></div>
+    <p className="analysis-note">把本月的数写进上月套表的副本。只写普通单元格，公式、合并单元格、受保护的格子只列出来，由你在 Excel 里处理；上月的原工作簿不会改动。<HelpLink article="rollforward" label="滚动到下月" /></p>
     <fieldset className="analysis-fieldset" disabled={locked}>
       <div className="analysis-edit-grid">
         <SearchableSelect label="上月套表" value={datasetId} options={datasetOptions(xlsx)} onChange={setDatasetId} placeholder="选择上月的工作簿" />

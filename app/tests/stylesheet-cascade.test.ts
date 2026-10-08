@@ -95,8 +95,6 @@ describe('disclosures (DESIGN.md 折叠段落)', () => {
    */
   const MAY_DRAW: Record<string, string> = {
     'styles/base.css :where(a, button, input, textarea, select, summary, [tabindex]):focus-visible': 'the shared 1px focus ring',
-    'views/analysis.css .analysis-source-refresh > summary .analysis-note': 'the description line inside the 更新 ERP 来源 summary',
-    'views/analysis.css .analysis-source-refresh:not([open]) > summary .analysis-note::after': 'the 点击展开刷新 suffix (PR E)',
     // The reading view injects exported report HTML (electron/reports/format.ts); its chart-data
     // <summary> is not React, so report.css redraws the quiet disclosure for it.
     'views/analysis/report.css .analysis-draft-main .report-visual-data > summary': 'exported HTML chart-data summary',

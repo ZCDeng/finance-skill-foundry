@@ -665,21 +665,16 @@ describe('the 资料 page, settings panel and task drawer controls', () => {
   const light = block(TOKENS, ':root');
   const dark = block(TOKENS, ":root[data-theme='dark']");
 
-  it('lets the settings panel scroll with the page, with no scroll area of its own, and keeps its heading in view', () => {
-    const dialog = declarations(ANALYSIS, '.analysis-finance-setup-dialog');
-    expect(dialog).not.toHaveProperty('max-height');
-    expect(dialog).not.toHaveProperty('overflow');
+  it('lets the 范围与计算 fold scroll with the page, with no scroll area of its own', () => {
+    expect(ANALYSIS).not.toContain('analysis-finance-setup-dialog');
     const body = declarations(ANALYSIS, '.analysis-finance-setup-body');
     expect(body).not.toHaveProperty('overflow');
     expect(body).not.toHaveProperty('overscroll-behavior');
     expect(ANALYSIS).not.toContain('analysis-finance-setup-scroll');
-    expect(declarations(ANALYSIS, '.analysis-finance-setup-head')).toMatchObject({ position: 'sticky', top: '-24px', 'z-index': '2' });
     // The column around the panes clips rather than hides, so scrollIntoView inside a pane cannot slide it.
     expect(declarations(read('../src/components/components.css'), ".fnd-shell[data-screen='analysis'] .fnd-column").overflow).toBe('clip');
-    // -24px cancels the results pane's own top padding, so the stuck heading meets the pane's edge.
-    expect(declarations(WORKSPACE, '.workspace-results').padding.split(' ')[0]).toBe('24px');
-    // The evidence drawer stays above the sticky heading.
-    expect(Number(declarations(ANALYSIS, '.analysis-evidence-anchor')['z-index'])).toBeGreaterThan(2);
+    // The results pane keeps a 24px gutter, room for the fold's hanging chevron.
+    expect(declarations(WORKSPACE, '.workspace-results').padding.split(' ')[1]).toBe('24px');
   });
 
   it('draws the task drawer\'s status segments as ordinary 36px, 14px controls', () => {

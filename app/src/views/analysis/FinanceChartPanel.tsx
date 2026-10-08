@@ -52,8 +52,8 @@ export function FinanceChartPanel({ taskId, runs, busy, onRefresh }: {
   }
   const rows = opened?.series?.rows ?? [];
   const columns = rows[0] ? Object.keys(rows[0]) : [];
-  return <aside className="analysis-chart-panel" aria-label="归档图"><details className="analysis-details">
-    <DisclosureSummary><div className="analysis-section-heading"><h3>归档图</h3><span className="analysis-note">{charts.length ? `${charts.length} 张 · ` : ''}归档当前结果，不重新计算。</span></div></DisclosureSummary>
+  return <><details className="analysis-details analysis-chart-panel" aria-label="归档图">
+    <DisclosureSummary>归档图<span className="analysis-note"> · {charts.length ? `${charts.length} 张，` : ''}归档当前结果，不重新计算</span></DisclosureSummary>
     <Button type="button" disabled={busy || pending || !latest} onClick={() => void archive()}>{pending ? '归档中…' : '归档当前结果图'}</Button>
     {charts.length ? <ul className="analysis-history-list">{charts.map((row) => <li key={row.id} className="analysis-history-row analysis-history-row--static">
       <span>{row.label || row.id}</span>
@@ -64,5 +64,5 @@ export function FinanceChartPanel({ taskId, runs, busy, onRefresh }: {
   </details>
     {message && <p role="status" className="analysis-message">{message}</p>}
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
-  </aside>;
+  </>;
 }

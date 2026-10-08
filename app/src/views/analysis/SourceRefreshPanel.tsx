@@ -56,9 +56,9 @@ export function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string
   }
   const ready = scope.source_id.trim() && scope.tenant_id.trim() && scope.ledger_id.trim()
     && scope.organization_id.trim() && scope.period.trim() && scope.currency.trim() && scope.cutoff_at.trim();
-  return <details className="analysis-source-refresh" aria-label="刷新财务来源">
-    <DisclosureSummary><span className="analysis-source-refresh-title">更新 ERP 来源</span>
-      <span className="analysis-note">来源系统重新导出后，在这里生成新的资料版本；已完成的计算仍按当时的资料保留。</span></DisclosureSummary>
+  return <details className="analysis-details analysis-source-refresh" aria-label="刷新财务来源">
+    <DisclosureSummary>更新 ERP 来源</DisclosureSummary>
+    <p className="analysis-note">来源系统重新导出后，在这里生成新的资料版本；已完成的计算仍按当时的资料保留。</p>
     <fieldset className="analysis-fieldset" disabled={busy || refreshing}><div className="analysis-edit-grid">
       <TextField label="来源编号" value={scope.source_id} onChange={(value) => setScope({ ...scope, source_id: value })} />
       <TextField label="账套" value={scope.tenant_id} onChange={(value) => setScope({ ...scope, tenant_id: value })} />

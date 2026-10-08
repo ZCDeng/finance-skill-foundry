@@ -74,8 +74,8 @@ export function FinanceAdjustmentPanel({ taskId, contextId, busy, onRefresh }: {
     }
   }
   if (!contextId) return null;
-  return <aside className="analysis-adjustment-panel" aria-label="考核调整"><details className="analysis-details">
-    <DisclosureSummary><div className="analysis-section-heading"><h3>考核调整</h3><span className="analysis-note">{pending.length ? `${pending.length} 条待确认 · ` : ''}确认后才会进入下一次管理损益。</span></div></DisclosureSummary>
+  return <><details className="analysis-details analysis-adjustment-panel" aria-label="考核调整">
+    <DisclosureSummary>考核调整<span className="analysis-note"> · {pending.length ? `${pending.length} 条待确认，` : ''}确认后才进入下一次管理损益</span></DisclosureSummary>
     {pending.length ? <ul className="analysis-history-list">{pending.map((row) => <li key={row.id} className="analysis-history-row analysis-history-row--static">
       <span>{row.label || '调整'} · 待确认</span>
       <Button type="button" disabled={locked} onClick={() => void confirm(row.id)}>{pendingId === row.id ? '确认中…' : '确认纳入'}</Button>
@@ -90,5 +90,5 @@ export function FinanceAdjustmentPanel({ taskId, contextId, busy, onRefresh }: {
     {/* Outside the fold: a failed list must not read as "nothing to confirm". */}
     {message && <p role="status" className="analysis-message">{message}</p>}
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
-  </aside>;
+  </>;
 }
