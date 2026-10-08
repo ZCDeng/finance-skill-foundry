@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -426,12 +426,14 @@ for (const toolName of ROSTER) {
     jsxs: (type, props, key) => ({ type, props, key }),
     Fragment: Symbol.for("Fragment"),
   };
+  let clientExports = null;
   const loader = {
     load: (bundle) => {
       const factory = bundle.factory((id) => {
         if (id === "react/jsx-runtime") return jsxRuntime;
         throw new Error(`unexpected require(${id})`);
       });
+      clientExports = factory;
       factory.apply({
         slots: {
           inject: (name, run) => {
@@ -478,6 +480,42 @@ for (const toolName of ROSTER) {
   assert.ok(injected.includes("tool.call.toolview"), "the tool view slot was never injected");
   assert.ok(inputSources.some((source) => source.name === "foundry-draft"),
     "the draft reference input source was never registered");
+
+  // The 「/」 menu's finance shortcuts: above upstream's skill list, in the
+  // manager's words, each one a question for a real bundled skill.
+  const shortcuts = inputSources.find((source) => source.name === "foundry-finance");
+  assert.ok(shortcuts, "the finance shortcut source was never registered");
+  assert.equal(shortcuts.trigger, "/");
+  assert.ok(shortcuts.order < 2, "finance shortcuts must list above upstream's skill source (order 2)");
+  const SKILL_IDS = new Set(readdirSync(new URL("../method/", import.meta.url), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && existsSync(new URL(`../method/${entry.name}/SKILL.md`, import.meta.url)))
+    .map((entry) => entry.name));
+  const rows = clientExports.FINANCE_SHORTCUTS;
+  assert.deepEqual([...new Set(rows.map((row) => row.section))],
+    ["开始与资料体检", "月结与管理报表", "预算与差异分析", "对账", "凭证草稿", "回款与现金"]);
+  assert.equal(new Set(rows.map((row) => row.id)).size, rows.length, "shortcut ids must be unique");
+  for (const row of rows) {
+    assert.ok(SKILL_IDS.has(row.skill), `${row.id} names ${row.skill}, which is not a bundled skill`);
+    for (const text of [row.label, row.prompt, ...row.keywords]) {
+      assert.ok(!/[A-Za-z]{3,}/.test(text), `${row.id} shows an English word to the manager: ${text}`);
+    }
+  }
+  for (const skill of SKILL_IDS) {
+    assert.ok(rows.some((row) => row.skill === skill), `no shortcut reaches the bundled ${skill} skill`);
+  }
+  const signal = new AbortController().signal;
+  const all = await shortcuts.candidates({ sessionId: "s" }, { query: "", position: "leading", signal });
+  assert.equal(all.length, rows.length);
+  assert.ok(all.every((candidate) => candidate.section && candidate.value && candidate.description));
+  const collection = await shortcuts.candidates({ sessionId: "s" }, { query: "收缴率", position: "leading", signal });
+  assert.deepEqual(collection.map((candidate) => candidate.value), ["collection-health"]);
+  const closing = await shortcuts.candidates({ sessionId: "s" }, { query: "关账", position: "leading", signal });
+  assert.deepEqual(closing.map((candidate) => candidate.value), ["close-walk"]);
+  assert.deepEqual(await shortcuts.candidates({ sessionId: "s" }, { query: "不存在", position: "leading", signal }), []);
+  // A pick only writes the question into the composer; it never claims or sends.
+  const picked = shortcuts.onPick({ candidate: collection[0], session: { sessionId: "s" }, position: "leading", via: "menu", span: { start: 0, end: 4, draftRev: 1 } });
+  assert.deepEqual(picked, { text: rows.find((row) => row.id === "collection-health").prompt });
+  assert.equal(shortcuts.onPick({ candidate: { name: "x", value: "missing" } }), undefined);
   const registeredKeys = new Set(registered.keys());
   for (const key of ["emit-brief", "query-locked", "record-reference"]) {
     assert.ok(registeredKeys.has(key), `${key} receipt row was not registered`);
