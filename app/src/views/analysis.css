@@ -320,7 +320,7 @@
 .analysis-account-map-table td { border: 1px solid var(--fnd-line, #e5e2dc); padding: 4px 6px; text-align: left; }
 .analysis-account-map-table thead th { background: var(--fnd-selection-surface); color: var(--fnd-ink); font-weight: 600; }
 .analysis-account-map-table td:last-child { width: 1%; white-space: nowrap; }
-.analysis-controls-card { display: grid; gap: 12px; }
+.analysis-controls-card { display: grid; gap: 12px; padding-top: 16px; border-top: 1px solid var(--fnd-line); }
 .analysis-controls-card h3 { display: inline-flex; align-items: center; gap: 6px; }
 .analysis-controls-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
 .analysis-controls-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fnd-size-body); }
