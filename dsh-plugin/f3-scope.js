@@ -1,4 +1,5 @@
 import { f3Allowlist } from "./index.js";
+import { hideDeveloperSections } from "./seat-prompt.js";
 
 /**
  * Narrow a leader's follow-up agent to the one tool it is allowed.
@@ -23,4 +24,5 @@ export const inject = ["tools"];
 
 export function apply(ctx) {
   ctx.tools.restrict({ allow: f3Allowlist() });
+  hideDeveloperSections(ctx);
 }

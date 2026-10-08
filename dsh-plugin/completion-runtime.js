@@ -178,22 +178,33 @@ function haltAfterResult(halted, record, requestKey, status) {
   halted.set(registryKey(record.sessionId, requestKey), cancelCause(`finance completion ${statusOf(status)}`));
 }
 
-function refuseIfHalted(halted, exec) {
-  if (!halted.size || !exec?.agent?.id) return;
+/** The cause that stops this request's further tools, or undefined. Prunes halts of older requests. */
+function haltCause(halted, exec) {
+  if (!halted.size || !exec?.agent?.id || !Array.isArray(exec?.agent?.session?.events)) return undefined;
   const identity = latestUserRequestIdentity(exec);
-  if (!identity) return;
+  if (!identity) return undefined;
   const sessionId = String(exec.agent.id);
   const key = registryKey(sessionId, `${sessionId}:${identity}`);
   for (const stale of [...halted.keys()]) {
     if (stale.startsWith(`${sessionId}\n`) && stale !== key) halted.delete(stale);
   }
-  const cause = halted.get(key);
-  if (!cause) return;
-  exec.agent.cancel?.(cause, { keepInbox: true });
-  throw new Error(`${cause.reason}: this request's draft is waiting on the manager; reply without further tools`);
+  return halted.get(key);
 }
 
-async function timeoutOperation(ctx, invoke, exec, record) {
+/** Stop the turn and say why, for a tool called after this request's draft was handed to the manager. */
+function refusalAfterHalt(halted, exec) {
+  const cause = haltCause(halted, exec);
+  if (!cause) return undefined;
+  exec.agent.cancel?.(cause, { keepInbox: true });
+  return `${cause.reason}: this request's draft is waiting on the manager; reply without further tools`;
+}
+
+function refuseIfHalted(halted, exec) {
+  const refusal = refusalAfterHalt(halted, exec);
+  if (refusal) throw new Error(refusal);
+}
+
+async function timeoutOperation(ctx, invoke, exec, record, halted) {
   if (record.closed) return;
   record.closed = true;
   clearTimer(record);
@@ -209,21 +220,17 @@ async function timeoutOperation(ctx, invoke, exec, record) {
   if (!TERMINAL_STATUSES.has(statusOf(status))) {
     await bestEffortStop(ctx, invoke, exec, record.operationId, "timeout");
   }
-  try {
-    if (latestUserRequestKey(exec) === record.requestKey) {
-      exec?.agent?.cancel?.(cancelCause("finance completion timeout"), { keepInbox: true });
-    }
-  } catch (error) {
-    ctx?.logger?.warn?.(`finance completion timeout cancel failed: ${error.message}`);
-  }
+  // Like needs_review: the model may still say where the draft stopped, but no further tool runs
+  // for this request. The halt is checked before every tool, the harness's own included.
+  halted.set(registryKey(record.sessionId, record.requestKey), cancelCause("finance completion timeout"));
 }
 
-function armDeadline(ctx, invoke, exec, operations, record, operation) {
+function armDeadline(ctx, invoke, exec, operations, record, operation, halted) {
   clearTimer(record);
   const deadline = parseDeadline(operation);
   const delay = Math.max(0, deadline - Date.now());
   record.timer = setTimeout(() => {
-    timeoutOperation(ctx, invoke, exec, record).finally(() => operations.delete(registryKey(record.sessionId, record.requestKey)));
+    timeoutOperation(ctx, invoke, exec, record, halted).finally(() => operations.delete(registryKey(record.sessionId, record.requestKey)));
   }, delay);
   // This runtime can keep a harness process alive for minutes; the persisted
   // backend operation is authoritative across restarts, so the JS timer should
@@ -265,7 +272,7 @@ export function createCompletionRuntime(ctx = {}, invoke = invokeFoundry, policy
   const halted = new Map();
   const call = (args, exec) => command(invoke, args, exec);
 
-  return async function completionRuntime(tool, input, exec, run) {
+  const runtime = async function completionRuntime(tool, input, exec, run) {
     if (typeof run !== "function") throw new Error("completion runtime requires a tool runner");
     refuseIfHalted(halted, exec);
     if (tool !== SAVE_TOOL) {
@@ -303,7 +310,7 @@ export function createCompletionRuntime(ctx = {}, invoke = invokeFoundry, policy
       clearTimer(record);
       operations.delete(key);
     } else {
-      armDeadline(ctx, invoke, exec, operations, record, begin);
+      armDeadline(ctx, invoke, exec, operations, record, begin, halted);
     }
 
     const controller = new AbortController();
@@ -332,4 +339,8 @@ export function createCompletionRuntime(ctx = {}, invoke = invokeFoundry, policy
       releaseController();
     }
   };
+  // The analysis seat's guard asks this before any tool, so skill, web_search, todo_write and the
+  // other harness tools stop too, not only the foundry tools this runtime wraps.
+  runtime.refusalAfterHalt = (exec) => refusalAfterHalt(halted, exec);
+  return runtime;
 }

@@ -422,6 +422,8 @@ export function apply(ctx) {
   if (denied.length) ctx.tools.restrict({ deny: denied });
   const allowed = new Set([...allowlist(), "report"]);
   // Keep late registrations from acquiring execution authority in a live task.
-  ctx.tools.guard((exec) => allowed.has(exec.name) ? undefined : `analysis cannot execute ${exec.name}`);
+  ctx.tools.guard((exec) => allowed.has(exec.name)
+    ? runtime.completion.refusalAfterHalt(exec)
+    : `analysis cannot execute ${exec.name}`);
   hideDeveloperSections(ctx);
 }

@@ -16,6 +16,8 @@ from pathlib import Path
 
 from foundry.harness import install_presets
 from foundry.task import TaskStore
+import pytest
+
 from test_real_load import WEB_SETTLE_SECONDS, ROOT, DSH_BIN, _dsh_args, _prepare, _probe_package, needs_dsh
 
 SEAT_PROMPT_PROBE = r"""
@@ -37,12 +39,13 @@ export function apply(ctx) {
         yield {type: 'finish', reason: {kind: 'stop'}};
       }
     }());
-    await ctx.agentPresets.standingKeyFor('analysis');
+    const preset = process.env.FOUNDRY_TEST_PRESET;
+    await ctx.agentPresets.standingKeyFor(preset);
     const handle = await ctx.agents.create({
       sessionId: 'seat-prompt-real',
-      meta: {cwd: process.env.FOUNDRY_TEST_WORKSPACE, agentPreset: 'analysis'},
+      meta: {cwd: process.env.FOUNDRY_TEST_WORKSPACE, agentPreset: preset},
       agentOptions: {provider: 'foundry-seat-fixture', model: 'deterministic'},
-      setup: async (agentCtx) => { await ctx.agentPresets.mount(agentCtx, 'analysis'); },
+      setup: async (agentCtx) => { await ctx.agentPresets.mount(agentCtx, preset); },
     });
     try {
       handle.agent.followup(createUserMessage({content: [{type: 'text', text: '看看资料'}], source: {kind: 'user'}}));
@@ -57,7 +60,8 @@ export function apply(ctx) {
 
 
 @needs_dsh
-def test_analysis_seat_sees_shipped_methods_only_and_no_harness_dev_notes(tmp_path: Path) -> None:
+@pytest.mark.parametrize("preset, persona", [("analysis", "财务经理的分析助手"), ("period", "本期结账分析的助手")])
+def test_finance_seats_see_shipped_methods_only_and_no_harness_dev_notes(tmp_path: Path, preset: str, persona: str) -> None:
     home = tmp_path / "dsh-home"
     _prepare(home, _probe_package(tmp_path / "probe", SEAT_PROMPT_PROBE), "web")
     install_presets(home)
@@ -78,6 +82,7 @@ def test_analysis_seat_sees_shipped_methods_only_and_no_harness_dev_notes(tmp_pa
         "FOUNDRY_LLM_MODULE": (Path(DSH_BIN).resolve().parents[2] / "dsh-llm" / "lib" / "index.js").as_uri(),
         "FOUNDRY_TEST_WORKSPACE": str(task.root / "analysis"),
         "DSH_AGENTS_HOME": str(personal),
+        "FOUNDRY_TEST_PRESET": preset,
     })
     log = tmp_path / "seat-prompt.log"
     with log.open("wb") as sink:
@@ -104,10 +109,10 @@ def test_analysis_seat_sees_shipped_methods_only_and_no_harness_dev_notes(tmp_pa
     report = json.loads(lines[-1].split(" ", 1)[1])
     system, messages = report["system"], report["messages"]
 
-    assert "财务经理的分析助手" in system
+    assert persona in system
     assert "implementation checkout" not in system
     assert "HMR" not in system and "dev:web" not in system
 
-    assert "financial-statements" in messages and "variance-analysis" in messages
+    assert "variance-analysis" in messages and "reconciliation" in messages
     assert "PERSONAL_SKILL_LEAK" not in messages and "agent-reach" not in messages
     assert "PERSONAL_CLOSE_SHADOW" not in messages
