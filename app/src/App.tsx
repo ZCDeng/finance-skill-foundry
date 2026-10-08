@@ -570,6 +570,13 @@ export function App() {
     showSampleTask(result.value.id, 'materials');
   }, [api, showSampleTask]);
 
+  const exportTemplates = useCallback(async () => {
+    if (!api?.templatesExport) throw new Error('这个版本还不能导出补充模板。');
+    const result = await api.templatesExport();
+    if (!result.ok) throw new Error(result.message);
+    return 'folder' in result.value ? result.value.folder : null;
+  }, [api]);
+
   /** Trash the reference and build it again; the new one opens if the old one was still on screen. */
   const rebuildReferenceTask = useCallback(async () => {
     const leaving = currentRef.current;
@@ -1006,6 +1013,7 @@ export function App() {
               onRemoveSamples={api.taskSampleRemove ? removeSampleTasks : undefined}
               onReference={api.taskSampleReference ? openReferenceTask : undefined}
               onNextMonth={api.taskSampleNext ? openNextMonthTask : undefined}
+              onExportTemplates={api.templatesExport ? exportTemplates : undefined}
               onReplaceSamples={api.taskSampleRemove && api.taskSample ? async () => { await removeSampleTasks(); await openSampleTask(); } : undefined}
               onOwnData={() => { closeGuide(); requestAnimationFrame(() => document.getElementById('analysis-question')?.focus()); }}
               onOpen={(target: GuideTarget) => {

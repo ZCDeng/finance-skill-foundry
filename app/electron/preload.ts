@@ -58,6 +58,7 @@ const api = {
   taskSampleReference: (rebuild?: boolean) => ipcRenderer.invoke('foundry:task-sample-reference', rebuild === true),
   taskSampleNext: () => ipcRenderer.invoke('foundry:task-sample-next'),
   taskSampleRemove: () => ipcRenderer.invoke('foundry:task-sample-remove'),
+  templatesExport: () => ipcRenderer.invoke('foundry:templates-export'),
   taskNew: (title: string, period: string) =>
     ipcRenderer.invoke('foundry:task-new', title, period),
   harnessStatus: () => ipcRenderer.invoke('harness:status'),

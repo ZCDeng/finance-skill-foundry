@@ -298,6 +298,17 @@ def _xlsx(
             book.close()
 
 
+def decode_text(data: bytes) -> tuple[str, str]:
+    """Text as the file wrote it, and the encoding it was read in.
+
+    UTF-8 first (with or without a BOM); otherwise GB18030, the superset of GBK and GB2312 that 用友, 金蝶
+    and Excel's 「CSV（逗号分隔）」 on a Chinese system write. Nothing is guessed beyond these two."""
+    try:
+        return data.decode("utf-8-sig"), "utf-8"
+    except UnicodeDecodeError:
+        return data.decode("gb18030"), "gb18030"
+
+
 def parse_source(
     data: bytes,
     suffix: str,
@@ -307,13 +318,14 @@ def parse_source(
 ) -> dict:
     if suffix not in SUPPORTED:
         raise FoundryError(
-            f"unsupported format {suffix}; supported: CSV, XLSX, JSON, Markdown and TXT"
+            "unsupported format .xls (the Excel 97-2003 format): save it as .xlsx first" if suffix == ".xls"
+            else f"unsupported format {suffix}; supported: CSV, XLSX, JSON, Markdown and TXT"
         )
     if len(data) > MAX_SOURCE_BYTES:
         raise FoundryError("source exceeds 32 MiB limit")
     try:
         if suffix in {".md", ".txt"}:
-            text = data.decode("utf-8-sig")
+            text, encoding = decode_text(data)
             paragraphs = []
             for match in re.finditer(r"\S.*?(?=\n\s*\n|\Z)", text, flags=re.S):
                 paragraphs.append(
@@ -331,7 +343,7 @@ def parse_source(
                 "row_count": 0,
                 "transformation": {
                     "format": suffix[1:],
-                    "encoding": "utf-8",
+                    "encoding": encoding,
                     "basis": "source_fact",
                 },
             }
@@ -343,7 +355,10 @@ def parse_source(
         workbook = None
         mode = None
         if suffix == ".csv":
-            reader = csv.DictReader(io.StringIO(data.decode("utf-8-sig")))
+            text, encoding = decode_text(data)
+            if encoding != "utf-8":
+                transformation["encoding"] = encoding
+            reader = csv.DictReader(io.StringIO(text))
             headers = reader.fieldnames or []
             rows = []
             for row in reader:

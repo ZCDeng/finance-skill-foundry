@@ -72,6 +72,8 @@ export const CHANNELS = {
   taskSampleReference: 'foundry:task-sample-reference',
   taskSampleNext: 'foundry:task-sample-next',
   taskSampleRemove: 'foundry:task-sample-remove',
+  /** Copies the 补充数据模板 into a folder the manager picks; touches no task. */
+  templatesExport: 'foundry:templates-export',
   harnessStatus: 'harness:status',
   harnessOpen: 'harness:open',
   harnessLayout: 'harness:layout',
