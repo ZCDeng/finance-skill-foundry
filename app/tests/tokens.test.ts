@@ -597,13 +597,21 @@ describe('the disclosure summary', () => {
     expect(declarations(COMPONENTS, `${SUMMARY}[data-tone='quiet'] > ${ICON}`)).toMatchObject({ width: '14px', height: '14px' });
   });
 
-  it('pulls the row 8px left so the chevron box starts on the content edge', () => {
+  it('hangs the chevron in the gutter so the words start on the content edge', () => {
     expect(declarations(COMPONENTS, SUMMARY)).toMatchObject({
-      'margin-inline-start': '-8px',
-      'max-width': 'calc(100% + 8px)',
-      padding: '5px 8px 5px 32px',
+      'margin-inline-start': '-24px',
+      'max-width': 'calc(100% + 24px)',
+      padding: '5px 8px 5px 24px',
     });
-    expect(declarations(COMPONENTS, ICON).left).toBe('8px');
+    // The 16px box sits at -20..-4 from the content edge, inside the 20px gutter of the narrowest pane.
+    expect(declarations(COMPONENTS, ICON).left).toBe('4px');
+    expect(declarations(COMPONENTS, `${SUMMARY}[data-tone='quiet'] > ${ICON}`).left).toBe('6px');
+    // In the taskbar the fold is a control in a row, so it keeps the chevron inside.
+    expect(declarations(COMPONENTS, `.fnd-taskbar__technical ${SUMMARY}`)['margin-inline-start']).toBe('0');
+    // In a bordered card with a narrower gutter the chevron stays inside rather than crossing the border.
+    const flat = COMPONENTS.replace(/\/\*[\s\S]*?\*\//g, '');
+    const inset = [...flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, selector]) => selector.includes('.analysis-structure-sheet') && selector.trim().endsWith(SUMMARY));
+    expect(inset?.[2]).toMatch(/margin-inline-start:\s*0/);
   });
 
   it('turns the chevron a quarter when open, on the shared transition', () => {
@@ -624,14 +632,14 @@ describe('the disclosure summary', () => {
     expect(declarations(COMPONENTS, `details[open]:has(> .fnd-disclosure-summary)::details-content`)['block-size']).toBe('auto');
   });
 
-  it('steps a nested fold under its parent words and rules its content, a third level not again', () => {
+  it('steps every nested fold 24px in and rules its content under the chevron', () => {
     const FOLD = 'details:has(> .fnd-disclosure-summary)';
     expect(declarations(COMPONENTS, `${FOLD} ${FOLD}`)['margin-inline-start']).toBe('24px');
-    expect(declarations(COMPONENTS, `${FOLD} ${FOLD} ${FOLD}`)['margin-inline-start']).toBe('0');
-    // 7px + 1px rule + 16px puts the content under the nested summary's words (24px).
+    expect(() => declarations(COMPONENTS, `${FOLD} ${FOLD} ${FOLD}`)).toThrow(/no rule/);
+    // -12px puts the 1px rule under the chevron's centre; 11px more brings the content back to the words.
     expect(declarations(COMPONENTS, `${FOLD} ${FOLD}::details-content`)).toMatchObject({
-      'margin-inline-start': '7px',
-      'padding-inline-start': '16px',
+      'margin-inline-start': '-12px',
+      'padding-inline-start': '11px',
       'border-inline-start': '1px solid var(--fnd-line)',
     });
     expect(declarations(COMPONENTS, `${FOLD} + ${FOLD}`)['border-top']).toBe('1px solid var(--fnd-line)');
