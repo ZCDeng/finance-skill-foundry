@@ -52,6 +52,37 @@ function proposal(sheets: StructureProposal['sheets'], state = 'pending_confirma
 }
 
 describe('structure confirmation card', () => {
+  it('names a presentation page someone else adopted in the pending strip', () => {
+    render(<StructurePendingStrip taskId="t" datasetName="月结套表" busy={false} onSettled={vi.fn()}
+      confirmation={{ id: 'c1', dataset_id: 'shell-1', source: 'assistant', state: 'pending_acknowledgement', parent_id: null,
+        sheets: [{ sheet: '01·核心指标看板', decision: 'table', reason: 'adopted_presentation_sheet' },
+          { sheet: '02·GL科目余额表', decision: 'table', reason: null }] }} />);
+    expect(screen.getByText(/01·核心指标看板 原本是看板或封面页/)).toBeTruthy();
+    expect(screen.queryByText(/02·GL科目余额表 原本/)).toBeNull();
+  });
+
+  it('lets the manager adopt a set-aside KPI board and sends it as a table', async () => {
+    const board = ledger({
+      sheet: '01·核心指标看板', decision: 'excluded', reason: 'presentation_sheet',
+      blocked_reason: 'presentation_sheet', adoptable: true,
+      columns: [column('A', '指标', 'unknown'), column('C', '本年累计', 'unknown')], amount_pairs: [], excluded_rows: [],
+    });
+    const cover = ledger({ sheet: '00·封面', decision: 'excluded', reason: 'presentation_sheet',
+      blocked_reason: 'presentation_sheet', columns: [], amount_pairs: [], excluded_rows: [] });
+    const onSettled = vi.fn();
+    render(<StructureProposalCard taskId="t" datasetName="月结套表" proposal={proposal([board, cover], 'no_table')}
+      busy={false} onSettled={onSettled} />);
+    // Only the board, which has a table on it, offers the choice.
+    expect(screen.getAllByRole('button', { name: /当作数据表/ })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: /当作数据表/ }));
+    fireEvent.click(screen.getByRole('button', { name: /确认表结构/ }));
+    await waitFor(() => expect(onSettled).toHaveBeenCalled());
+    const [, command, spec] = financeCall.mock.calls[0];
+    expect(command).toBe('structure-proposal-confirm');
+    expect(spec.sheets.map((sheet: { sheet: string; decision: string; blocked_reason: string | null }) =>
+      [sheet.sheet, sheet.decision, sheet.blocked_reason])).toEqual([['01·核心指标看板', 'table', null]]);
+  });
+
   it('shows the rows around the proposed header so the number is not a guess', () => {
     render(<StructureProposalCard taskId="t" datasetName="月结套表" proposal={proposal([ledger()])}
       busy={false} onSettled={vi.fn()} />);

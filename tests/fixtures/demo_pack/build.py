@@ -80,8 +80,8 @@ import calendar
 _MONTH_END = calendar.monthrange(PERIOD_Y, PERIOD_M)[1]
 _YTD_DAYS = sum(calendar.monthrange(PERIOD_Y, m)[1] for m in range(1, PERIOD_M + 1))
 _IMP_PCT = round(sum(S_IMPAIR[:PERIOD_M]) * 100)
-# 演示版把「看板」改叫「核心经营指标」：FA Foundry 把名为看板的页当展示页排除，回款健康就读不到这张表
-KPI_SHEET = "01·核心经营指标" if DEMO else "01·核心指标看板"
+# 看板页默认被当作展示页排除；演示时由经理在表结构确认里点「当作数据表」采用，回款健康才读得到
+KPI_SHEET = "01·核心指标看板"
 def w(x): return x / WAN          # 元 -> 万元
 def sdiv(a, b): return a / b if b else 0
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Check, RotateCcw, X } from 'lucide-react';
+import { AlertTriangle, Check, RotateCcw, Table2, X } from 'lucide-react';
 import { bridge } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { WaitLoop } from '../../components/WaitLoop.js';
@@ -88,6 +88,8 @@ export interface ProposedSheet {
   };
   preview: { row: number; is_header: boolean; cells: { letter: string; text: string }[] }[];
   confidence: number;
+  /** A KPI board or other presentation page that still has a table on it: set aside, but hers to adopt. */
+  adoptable?: boolean;
 }
 
 export interface StructureProposal {
@@ -105,13 +107,17 @@ interface Confirmation {
   source: string;
   state: string;
   parent_id: string | null;
+  sheets?: { sheet: string; decision?: string; reason?: string | null }[];
 }
 
 const ROLE_LABELS: Record<string, string> = {
   account_code: '科目代码', account_name: '科目名称', management_account: '管理科目',
   category: '类别', direction: '方向', amount: '金额', debit: '借方', credit: '贷方',
   doc_id: '凭证号', line_id: '行号', date: '日期', summary: '摘要', period: '期间',
-  currency: '币种', unit: '单位', organization: '组织', ledger: '账套', unknown: '未识别',
+  currency: '币种', unit: '单位', organization: '组织', ledger: '账套',
+  invoice_id: '发票号', due_date: '到期日', issue_date: '开票日期', effective_date: '回款日期',
+  product: '业态/产品', quantity: '数量', price: '单价', posting_status: '过账状态', status: '状态',
+  scenario: '情景', kind: '收付类型', event_id: '流水号', unknown: '未识别',
 };
 const EXCLUSION_LABELS: Record<string, string> = {
   section: '分节标题', subtotal: '小计或合计', note: '说明',
@@ -127,7 +133,8 @@ function unreadHeaders(sheet: ProposedSheet): string[] {
 }
 const ROLE_CHOICES = ['account_code', 'account_name', 'management_account', 'category', 'direction',
   'amount', 'debit', 'credit', 'doc_id', 'line_id', 'date', 'summary', 'period', 'currency', 'unit',
-  'organization', 'ledger', 'unknown'];
+  'organization', 'ledger', 'invoice_id', 'due_date', 'issue_date', 'effective_date', 'product', 'quantity',
+  'price', 'posting_status', 'status', 'scenario', 'kind', 'event_id', 'unknown'];
 
 function undecided(sheet: ProposedSheet): boolean {
   return sheet.amount_pairs.some((pair) => pair.primary && pair.direction.kind === 'undecided');
@@ -212,6 +219,21 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
     setSheets((current) => current.map((sheet) => (sheet.sheet === name ? change(sheet) : sheet)));
   }
 
+  // A set-aside KPI board comes back as a table she can review column by column like any other.
+  function adopt(name: string) {
+    edit(name, (sheet) => ({ ...sheet, decision: 'table', reason: 'adopted_presentation_sheet', blocked_reason: null }));
+    setChosen((current) => ({ ...current, [name]: true }));
+  }
+
+  function adoptButton(sheet: ProposedSheet) {
+    if (!sheet.adoptable) return null;
+    return (
+      <Button type="button" variant="outline" size="sm" disabled={locked} onClick={() => adopt(sheet.sheet)}>
+        <Table2 size={14} strokeWidth={1.5} aria-hidden />当作数据表
+      </Button>
+    );
+  }
+
   async function confirm() {
     const api = bridge(); if (!api?.financeCall) return;
     setWorking(true); setError('');
@@ -232,7 +254,11 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
       <section className="analysis-structure-card">
         {/* Opened under the file's own row, which already names it: the heading is for screen readers. */}
         <h4 className="sr-only">{datasetName}</h4>
-        <p className="analysis-note">这份文件里没有可以计算的表。每张表的判断如下。</p>
+        <p className="analysis-note">
+          {setAside.some((sheet) => sheet.adoptable)
+            ? '这份文件里没有直接可以计算的表；看板页上的表可以点「当作数据表」采用。每张表的判断如下。'
+            : '这份文件里没有可以计算的表。每张表的判断如下。'}
+        </p>
         <ul className="analysis-structure-reasons">
           {setAside.map((sheet) => (
             <li key={sheet.sheet}>
@@ -243,6 +269,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
               {unreadHeaders(sheet).length > 0 && (
                 <span className="analysis-note">读到的列：{unreadHeaders(sheet).join('、')}</span>
               )}
+              {adoptButton(sheet)}
             </li>
           ))}
         </ul>
@@ -446,7 +473,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
 
       {setAside.length > 0 && (
         <details className="analysis-structure-excluded">
-          <DisclosureSummary>不能确认的工作表 {setAside.length} 张</DisclosureSummary>
+          <DisclosureSummary>暂不计算的工作表 {setAside.length} 张</DisclosureSummary>
           <ul>
             {setAside.map((sheet) => (
               <li key={sheet.sheet}>
@@ -454,6 +481,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
                 {unreadHeaders(sheet).length > 0 && (
                   <span className="analysis-note">读到的列：{unreadHeaders(sheet).join('、')}</span>
                 )}
+                {adoptButton(sheet)}
               </li>
             ))}
           </ul>
@@ -495,6 +523,10 @@ export function StructurePendingStrip({ taskId, datasetName, confirmation, busy,
   const [error, setError] = useState('');
   const locked = busy || Boolean(working);
   const fromTemplate = confirmation.source === 'template';
+  // A presentation page taken into calculation by someone else is the one thing here she must see by name.
+  const adopted = (confirmation.sheets ?? [])
+    .filter((sheet) => sheet.decision === 'table' && sheet.reason === 'adopted_presentation_sheet')
+    .map((sheet) => sheet.sheet);
 
   async function settle(command: 'structure-acknowledge' | 'structure-reject' | 'structure-withdraw') {
     const api = bridge(); if (!api?.financeCall) return;
@@ -519,6 +551,12 @@ export function StructurePendingStrip({ taskId, datasetName, confirmation, busy,
         {fromTemplate ? '这份文件的表结构套用了上次记住的结构，还没有经过你确认。' : '助手代你确认了这份文件的表结构，还没有经过你追认。'}
         表已经可以计算，追认只是把这条记录归到你名下。
       </p>
+      {adopted.length > 0 && (
+        <p role="status" className="analysis-structure-blocked">
+          <AlertTriangle size={14} strokeWidth={1.5} aria-hidden />
+          {adopted.join('、')} 原本是看板或封面页，这次当作数据表计算了；不该算的话请{fromTemplate ? '撤销套用' : '拒绝'}。
+        </p>
+      )}
       {error && <p role="alert" className="analysis-structure-error">{error}</p>}
       {working && <p role="status" className="analysis-note"><WaitLoop />正在保存你的决定…</p>}
       <div className="analysis-structure-actions">

@@ -222,6 +222,36 @@ def _roles(sheet: dict[str, Any]) -> list[str]:
     return [str(column.get("role") or "") for column in sheet.get("columns") or []]
 
 
+# Roles the proposal engine learnt after templates were already being remembered. A shape
+# stored before then reads these columns as unknown (or, for the dates, as a plain date);
+# that is the same shape, not a different one, and the newer reading is the one to keep.
+LATER_ROLES = frozenset({
+    "invoice_id", "due_date", "issue_date", "effective_date", "product", "quantity", "price",
+    "posting_status", "status", "scenario", "kind", "event_id",
+})
+_EARLIER_READINGS = frozenset({"unknown", "date"})
+
+
+def _same_role(current: str, stored: str) -> bool:
+    return current == stored or (current in LATER_ROLES and stored in _EARLIER_READINGS)
+
+
+def _roles_agree(sheet: dict[str, Any], stored: dict[str, Any]) -> bool:
+    current, remembered = _roles(sheet), _roles(stored)
+    return len(current) == len(remembered) and all(_same_role(a, b) for a, b in zip(current, remembered))
+
+
+def _keep_later_roles(columns: list[dict[str, Any]], sheet: dict[str, Any]) -> list[dict[str, Any]]:
+    """A remembered shape keeps this month's reading of a column it only knew as unknown."""
+    read = {column.get("letter"): column.get("role") for column in sheet.get("columns") or []}
+    return [
+        {**column, "role": read[column.get("letter")]}
+        if read.get(column.get("letter")) in LATER_ROLES and column.get("role") in _EARLIER_READINGS
+        else column
+        for column in columns
+    ]
+
+
 def _letters(sheet: dict[str, Any]) -> list[str]:
     return [str(column.get("letter") or "") for column in sheet.get("columns") or []]
 
@@ -243,7 +273,7 @@ def similarity(sheet: dict[str, Any], template: dict[str, Any]) -> float:
     roles_a, roles_b = _roles(sheet), _roles(stored)
     width = max(len(roles_a), len(roles_b))
     ordered = (
-        sum(1 for a, b in zip(roles_a, roles_b) if a == b) / width if width else 0.0
+        sum(1 for a, b in zip(roles_a, roles_b) if _same_role(a, b)) / width if width else 0.0
     )
     named = 1.0 if sheet_pattern(sheet.get("sheet", "")) == template.get("sheet_pattern") else 0.0
     return round(0.5 * jaccard + 0.35 * ordered + 0.15 * named, 4)
@@ -257,7 +287,7 @@ def differences(sheet: dict[str, Any], template: dict[str, Any]) -> list[str]:
     # list untouched and moves every amount one cell to the right.
     if _headers(sheet) != _headers(stored) or _letters(sheet) != _letters(stored):
         found.append("columns")
-    if _roles(sheet) != _roles(stored):
+    if not _roles_agree(sheet, stored):
         found.append("roles")
     stored_pairs = {
         pair.get("label"): (pair.get("direction") or {}).get("kind")
@@ -294,7 +324,10 @@ def apply_matching_templates(
     prepared: list[dict[str, Any]] = []
     matches: list[dict[str, Any]] = []
     for sheet in sheets:
-        if sheet.get("decision") != "table":
+        # A presentation page the manager adopted last month is remembered like any table;
+        # this month's copy of it is set aside again until a shape matches it exactly.
+        adoptable = sheet.get("reason") == "presentation_sheet" and sheet.get("adoptable")
+        if sheet.get("decision") != "table" and not adoptable:
             prepared.append(sheet)
             continue
         scored = sorted(
@@ -307,6 +340,13 @@ def apply_matching_templates(
             prepared.append(sheet)
             continue
         gaps = differences(sheet, template)
+        if adoptable:
+            # Only the page she adopted before: a 对标 page that copies a data table's
+            # headers is not thereby a table she chose.
+            if gaps or sheet_pattern(sheet.get("sheet", "")) != template.get("sheet_pattern"):
+                prepared.append(sheet)
+                continue
+            sheet = {**sheet, "decision": "table", "reason": "adopted_presentation_sheet", "blocked_reason": None}
         filled = dict(sheet)
         if gaps:
             # A remembered shape that does not fit exactly is a starting point,
@@ -317,6 +357,7 @@ def apply_matching_templates(
             # nothing else. Rows, title area, period and preview are all facts
             # about the file in hand, and only the engine can say where they are.
             filled = {**sheet, **(template.get("declaration") or {})}
+            filled["columns"] = _keep_later_roles(filled.get("columns") or [], sheet)
         filled["template_id"] = template["id"]
         prepared.append(filled)
         matches.append(

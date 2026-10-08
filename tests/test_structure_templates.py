@@ -388,3 +388,130 @@ def test_two_tasks_demoting_at_once_both_land(tmp_path: Path) -> None:
 
     # Four withdrawals are four steps down, not one.
     assert shelf.read(ledger["id"])["weight"] == 3
+
+
+# --- presentation pages the manager adopts --------------------------------------------------
+
+
+def _dashboard(service: FinanceStore, shell_id: str) -> dict:
+    proposal = service.structure_proposal_list({"dataset_id": shell_id})["proposals"][0]
+    return next(sheet for sheet in proposal["sheets"] if sheet["sheet"].startswith("01"))
+
+
+def test_a_kpi_board_is_set_aside_but_keeps_what_was_read_so_it_can_be_adopted(tmp_path: Path) -> None:
+    """A pack's KPI board is often the only place it states its headline figures, and
+    collection health reads it. It is set aside by default, but the manager can take it."""
+    _task_obj, analysis, service = _task(tmp_path)
+    shell = _add(analysis, tmp_path, fixture.monthly_pack(), "八月")
+    service.structure_propose(shell["id"])
+    board = _dashboard(service, shell["id"])
+    assert (board["decision"], board["reason"], board["adoptable"]) == ("excluded", "presentation_sheet", True)
+    assert [column["header"] for column in board["columns"]][:3] == ["指标", "本月", "本年累计"]
+
+    service.structure_proposal_confirm({"dataset_id": shell["id"], "sheets": [{**board, "decision": "table"}]})
+    tables = [row for row in analysis.state()["datasets"] if row["kind"] != "workbook"]
+    assert [row["name"] for row in tables] == ["01·核心指标看板"]
+    rows = analysis.read_dataset(tables[0]["id"])["rows"]
+    assert any(row.get("col_A_指标") == "营业收入" for row in rows)
+
+
+def test_a_cover_page_with_no_table_cannot_be_adopted(tmp_path: Path) -> None:
+    _task_obj, analysis, service = _task(tmp_path)
+    shell = _add(analysis, tmp_path, fixture.monthly_pack(), "八月")
+    service.structure_propose(shell["id"])
+    proposal = service.structure_proposal_list({"dataset_id": shell["id"]})["proposals"][0]
+    cover = next(sheet for sheet in proposal["sheets"] if sheet["sheet"].startswith("00"))
+    assert cover["decision"] == "excluded" and not cover.get("adoptable")
+    with pytest.raises(FoundryError, match="cannot be confirmed as a table"):
+        service.structure_proposal_confirm({"dataset_id": shell["id"], "sheets": [{**cover, "decision": "table"}]})
+
+
+def test_next_months_board_is_adopted_from_the_remembered_shape(tmp_path: Path) -> None:
+    store = TaskStore(tmp_path / "var")
+    _task_obj, analysis, service = _task(tmp_path, store=store)
+    august = _add(analysis, tmp_path, fixture.monthly_pack(), "八月")
+    service.structure_propose(august["id"])
+    service.structure_proposal_confirm({"dataset_id": august["id"],
+                                        "sheets": [{**_dashboard(service, august["id"]), "decision": "table"}]})
+
+    _task_obj, analysis, service = _task(tmp_path, store=store)
+    september = _add(analysis, tmp_path, fixture.monthly_pack(period="2026年09月"), "九月")
+    proposal = service.structure_propose(september["id"])
+    matches = {item["sheet"]: item for item in proposal["template_matches"]}
+    assert matches["01·核心指标看板"]["auto_apply"] is True
+    assert service.dataset_structure_state(september["id"]) == "pending_acknowledgement"
+
+
+def test_detail_tables_name_the_columns_the_scenarios_read() -> None:
+    """Confirmed invoice, collection, cash and price/quantity tables used to come out with
+    col_A_invoice_id style names, so aging and the 13-week view needed a field map each time."""
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    from foundry.structure_snapshot import CANONICAL_NAMES
+
+    book = Workbook()
+    invoices = book.active
+    invoices.title = "应收发票"
+    invoices.append(["发票号", "客户", "开票日期", "到期日", "金额", "状态", "ledger_id"])
+    invoices.append(["HC-1", "业主", "2026-07-01", "2026-07-31", 100, "争议", "L1"])
+    cash = book.create_sheet("收款计划")
+    cash.append(["id", "date", "amount", "status"])
+    cash.append(["R01", "2026-09-03", 31500, "actual"])
+    prices = book.create_sheet("量价")
+    prices.append(["业态", "情景", "计费面积", "单价", "金额"])
+    prices.append(["住宅", "actual", 100800, 1.52, 153216])
+    data = BytesIO()
+    book.save(data)
+    sheets = {sheet["sheet"]: sheet for sheet in propose_workbook_structure(data.getvalue())["sheets"]}
+
+    def names(sheet):
+        return [CANONICAL_NAMES.get(column["role"]) for column in sheets[sheet]["columns"]]
+
+    assert names("应收发票") == ["invoice_id", None, "issue_date", "due_date", "amount", "status", None]
+    assert names("收款计划") == ["id", "date", "amount", "status"]
+    assert names("量价") == ["product", "scenario", "quantity", "price", "amount"]
+
+
+def test_a_shape_remembered_before_the_detail_roles_still_applies_and_keeps_the_new_reading() -> None:
+    """Templates stored before invoice_id, due_date, status... were roles read those columns as
+    unknown or date. The same file next month must still auto-apply, with this month's names."""
+    from foundry.structure_templates import _keep_later_roles, differences, similarity
+
+    def col(letter, header, role):
+        return {"letter": letter, "header": header, "display": header, "role": role}
+
+    sheet = {"sheet": "应收发票", "columns": [col("A", "发票号", "invoice_id"), col("B", "开票日期", "issue_date"),
+                                             col("C", "金额", "amount"), col("D", "状态", "status")]}
+    stored = {"sheet": "应收发票", "columns": [col("A", "发票号", "unknown"), col("B", "开票日期", "date"),
+                                              col("C", "金额", "amount"), col("D", "状态", "unknown")]}
+    template = {"declaration": stored, "sheet_pattern": "应收发票"}
+    assert similarity(sheet, template) == 1.0
+    assert differences(sheet, template) == []
+    kept = _keep_later_roles(stored["columns"], sheet)
+    assert [column["role"] for column in kept] == ["invoice_id", "issue_date", "amount", "status"]
+    # A genuinely different role is still a difference.
+    moved = {**sheet, "columns": [col("A", "发票号", "amount"), *sheet["columns"][1:]]}
+    assert "roles" in differences(moved, template)
+
+
+def test_a_contract_end_date_is_not_a_receivable_due_date() -> None:
+    from foundry.structure_proposal import _role_for
+
+    assert _role_for("到期日") == "due_date"
+    assert _role_for("合同到期日") == "unknown"
+
+
+def test_a_presentation_page_is_adopted_only_against_its_own_template(tmp_path: Path) -> None:
+    from foundry.structure_templates import apply_matching_templates
+
+    store = TaskStore(tmp_path / "var")
+    _task_obj, analysis, service = _task(tmp_path, store=store)
+    august = _add(analysis, tmp_path, fixture.monthly_pack(), "八月")
+    service.structure_propose(august["id"])
+    board = _dashboard(service, august["id"])
+    service.structure_proposal_confirm({"dataset_id": august["id"], "sheets": [{**board, "decision": "table"}]})
+    impostor = {**board, "sheet": "13·行业对标与假设"}
+    prepared, matches = apply_matching_templates(service, [impostor])
+    assert prepared[0]["decision"] == "excluded" and matches == []

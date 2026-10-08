@@ -43,6 +43,19 @@ CANONICAL_NAMES = {
     "unit": "unit",
     "organization": "organization",
     "ledger": "ledger",
+    "invoice_id": "invoice_id",
+    "due_date": "due_date",
+    "issue_date": "issue_date",
+    "effective_date": "effective_date",
+    "product": "product",
+    "quantity": "quantity",
+    "price": "price",
+    "posting_status": "posting_status",
+    "status": "status",
+    "scenario": "scenario",
+    "kind": "kind",
+    # Cash events and collections are keyed by `id` in the scenario engine.
+    "event_id": "id",
 }
 AMOUNT_COLUMN = "amount"
 DC_COLUMN = "dc_flag"
