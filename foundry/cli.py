@@ -304,12 +304,28 @@ def _purge_task(var: Path, task_id: str) -> None:
 
 
 
-def _sample_kind(task) -> str | None:
-    """A practice task's kind (practice, reference, next_month, or legacy for the 6 月 one), None for a real task."""
+def _sample_fields(task, pack_version) -> dict:
+    """A practice task's kind (practice, reference, next_month, or legacy for the 6 月 one) and whether
+    an installed example pack is newer than the one it was made from, and whether it is finished (the
+    reference is on the list for the minute it takes to build); None, False and True for a real task."""
     from foundry.sample_marker import read_marker
 
     marker = read_marker(task)
-    return None if marker is None else str(marker.get("kind") or "legacy")
+    if marker is None:
+        return {"sample": None, "sample_outdated": False, "sample_ready": True}
+    return {"sample": str(marker.get("kind") or "legacy"),
+            "sample_outdated": pack_version is not None and marker.get("version") != pack_version,
+            "sample_ready": marker.get("ready", True) is not False}
+
+
+def _pack_version():
+    from foundry.errors import FoundryError
+    from foundry.sample_task import pack_manifest
+
+    try:
+        return pack_manifest()["version"]
+    except (FoundryError, OSError, ValueError, KeyError):
+        return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -556,10 +572,11 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(run(), ensure_ascii=False))
             return 0
         if args.cmd == "task-list":
+            version = _pack_version()
             print(
                 json.dumps(
                     [
-                        {**task.meta(), "windows": len(task.windows()), "sample": _sample_kind(task)}
+                        {**task.meta(), "windows": len(task.windows()), **_sample_fields(task, version)}
                         for task in tasks.list(args.lifecycle)
                     ],
                     ensure_ascii=False,

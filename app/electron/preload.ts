@@ -55,6 +55,8 @@ const api = {
   taskPurge: (task: string) => ipcRenderer.invoke('foundry:task-purge', task),
   taskEmpty: (lifecycle: string, ids: string[]) => ipcRenderer.invoke('foundry:task-empty', lifecycle, ids),
   taskSample: () => ipcRenderer.invoke('foundry:task-sample'),
+  taskSampleReference: (rebuild?: boolean) => ipcRenderer.invoke('foundry:task-sample-reference', rebuild === true),
+  taskSampleRemove: () => ipcRenderer.invoke('foundry:task-sample-remove'),
   taskNew: (title: string, period: string) =>
     ipcRenderer.invoke('foundry:task-new', title, period),
   harnessStatus: () => ipcRenderer.invoke('harness:status'),

@@ -13,7 +13,7 @@ vi.mock('../electron/foundry.js', async (original) => ({
 }));
 
 const { runFoundry } = await import('../electron/foundry.js');
-const { changeTaskLifecycle, newTask, sampleTask } = await import('../electron/writes.js');
+const { changeTaskLifecycle, newTask, removeSamples, sampleReference, sampleTask } = await import('../electron/writes.js');
 const called = runFoundry as unknown as ReturnType<typeof vi.fn>;
 
 afterEach(() => called.mockReset());
@@ -31,7 +31,7 @@ describe('creating a task', () => {
    * cold install.
    */
   it('is a mutation the window can make, and the only one', () => {
-    expect(Object.values(WRITES)).toEqual(['task-new', 'task-archive', 'task-trash', 'task-restore', 'task-purge', 'task-empty', 'task-sample']);
+    expect(Object.values(WRITES)).toEqual(['task-new', 'task-archive', 'task-trash', 'task-restore', 'task-purge', 'task-empty', 'task-sample', 'task-sample-reference', 'task-sample-remove']);
   });
 
   it('passes the title through and leaves an empty period off the argv', async () => {
@@ -126,5 +126,28 @@ describe('the practice task', () => {
   it('refuses an answer without a task id', async () => {
     called.mockResolvedValue(JSON.stringify({ id: '../x' }));
     await expect(sampleTask({ varRoot: '/v' })).rejects.toThrow(/task id/);
+  });
+});
+
+describe('the reference task', () => {
+  it('waits out the build and passes --rebuild only when asked', async () => {
+    called.mockResolvedValue(JSON.stringify({ id: ID, created: true }));
+    expect(await sampleReference({ varRoot: '/v' }, false)).toEqual({ id: ID, created: true });
+    expect(called).toHaveBeenLastCalledWith({ varRoot: '/v' }, 'task-sample-reference', [], { timeoutMs: 330_000 });
+    await sampleReference({ varRoot: '/v' }, true);
+    expect(called).toHaveBeenLastCalledWith({ varRoot: '/v' }, 'task-sample-reference', ['--rebuild'], { timeoutMs: 330_000 });
+  });
+
+  it('refuses an answer without a task id', async () => {
+    called.mockResolvedValue(JSON.stringify({ id: 'nope' }));
+    await expect(sampleReference({ varRoot: '/v' }, false)).rejects.toThrow(/task id/);
+  });
+});
+
+describe('removing the examples', () => {
+  it('hands back only the ids the CLI printed', async () => {
+    called.mockResolvedValue(JSON.stringify({ trashed: [ID, 3] }));
+    expect(await removeSamples({ varRoot: '/v' })).toEqual({ trashed: [ID] });
+    expect(called).toHaveBeenLastCalledWith({ varRoot: '/v' }, 'task-sample-remove', [], undefined);
   });
 });

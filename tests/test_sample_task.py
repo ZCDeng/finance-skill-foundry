@@ -120,8 +120,8 @@ def test_the_cli_prints_the_task_and_marks_practice_tasks_in_the_list(tmp_path, 
     assert printed["created"] is True and len(printed["id"]) == 32
     TaskStore(tmp_path / "var").create(title="真实任务")
     assert main(["--var", var, "task-list"]) == 0
-    listed = {row["title"]: row["sample"] for row in json.loads(capsys.readouterr().out)}
-    assert listed == {KINDS["practice"]: "practice", "真实任务": None}
+    listed = {row["title"]: (row["sample"], row["sample_outdated"], row["sample_ready"]) for row in json.loads(capsys.readouterr().out)}
+    assert listed == {KINDS["practice"]: ("practice", False, True), "真实任务": (None, False, True)}
     assert main(["--var", var, "task-sample-status"]) == 0
     assert json.loads(capsys.readouterr().out)["outdated"] is False
 

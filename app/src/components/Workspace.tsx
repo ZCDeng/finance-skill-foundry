@@ -49,6 +49,8 @@ interface Props {
   onEmpty?(lifecycle: 'archived' | 'trashed', ids: string[]): Promise<number>;
   onLayout(rect: WorkspaceRect | null): void;
   conversation: ReactNode;
+  /** What an example task is, under the header; nothing for a real task. */
+  banner?: ReactNode;
   /** The guide is open in the conversation column: show the column even with no task or with results in focus. */
   guiding?: boolean;
   children: ReactNode;
@@ -67,7 +69,7 @@ const lifecycleLabels: Record<TaskLifecycleFilter, string> = {
   all: '全部',
 };
 
-export function Workspace({ active, focusConversationRequest = 0, task, tasks, lifecycleView, onLifecycleView, onPick, onNew, onMethods, onData, onHistory, onRename, onArchive, onTrash, onRestore, onPurge, onEmpty, onLayout, conversation, guiding = false, children }: Props) {
+export function Workspace({ active, focusConversationRequest = 0, task, tasks, lifecycleView, onLifecycleView, onPick, onNew, onMethods, onData, onHistory, onRename, onArchive, onTrash, onRestore, onPurge, onEmpty, onLayout, conversation, banner, guiding = false, children }: Props) {
   const [sidebar, setSidebar] = useState(() => mediaMatches('(min-width: 1360px)'));
   const [wide, setWide] = useState(() => mediaMatches('(min-width: 1360px)'));
   const [narrow, setNarrow] = useState(() => mediaMatches('(max-width: 1100px)'));
@@ -266,7 +268,7 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
         </Button> : null}
         <div className="workspace-tasklist">
           {shownTasks.map((row) => <button key={row.id} className="workspace-task" title={row.title} aria-label={row.title} aria-current={task?.id === row.id ? 'true' : undefined}
-            onClick={() => pick(row.id)}><span>{row.title}</span><small>{joinParts([row.period ? <PeriodWords value={row.period} /> : null, lifecycleLabels[row.lifecycle_status ?? 'active']])}</small></button>)}
+            onClick={() => pick(row.id)}><span>{row.title}</span><small>{joinParts([row.period ? <PeriodWords value={row.period} /> : null, row.sample ? '示例' : null, lifecycleLabels[row.lifecycle_status ?? 'active']])}</small></button>)}
           {shownTasks.length === 0 ? <p className="fnd-muted">{query ? '没有找到相关任务' : lifecycleView === 'archived' ? '没有已归档的任务' : lifecycleView === 'trashed' ? '回收站是空的' : '从一个问题开始第一项分析'}</p> : null}
         </div>
         {/* Places to go, kept apart from what can be done to the open task (the header's 这个任务 menu). */}
@@ -324,6 +326,7 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
             </DropdownMenuContent>
           </DropdownMenu> : null}
         </header>
+        {task ? banner : null}
         <div className="workspace-panes">
           <section className="workspace-conversation" aria-label={guiding ? '使用指南' : '持续对话'} hidden={!guiding && (!task || effective === 'results')}>
             <div className="workspace-native" ref={slot}>{conversation}</div>

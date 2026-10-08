@@ -20,7 +20,15 @@ export interface TaskRow {
   trashed_at?: string;
   restored_at?: string;
   windows: number;
+  /** Which example this task is (`legacy` is the 6 月 one from before the pack); null for a real task. */
+  sample?: SampleKind | null;
+  /** Made from an older example pack than the one installed. */
+  sample_outdated?: boolean;
+  /** False while the reference is still being built. */
+  sample_ready?: boolean;
 }
+
+export type SampleKind = 'practice' | 'reference' | 'next_month' | 'legacy';
 
 export type TaskLifecycleStatus = 'active' | 'archived' | 'trashed';
 export type TaskLifecycleFilter = TaskLifecycleStatus | 'all';
@@ -205,6 +213,10 @@ export interface Bridge {
   taskNew(title: string, period: string): Promise<Answer<{ id: string }>>;
   /** The synthetic practice task, created once and reused. */
   taskSample?(): Promise<Answer<{ id: string; created: boolean }>>;
+  /** The reference task: reused once built, or (`rebuild`) trashed and built again. Takes most of a minute. */
+  taskSampleReference?(rebuild?: boolean): Promise<Answer<{ id: string; created: boolean }>>;
+  /** Every practice task to the trash; real tasks are never touched. */
+  taskSampleRemove?(): Promise<Answer<{ trashed: string[] }>>;
   /** Absent when this build has no harness install to embed. */
   harnessStatus?(): Promise<Answer<HarnessStatus>>;
   harnessOpen?(

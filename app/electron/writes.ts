@@ -24,8 +24,12 @@ export const WRITES = {
   taskPurge: 'task-purge',
   /** 已归档 → every one to the trash; 回收站 → every one deleted for good. */
   taskEmpty: 'task-empty',
-  /** The synthetic practice task: its own task, its own generated workbook, never another task's data. */
+  /** The 华宸 practice task: its own task, the bundled example files, never another task's data. */
   taskSample: 'task-sample',
+  /** The same files taken through the whole route by the example; `--rebuild` makes it again. */
+  taskSampleReference: 'task-sample-reference',
+  /** Every practice task to the trash. Real tasks are never touched. */
+  taskSampleRemove: 'task-sample-remove',
 } as const;
 
 export type WriteName = keyof typeof WRITES;
@@ -63,6 +67,30 @@ export async function sampleTask(
   const value = JSON.parse(await runFoundry(binding, WRITES.taskSample, [], env)) as { id?: unknown; created?: unknown };
   if (typeof value.id !== 'string' || !/^[0-9a-f]{32}$/.test(value.id)) throw new Error('task-sample did not print a task id');
   return { id: value.id, created: value.created === true };
+}
+
+/** Building the reference runs every step of the route, which takes most of a minute. */
+const REFERENCE_TIMEOUT_MS = 330_000;
+
+/** Create or reuse the reference task, or (`rebuild`) trash it and build it again; hands back its id. */
+export async function sampleReference(
+  binding: Omit<Binding, 'task' | 'session'>,
+  rebuild: boolean,
+  env?: FoundryEnv,
+): Promise<{ id: string; created: boolean }> {
+  const value = JSON.parse(await runFoundry(binding, WRITES.taskSampleReference, rebuild ? ['--rebuild'] : [],
+    { ...env, timeoutMs: env?.timeoutMs ?? REFERENCE_TIMEOUT_MS })) as { id?: unknown; created?: unknown };
+  if (typeof value.id !== 'string' || !/^[0-9a-f]{32}$/.test(value.id)) throw new Error('task-sample-reference did not print a task id');
+  return { id: value.id, created: value.created === true };
+}
+
+/** Move every practice task to the trash and hand back the ids moved. */
+export async function removeSamples(
+  binding: Omit<Binding, 'task' | 'session'>,
+  env?: FoundryEnv,
+): Promise<{ trashed: string[] }> {
+  const value = JSON.parse(await runFoundry(binding, WRITES.taskSampleRemove, [], env)) as { trashed?: unknown };
+  return { trashed: Array.isArray(value.trashed) ? value.trashed.filter((id): id is string => typeof id === 'string') : [] };
 }
 
 export async function changeTaskLifecycle(
