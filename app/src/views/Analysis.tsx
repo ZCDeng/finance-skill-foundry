@@ -51,6 +51,8 @@ type Props = {
   draftRequest?: { count: number; taskId: string; draftId: string };
 };
 const TABS: [Tab, string][] = [['datasets', '资料'], ['results', '分析结果'], ['drafts', '文稿'], ['close', '月结'], ['methods', '方法']];
+/** Each page's own 使用指南 article, opened from the 「?」 beside 刷新. */
+const PAGE_ARTICLES: Partial<Record<Tab, string>> = { datasets: 'page-datasets', results: 'page-results', drafts: 'page-drafts', close: 'page-close' };
 const EXAMPLES = ['本月利润为什么没有达到预算？', '哪些客户需要优先跟进回款？', '回款晚两周，现金余额会怎样？'];
 
 /** All figures are rendered as received. In particular, Decimal strings never pass through Number. */
@@ -389,12 +391,14 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               chooseTab(tabs[next][0]); document.getElementById(`analysis-tab-${tabs[next][0]}`)?.focus();
             }}>{title}{id === 'close' ? null : <span>{counts[id]}</span>}</TabsTrigger>
         ))}
-      </TabsList><Button variant="outline" type="button" disabled={busy || loading} onClick={() => {
+      </TabsList><div className="analysis-tabbar-tools">
+        {PAGE_ARTICLES[tab] ? <HelpLink article={PAGE_ARTICLES[tab]!} label={`「${TABS.find(([id]) => id === tab)?.[1]}」页有什么`} /> : null}
+        <Button variant="outline" type="button" disabled={busy || loading} onClick={() => {
         // The 5-second read leaves the structure to-dos alone; an explicit 刷新 reads them again too.
         setMaterialsRefresh((count) => count + 1);
         void perform((taskId) => refresh(taskId, { scope: true }));
       }}>
-        <RefreshCw size={13} aria-hidden />刷新</Button></div></Tabs>
+        <RefreshCw size={13} aria-hidden />刷新</Button></div></div></Tabs>
       <section role="tabpanel" id={`analysis-panel-${tab}`} aria-labelledby={embedded && tab === 'methods' ? undefined : `analysis-tab-${tab}`}
         aria-label={embedded && tab === 'methods' ? '方法库' : undefined} className="analysis-content">
         {/* The first read draws the shape of the tab; a refresh over what is already shown keeps the quiet line. */}
