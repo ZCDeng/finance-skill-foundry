@@ -582,7 +582,11 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
 
 
 def normalize_background(
-    spec: dict, *, parent: dict | None = None, dataset: dict | None = None
+    spec: dict,
+    *,
+    parent: dict | None = None,
+    dataset: dict | None = None,
+    context: dict | None = None,
 ) -> dict:
     if not isinstance(spec, dict):
         raise FoundryError("finance background spec must be an object")
@@ -591,12 +595,20 @@ def normalize_background(
     if basis not in BASIS:
         raise FoundryError("background basis is unsupported")
     scope = spec.get("scope", parent.get("scope", {}))
-    if (
-        not isinstance(scope, dict)
-        or not scope.get("ledger")
-        or not scope.get("organization")
-    ):
-        raise FoundryError("background scope requires ledger and organization")
+    if not isinstance(scope, dict):
+        raise FoundryError("background scope must be an object")
+    # A note saved against a finance context takes that context's ledger and
+    # organization, blank ones included: files from one company often name neither,
+    # and the note then reaches only scopes that leave them blank too.
+    if context and not (scope.get("ledger") and scope.get("organization")):
+        scope = {**scope, **{
+            key: value for key in ("ledger", "organization")
+            if (value := _context_scope_value(context, key)) is not None and not scope.get(key)
+        }}
+    elif not scope.get("ledger") or not scope.get("organization"):
+        raise FoundryError(
+            "background scope requires ledger and organization, or a context_id whose scope supplies them"
+        )
     effective_from = _date_key(
         spec.get("effective_from", parent.get("effective_from")), "effective_from"
     )
@@ -654,9 +666,22 @@ def normalize_background(
     }
 
 
+def _context_scope_value(context: dict, key: str) -> str | None:
+    for scope in (context.get("scopes") or {}).values():
+        if isinstance(scope, dict) and key in scope:
+            return str(scope.get(key) or "")
+    return None
+
+
 def background_applies(record: dict, *, scope: dict, as_of: str | None = None) -> bool:
     candidate = record.get("scope", {})
     for key, value in candidate.items():
+        # Ledger and organization are the boundary a note may not cross: a note
+        # saved for a context that names neither stays with scopes that name neither.
+        if key in ("ledger", "organization"):
+            if (scope.get(key) or "") != (value or ""):
+                return False
+            continue
         if key == "scenario" or value in (None, ""):
             continue
         if scope.get(key) != value:
