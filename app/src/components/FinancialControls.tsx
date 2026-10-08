@@ -197,6 +197,12 @@ export function DateInput({ label, value, onChange, placeholder = 'YYYY-MM-DD', 
   };
   const selected = validDate(value) ? fromDateText(value) : undefined;
   const shownMonth = validDate(draft) ? fromDateText(draft) : selected;
+  const pick = (date: Date) => {
+    const next = toDateText(date);
+    setDraft(next);
+    onChange(next);
+    setOpen(false);
+  };
   return <FieldShell label={label} htmlFor={id} help={help ?? '支持未来日期，预算和资金预测会用到。'} error={error}>
     <Popover open={open} onOpenChange={setOpen}>
       <div className="fnd-date-picker">
@@ -217,26 +223,12 @@ export function DateInput({ label, value, onChange, placeholder = 'YYYY-MM-DD', 
       </div>
       {/* The calendar moves focus to the chosen (or today's) day itself; arrows, PageUp/PageDown and Enter are its own. */}
       <PopoverContent className="fnd-date-picker__popover" aria-label={`${label}日期选择`} {...pickerFocus} onOpenAutoFocus={(event) => event.preventDefault()}>
-        <Calendar mode="single" required selected={selected} defaultMonth={shownMonth} autoFocus onSelect={(date: Date) => {
-          const next = toDateText(date);
-          setDraft(next);
-          onChange(next);
-          setOpen(false);
-        }} />
+        <Calendar mode="single" required selected={selected} defaultMonth={shownMonth} autoFocus onSelect={pick} />
+        <div className="fnd-calendar__footer">
+          <Button type="button" variant="ghost" size="sm" onClick={() => pick(new Date())}>今天</Button>
+        </div>
       </PopoverContent>
     </Popover>
-  </FieldShell>;
-}
-
-export function DateRangeInput({ label, start, end, onChange, help, disabled }: {
-  label: string; start: string; end: string; onChange(value: { start: string; end: string }): void; help?: string; disabled?: boolean;
-}) {
-  const error = start && end && validDate(start) && validDate(end) && start > end ? '开始日期不能晚于结束日期。' : '';
-  return <FieldShell label={label} help={help ?? '日期范围按 YYYY-MM-DD 保存。'} error={error}>
-    <div className="fnd-range-field">
-      <DateInput label={`${label}开始`} ariaLabel={`${label}开始`} value={start} disabled={disabled} onChange={(next) => onChange({ start: next, end })} help=" " />
-      <DateInput label={`${label}结束`} ariaLabel={`${label}结束`} value={end} disabled={disabled} onChange={(next) => onChange({ start, end: next })} help=" " />
-    </div>
   </FieldShell>;
 }
 

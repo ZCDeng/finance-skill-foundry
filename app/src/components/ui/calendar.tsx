@@ -1,34 +1,50 @@
-import type { ComponentProps } from 'react';
-import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
-import { DayPicker, getDefaultClassNames } from 'react-day-picker';
+import { useEffect, useRef, type ComponentProps } from 'react';
+import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
+import { DayPicker, getDefaultClassNames, type DayButtonProps } from 'react-day-picker';
 import { zhCN } from 'react-day-picker/locale';
 
 import { cn } from '@/lib/utils.js';
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
+/** How far the year dropdown reaches either side of today, unless the caller sets its own months. */
+const YEARS_AROUND = 10;
+
 /*
  * shadcn's Calendar on react-day-picker, set for Chinese finance use: weeks
- * start on Monday, the caption reads "2026 年 8 月" and weekdays are one
+ * start on Monday, the caption is a year and a month dropdown ("2026 年",
+ * "8 月") so an ageing date a year back is two picks, and weekdays are one
  * character. Days are styled in financial-controls.css (.fnd-calendar*).
  */
-function Calendar({ className, classNames, formatters, labels, ...props }: ComponentProps<typeof DayPicker>) {
+function Calendar({ className, classNames, formatters, labels, components, captionLayout = 'dropdown', startMonth, endMonth, ...props }: ComponentProps<typeof DayPicker>) {
   const defaults = getDefaultClassNames();
+  // The default reach also stretches to the shown and selected dates, so a stored date years back is still on the dropdown.
+  const shown = [props.month, props.defaultMonth, 'selected' in props ? props.selected : undefined].filter((d): d is Date => d instanceof Date).map((d) => d.getFullYear());
+  const thisYear = new Date().getFullYear();
+  const firstYear = Math.min(thisYear - YEARS_AROUND, ...shown);
+  const lastYear = Math.max(thisYear + YEARS_AROUND, ...shown);
   return (
     <DayPicker
       data-slot="calendar"
       locale={zhCN}
       weekStartsOn={1}
       showOutsideDays={false}
+      captionLayout={captionLayout}
+      startMonth={startMonth ?? new Date(firstYear, 0, 1)}
+      endMonth={endMonth ?? new Date(lastYear, 11, 1)}
       className={cn('fnd-calendar', className)}
       formatters={{
         formatCaption: (date) => `${date.getFullYear()} 年 ${date.getMonth() + 1} 月`,
+        formatYearDropdown: (date) => `${date.getFullYear()} 年`,
+        formatMonthDropdown: (date) => `${date.getMonth() + 1} 月`,
         formatWeekdayName: (date) => WEEKDAYS[date.getDay()],
         ...formatters,
       }}
       labels={{
         labelPrevious: () => '上一月',
         labelNext: () => '下一月',
+        labelYearDropdown: () => '选择年份',
+        labelMonthDropdown: () => '选择月份',
         labelDayButton: (date, modifiers) => `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日${modifiers.today ? '，今天' : ''}${modifiers.selected ? '，已选' : ''}`,
         labelGrid: (date) => `${date.getFullYear()} 年 ${date.getMonth() + 1} 月`,
         ...labels,
@@ -42,6 +58,9 @@ function Calendar({ className, classNames, formatters, labels, ...props }: Compo
         button_next: 'fnd-calendar__nav-button',
         month_caption: 'fnd-calendar__caption',
         caption_label: 'fnd-calendar__caption-label',
+        dropdowns: 'fnd-calendar__dropdowns',
+        dropdown_root: 'fnd-calendar__dropdown-root',
+        dropdown: 'fnd-calendar__dropdown',
         month_grid: 'fnd-calendar__grid',
         weekdays: 'fnd-calendar__weekdays',
         weekday: 'fnd-calendar__weekday',
@@ -58,11 +77,37 @@ function Calendar({ className, classNames, formatters, labels, ...props }: Compo
       components={{
         Chevron: ({ orientation, className: chevronClass }) => orientation === 'left'
           ? <ChevronLeftIcon className={chevronClass} size={16} aria-hidden />
-          : <ChevronRightIcon className={chevronClass} size={16} aria-hidden />,
+          : orientation === 'right'
+            ? <ChevronRightIcon className={chevronClass} size={16} aria-hidden />
+            : <ChevronDownIcon className={cn('fnd-calendar__dropdown-icon', chevronClass)} size={14} aria-hidden />,
+        DayButton: CalendarDayButton,
+        ...components,
       }}
       {...props}
     />
   );
 }
 
-export { Calendar };
+/*
+ * shadcn's CalendarDayButton: the day carries its state as data attributes the
+ * stylesheet reads (selected, today), and takes focus itself when the grid moves
+ * the keyboard focus onto it.
+ */
+function CalendarDayButton({ className, day, modifiers, ...props }: DayButtonProps) {
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (modifiers.focused) ref.current?.focus();
+  }, [modifiers.focused]);
+  return (
+    <button
+      ref={ref}
+      data-slot="calendar-day"
+      data-selected={modifiers.selected ? 'true' : undefined}
+      data-today={modifiers.today ? 'true' : undefined}
+      className={cn('fnd-calendar__day-button', className)}
+      {...props}
+    />
+  );
+}
+
+export { Calendar, CalendarDayButton };

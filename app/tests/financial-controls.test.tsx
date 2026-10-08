@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { useState } from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AccountingPeriodInput, DateInput, DateRangeInput, DecimalInput, MultiSelect, PeriodRangeInput, SearchableSelect } from '../src/components/FinancialControls.js';
+import { AccountingPeriodInput, DateInput, DecimalInput, MultiSelect, PeriodRangeInput, SearchableSelect } from '../src/components/FinancialControls.js';
 import { contextOptions } from '../src/views/analysis/shared.js';
 import type { FinanceContextState } from '../src/bridge.js';
 
@@ -112,22 +112,43 @@ describe('financial web controls', () => {
     const dialog = screen.getByRole('dialog', { name: '账龄日期日期选择' });
     // shadcn Calendar: focus lands on the chosen day; weeks start on Monday.
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: /2026年8月31日/ })));
-    expect(dialog.textContent).toContain('2026 年 8 月');
+    // The caption is a year and a month dropdown, so a date a year back is two picks.
+    expect((within(dialog).getByRole('combobox', { name: '选择年份' }) as HTMLSelectElement).value).toBe('2026');
+    expect((within(dialog).getByRole('combobox', { name: '选择月份' }) as HTMLSelectElement).value).toBe('7');
     expect(Array.from(dialog.querySelectorAll('th')).map((cell) => cell.textContent)).toEqual(['一', '二', '三', '四', '五', '六', '日']);
     fireEvent.click(screen.getByRole('button', { name: /2026年8月15日/ }));
     expect(onDate).toHaveBeenLastCalledWith('2026-08-15');
   });
 
-  it('validates true ranges without using them for cash cutoff semantics', () => {
-    const onDates = vi.fn();
-    const onPeriods = vi.fn();
-    render(<><DateRangeInput label="凭证日期范围" start="2026-09-10" end="2026-09-01" onChange={onDates} />
-      <PeriodRangeInput label="适用期间范围" start="2026-10" end="2026-09" onChange={onPeriods} /></>);
+  it('jumps a year from the caption dropdown and takes today in one press', async () => {
+    const onDate = vi.fn();
+    render(<DateInput label="账龄日期" value="2026-08-31" onChange={onDate} />);
+    fireEvent.click(screen.getByRole('button', { name: '账龄日期打开日期选择' }));
+    const dialog = screen.getByRole('dialog', { name: '账龄日期日期选择' });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: '选择年份' }), { target: { value: '2025' } });
+    fireEvent.click(await within(dialog).findByRole('button', { name: /2025年8月15日/ }));
+    expect(onDate).toHaveBeenLastCalledWith('2025-08-15');
 
-    expect(screen.getByText('开始日期不能晚于结束日期。')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '账龄日期打开日期选择' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: '账龄日期日期选择' })).getByRole('button', { name: '今天' }));
+    const today = new Date();
+    const pad = (value: number) => String(value).padStart(2, '0');
+    expect(onDate).toHaveBeenLastCalledWith(`${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`);
+  });
+
+  it('opens on a stored date older than the default ten-year reach', () => {
+    render(<DateInput label="历史日期" value="1998-03-12" onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '历史日期打开日期选择' }));
+    const dialog = screen.getByRole('dialog', { name: '历史日期日期选择' });
+    expect((within(dialog).getByRole('combobox', { name: '选择年份' }) as HTMLSelectElement).value).toBe('1998');
+    expect(within(dialog).getByRole('button', { name: /1998年3月12日.*已选/ })).toBeTruthy();
+  });
+
+  it('validates true ranges without using them for cash cutoff semantics', () => {
+    const onPeriods = vi.fn();
+    render(<PeriodRangeInput label="适用期间范围" start="2026-10" end="2026-09" onChange={onPeriods} />);
+
     expect(screen.getByText('开始期间不能晚于结束期间。')).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('凭证日期范围结束'), { target: { value: '2026-09-30' } });
-    expect(onDates).toHaveBeenLastCalledWith({ start: '2026-09-10', end: '2026-09-30' });
     fireEvent.click(screen.getByRole('button', { name: '适用期间范围开始设为上期' }));
     expect(onPeriods).toHaveBeenLastCalledWith({ start: '2026-09', end: '2026-09' });
   });

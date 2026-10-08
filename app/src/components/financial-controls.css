@@ -395,8 +395,7 @@
 .fnd-calendar__nav-button:hover,
 .fnd-month-grid button:hover,
 .fnd-calendar__day-button:hover,
-.fnd-month-grid button[aria-pressed='true'],
-.fnd-calendar__day--selected .fnd-calendar__day-button {
+.fnd-month-grid button[aria-pressed='true'] {
   border-color: var(--fnd-line-hover);
   background: var(--fnd-selection-surface);
 }
@@ -466,14 +465,89 @@
   text-align: center;
 }
 
+/* shadcn's CalendarDayButton: a 32px cell; the chosen day is solid, today a thin edge. */
 .fnd-calendar__day-button {
   width: 100%;
-  min-height: 30px;
+  min-height: 32px;
+  font-variant-numeric: tabular-nums;
 }
 
-.fnd-calendar__day--today .fnd-calendar__day-button {
+.fnd-calendar__day-button[data-today='true'] {
+  border-color: var(--fnd-line-hover);
   color: var(--fnd-accent-text);
   font-weight: var(--fnd-weight-strong);
+}
+
+.fnd-calendar__day-button[data-selected='true'],
+.fnd-calendar__day-button[data-selected='true']:hover {
+  border-color: var(--fnd-accent);
+  background: var(--fnd-accent);
+  color: var(--fnd-on-accent);
+}
+
+/*
+ * The caption as two dropdowns, as shadcn draws them: a native select laid
+ * transparent over its own label, so the platform menu opens and the label
+ * keeps the field's look.
+ */
+.fnd-calendar__dropdowns {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+}
+
+.fnd-calendar__dropdown-root {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-menu-item);
+  transition: border-color var(--fnd-transition), background var(--fnd-transition);
+}
+
+.fnd-calendar__dropdown-root:hover {
+  border-color: var(--fnd-line-hover);
+  background: var(--fnd-selection-surface);
+}
+
+.fnd-calendar__dropdown-root:has(.fnd-calendar__dropdown:focus-visible) {
+  outline: 1px solid var(--fnd-focus);
+  outline-offset: -1px;
+}
+
+.fnd-calendar__dropdown {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.fnd-calendar__dropdown-root .fnd-calendar__caption-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  padding: 0 6px 0 8px;
+  color: var(--fnd-ink);
+  font-weight: var(--fnd-weight-strong);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.fnd-calendar__dropdown-icon {
+  color: var(--fnd-muted);
+}
+
+.fnd-calendar__footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--fnd-line);
 }
 
 .fnd-calendar__day--disabled .fnd-calendar__day-button {
