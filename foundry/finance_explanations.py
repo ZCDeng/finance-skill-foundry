@@ -600,10 +600,14 @@ def normalize_background(
     # A note saved against a finance context takes that context's ledger and
     # organization, blank ones included: files from one company often name neither,
     # and the note then reaches only scopes that leave them blank too.
-    if context and not (scope.get("ledger") and scope.get("organization")):
+    # A revision inherits what its parent was saved with, blank ledger included.
+    if context or parent:
         scope = {**scope, **{
-            key: value for key in ("ledger", "organization")
-            if (value := _context_scope_value(context, key)) is not None and not scope.get(key)
+            key: scope.get(key)
+            or (_context_scope_value(context, key) if context else "")
+            or (parent.get("scope") or {}).get(key)
+            or ""
+            for key in ("ledger", "organization")
         }}
     elif not scope.get("ledger") or not scope.get("organization"):
         raise FoundryError(
@@ -666,21 +670,24 @@ def normalize_background(
     }
 
 
-def _context_scope_value(context: dict, key: str) -> str | None:
+def _context_scope_value(context: dict, key: str) -> str:
+    """The context's value for ``key`` from its primary (first) scope, blank when it names none."""
     for scope in (context.get("scopes") or {}).values():
-        if isinstance(scope, dict) and key in scope:
+        if isinstance(scope, dict):
             return str(scope.get(key) or "")
-    return None
+    return ""
 
 
 def background_applies(record: dict, *, scope: dict, as_of: str | None = None) -> bool:
     candidate = record.get("scope", {})
+    # Ledger and organization are the boundary a note may not cross, checked whether or not
+    # the record carries the keys: a note for a context that names neither stays with scopes
+    # that name neither.
+    for key in ("ledger", "organization"):
+        if (scope.get(key) or "") != (candidate.get(key) or ""):
+            return False
     for key, value in candidate.items():
-        # Ledger and organization are the boundary a note may not cross: a note
-        # saved for a context that names neither stays with scopes that name neither.
         if key in ("ledger", "organization"):
-            if (scope.get(key) or "") != (value or ""):
-                return False
             continue
         if key == "scenario" or value in (None, ""):
             continue

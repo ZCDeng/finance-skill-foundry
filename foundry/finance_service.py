@@ -445,8 +445,11 @@ class FinanceStore:
         for alias, dataset_id in context["bindings"].items():
             dataset = self.analysis.read_dataset(dataset_id)
             if _is_workbook_shell(dataset):
+                # A warning, not an error: beside a table the engine reads, the workbook is only
+                # kept for recipes and must not mark that run incomplete. run_revision fails the
+                # run when nothing at all was read.
                 combined["diagnostics"].append({
-                    "severity": "error",
+                    "severity": "warning",
                     "code": "workbook_structure_unconfirmed",
                     "message": WORKBOOK_SHELL_MESSAGE.format(alias=alias),
                     "alias": alias,

@@ -2733,3 +2733,57 @@ def test_background_takes_ledger_from_its_context_when_the_scope_leaves_it_out(s
         "scope": {"period": "2026-09"},
     })
     assert (saved["scope"]["ledger"], saved["scope"]["organization"]) == ("L1", "O1")
+
+
+def test_a_context_without_ledger_keys_cannot_reach_a_named_ledger(tmp_path):
+    """Review of the first fix: a scope with no ledger/organization keys at all (not blank
+    strings) left the note with no boundary, and it reached the named-ledger context."""
+    task = TaskStore(tmp_path / "var").create(title="缺键")
+    analysis = AnalysisStore(task)
+    path = tmp_path / "actual.json"
+    path.write_text(json.dumps([{"account_code": "6001", "management_account": "revenue", "amount": 100}]))
+    dataset = analysis.add_dataset(path, name="actual")["id"]
+    store = FinanceStore(task)
+    keyless = store.save_context({"bindings": {"a": dataset},
+                                  "scopes": {"a": {"period": "2026-08", "currency": "CNY", "unit": "元"}}})
+    named = store.save_context({"bindings": {"a": dataset},
+                                "scopes": {"a": {"ledger": "L1", "organization": "O1", "period": "2026-08",
+                                                 "currency": "CNY", "unit": "元"}}})
+    note = store.finance_background_save({"context_id": keyless["id"], "basis": "user_assumption",
+                                          "text": "币种人民币", "effective_from": "2026-08"})
+    assert (note["scope"]["ledger"], note["scope"]["organization"]) == ("", "")
+    listed = lambda c: [r["id"] for r in store.finance_background_list({"context_id": c["id"]})["business_contexts"]]
+    assert listed(keyless) == [note["id"]]
+    assert listed(named) == []
+
+    # A stored record without the keys at all is held to the same boundary.
+    from foundry.finance_explanations import background_applies
+    bare = {"scope": {"currency": "CNY"}, "effective_from": "2026-08"}
+    assert not background_applies(bare, scope={"ledger": "L1", "organization": "O1", "currency": "CNY"}, as_of="2026-08")
+
+    # A revision by parent_id alone keeps the parent's blank scope.
+    revised = store.finance_background_save({"parent_id": note["id"], "text": "币种人民币，不做汇率折算"})
+    assert (revised["scope"]["ledger"], revised["scope"]["organization"]) == ("", "")
+
+
+def test_a_workbook_kept_beside_a_readable_table_does_not_mark_the_run_incomplete(tmp_path):
+    from openpyxl import Workbook
+
+    task = TaskStore(tmp_path / "var").create(title="混合")
+    analysis = AnalysisStore(task)
+    path = tmp_path / "gl.json"
+    path.write_text(json.dumps([{"account_code": "6001", "management_account": "revenue", "amount": 100},
+                                {"account_code": "6401", "management_account": "cost", "amount": 60},
+                                {"account_code": "6601", "management_account": "expense", "amount": 10}]))
+    gl = analysis.add_dataset(path, name="gl")["id"]
+    book = Workbook()
+    book.active["A1"] = "预算"
+    book_path = tmp_path / "budget.xlsx"
+    book.save(book_path)
+    shell = analysis.add_dataset(book_path, name="budget")["id"]
+    store = FinanceStore(task)
+    scope = {"ledger": "L1", "organization": "O1", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "actual"}
+    context = store.save_context({"bindings": {"gl": gl, "book": shell}, "scopes": {"gl": scope}})
+    run = store.run_metric({"context_id": context["id"], "metric": {"kind": "management_pnl"}})
+    assert run["execution_status"] == "succeeded" and run["result"]["rows"]
+    assert run["completeness"] == "not_reconciled"
