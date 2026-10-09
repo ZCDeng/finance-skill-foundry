@@ -91,8 +91,11 @@ def overview(store) -> dict:
     pack = _pack_version()
     rows = []
     for task in store.list("active"):
-        row = _task_row(task, pack)
+        # A task whose windows or sample marker cannot be read is one error row, not a failed 总览:
+        # the row falls back to the metadata `store.list` already read.
+        row = {**task.meta(), "windows": 0}
         try:
+            row = _task_row(task, pack)
             rows.append({"task": row, **_task_overview(task, row)})
         except FoundryError as exc:
             rows.append({"task": row, "error": str(exc), "todo": []})

@@ -64,6 +64,16 @@ def test_one_unreadable_task_does_not_hide_the_others(tmp_path, capsys, monkeypa
     assert rows[fine.id]["headline"]["state"] == "not_ready"
 
 
+
+def test_a_task_with_unreadable_windows_is_one_error_row(tmp_path, capsys):
+    store = TaskStore(tmp_path / "var")
+    broken = store.create(title="坏的", period="2026-08")
+    fine = store.create(title="好的", period="2026-07")
+    broken.windows_path.write_text("{not json\n", encoding="utf-8")
+    rows = {row["task"]["id"]: row for row in _overview(store.var_root, capsys)["tasks"]}
+    assert rows[broken.id]["error"].startswith("读取失败") and rows[broken.id]["task"]["title"] == "坏的"
+    assert rows[fine.id]["headline"]["state"] == "not_ready"
+
 def _detail(root: Path, kind: str, name: str, lines: list[str]) -> Path:
     path = root / f"{name}.csv"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
