@@ -48,6 +48,9 @@ MAX_DETAIL_FILES = 32
 MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024
 SNIFF_BYTES = 1024 * 1024
 SAMPLE_LINES = 10
+# Which calculation a run used. Raise it whenever _compute would give a different figure from the same rows
+# and 口径. A constant, not a hash of this file: the packaged app carries only bytecode, so the source is not there.
+COLLECTION_ENGINE_VERSION = 1
 
 # The standard columns of each kind of detail, with the names billing systems export them under.
 # The first name is the one the guide and the templates use.
@@ -461,7 +464,7 @@ class BillingDetailStore:
                               "mapping": meta["confirmation"]["mapping"],
                               "files": [{"name": entry["name"], "sha256": entry["sha256"]} for entry in meta["files"]]}
                        for kind, meta in metas.items()},
-            "code_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            "engine_version": COLLECTION_ENGINE_VERSION,
             "result": result,
         }
         runs = self.root / "runs"
