@@ -22,6 +22,7 @@ import {
   isWorkbook,
 } from './bridge.js';
 import { Deliverables, type OpenDeliverable } from './views/Deliverables.js';
+import { TASK_CHANGED_EVENT } from './views/guide/QuickStartChecklist.js';
 import { Overview, type OverviewTarget } from './views/Overview.js';
 import { PreviewBar } from './views/Preview.js';
 import { TaskDetail } from './views/TaskDetail.js';
@@ -280,6 +281,13 @@ export function App() {
   }, [api]);
   const taskKey = tasks.map((row) => `${row.id}:${row.lifecycle_status ?? 'active'}`).join(',');
   useEffect(() => { refreshOverview(); }, [refreshOverview, screen === 'overview', taskKey]);
+  // A confirmation in the workspace (scope, structure, a control) changes the to-do count on the 总览 tab.
+  useEffect(() => {
+    let timer = 0;
+    const changed = () => { window.clearTimeout(timer); timer = window.setTimeout(refreshOverview, 500); };
+    window.addEventListener(TASK_CHANGED_EVENT, changed);
+    return () => { window.removeEventListener(TASK_CHANGED_EVENT, changed); window.clearTimeout(timer); };
+  }, [refreshOverview]);
 
   /** Ignore stale reads after a task switch, including failures from the prior task. */
   const refreshDetail = useCallback((id: string | null) => {
@@ -1011,6 +1019,7 @@ export function App() {
       }}
       onGuide={inWorkspace || screen === 'overview' ? () => { setScreen('analysis'); openGuideAt(''); } : undefined}
       todoCount={overview?.todo_count ?? 0}
+      overview={Boolean(api?.overview)}
       covered={preview !== null && (screen === 'deliverables' || screen === 'tasks' || locatorPreview)}
       strip={
         screen === 'formulator' ? (
@@ -1120,7 +1129,7 @@ export function App() {
       ) : null}
       {screen === 'overview' ? (
         <Overview data={overview} loading={overviewLoading} error={overviewError}
-          tasks={tasks.filter((row) => (row.lifecycle_status ?? 'active') === 'active')}
+          fresh={firstRun}
           recent={gallery.slice(0, 5)}
           onRefresh={() => { refreshOverview(); refreshGallery(); }}
           onOpen={openFromOverview}

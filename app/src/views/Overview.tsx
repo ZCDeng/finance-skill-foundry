@@ -55,8 +55,8 @@ export interface OverviewProps {
   data: OverviewData | null;
   loading: boolean;
   error: string;
-  /** Active tasks, for the 用上月套表起草本月 picker. */
-  tasks: TaskRow[];
+  /** No task anywhere, archived and trashed ones included: the start block is then the whole page. */
+  fresh: boolean;
   /** The newest 成果库 rows, newest first. */
   recent: GalleryRow[];
   onRefresh(): void;
@@ -77,9 +77,11 @@ export interface OverviewProps {
  * adds figures across tasks: two tasks' periods, organisations and 口径 differ, and a total of
  * them would be a number no workbook holds.
  */
-export function Overview({ data, loading, error, tasks, recent, onRefresh, onOpen, onOpenClose, onNewQuestion, onSample, onChecklist, onGuide, onLibrary }: OverviewProps) {
+export function Overview({ data, loading, error, fresh, recent, onRefresh, onOpen, onOpenClose, onNewQuestion, onSample, onChecklist, onGuide, onLibrary }: OverviewProps) {
   const rows = data?.tasks ?? [];
-  const empty = data !== null && rows.length === 0;
+  // No active task is not the same as none at all: everything may be archived. Only the second is a first run.
+  const empty = data !== null && rows.length === 0 && fresh;
+  const idle = data !== null && rows.length === 0 && !fresh;
   return (
     <div className="fnd-overview">
       <div className="fnd-overview__head">
@@ -92,7 +94,7 @@ export function Overview({ data, loading, error, tasks, recent, onRefresh, onOpe
         </Button>
       </div>
       {error ? <p role="alert" className="analysis-message analysis-message--error">{error}</p> : null}
-      <Start empty={empty} tasks={tasks} onOpen={onOpen} onNewQuestion={onNewQuestion} onSample={onSample} onChecklist={onChecklist} onGuide={onGuide} />
+      <Start empty={empty} idle={idle} tasks={rows.map((row) => row.task)} onOpen={onOpen} onNewQuestion={onNewQuestion} onSample={onSample} onChecklist={onChecklist} onGuide={onGuide} />
       {data === null && loading ? <Loading label="正在读取各任务的月结状态…"><SkeletonRows rows={4} /></Loading> : null}
       {rows.length ? <div className="fnd-overview__grid">
         <Todos rows={rows} onOpen={onOpen} />
@@ -112,16 +114,17 @@ function Section({ title, note, id, children, className }: { title: string; note
 }
 
 /** The four ways in. With no task at all this is the whole first screen. */
-function Start({ empty, tasks, onOpen, onNewQuestion, onSample, onChecklist, onGuide }: {
-  empty: boolean; tasks: TaskRow[]; onOpen(task: TaskRow, target: OverviewTarget): void; onNewQuestion(): void;
+function Start({ empty, idle, tasks, onOpen, onNewQuestion, onSample, onChecklist, onGuide }: {
+  empty: boolean; idle: boolean; tasks: TaskRow[]; onOpen(task: TaskRow, target: OverviewTarget): void; onNewQuestion(): void;
   onSample?(): void; onChecklist(): void; onGuide(): void;
 }) {
   const id = useId();
   // Newest period first: last month's task is nearly always the one to roll forward from.
-  const sources = [...tasks].filter((task) => (task.lifecycle_status ?? 'active') === 'active')
+  const sources = [...tasks]
     .sort((a, b) => (b.period ?? '').localeCompare(a.period ?? '') || b.created_at.localeCompare(a.created_at));
   return <Section id={`${id}-start`} title={empty ? '从这里开始' : '开始'} className={empty ? 'fnd-overview__start--first' : 'fnd-overview__start'}
-    note={empty ? '还没有任务。可以先用示例练一遍，也可以直接带上自己的资料提问。' : undefined}>
+    note={empty ? '还没有任务。可以先用示例练一遍，也可以直接带上自己的资料提问。'
+      : idle ? '没有进行中的任务。已归档和回收站里的任务在工作区左边的任务列表里。' : undefined}>
     <div className="fnd-overview__actions">
       <Button type="button" variant={empty ? 'default' : 'outline'} onClick={onNewQuestion}>
         <MessageSquarePlus size={15} strokeWidth={1.5} aria-hidden />问一个新问题

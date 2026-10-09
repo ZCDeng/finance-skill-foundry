@@ -31,7 +31,7 @@ const data: OverviewData = {
   ],
 };
 const noop = () => undefined;
-const props = { data, loading: false, error: '', tasks: [august, july], recent: [], onRefresh: noop, onOpen: vi.fn(), onOpenClose: vi.fn(),
+const props = { data, loading: false, error: '', fresh: false, recent: [], onRefresh: noop, onOpen: vi.fn(), onOpenClose: vi.fn(),
   onNewQuestion: vi.fn(), onChecklist: vi.fn(), onGuide: vi.fn(), onLibrary: vi.fn() };
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); delete (globalThis as unknown as { foundry?: Bridge }).foundry; });
@@ -65,7 +65,7 @@ describe('总览', () => {
   });
 
   it('with no task at all, the ways in are the page', () => {
-    render(<Overview {...props} data={{ schema_version: 1, tasks: [], todo_count: 0 }} tasks={[]} onSample={vi.fn()} />);
+    render(<Overview {...props} data={{ schema_version: 1, tasks: [], todo_count: 0 }} fresh onSample={vi.fn()} />);
     expect(screen.getByRole('heading', { name: '从这里开始' })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: /等你处理/ })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '第一次使用' }));
@@ -75,6 +75,12 @@ describe('总览', () => {
   it('says nothing holds the close when nothing does', () => {
     render(<Overview {...props} data={{ ...data, todo_count: 0, tasks: data.tasks.map((row) => ({ ...row, todo: [] })) }} />);
     expect(screen.getByText('没有挡住月结的事项。')).toBeTruthy();
+  });
+
+  it('with every task archived, says so instead of greeting a first run', () => {
+    render(<Overview {...props} data={{ schema_version: 1, tasks: [], todo_count: 0 }} />);
+    expect(screen.queryByRole('heading', { name: '从这里开始' })).toBeNull();
+    expect(screen.getByText(/没有进行中的任务/)).toBeTruthy();
   });
 });
 
@@ -111,5 +117,21 @@ describe('总览 in the app', () => {
     fireEvent.click(screen.getByRole('button', { name: '成果库' }));
     fireEvent.click(screen.getByRole('button', { name: /^总览/ }));
     await waitFor(() => expect(api.overview.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  it('reads 总览 again when a task changes in the workspace, so the tab count follows', async () => {
+    const api = mount();
+    await screen.findByRole('heading', { name: '等你处理（3）' });
+    fireEvent.click(screen.getByRole('button', { name: '工作区' }));
+    const before = api.overview.mock.calls.length;
+    window.dispatchEvent(new Event('fnd:task-changed'));
+    await waitFor(() => expect(api.overview.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  it('leaves the 总览 tab out of a build that cannot read it', async () => {
+    const { Shell } = await import('../src/components/Shell.js');
+    render(<Shell screen="analysis" onScreen={() => {}} overview={false}><p>x</p></Shell>);
+    expect(screen.queryByRole('button', { name: /^总览/ })).toBeNull();
+    expect(screen.getByRole('button', { name: '工作区' })).toBeTruthy();
   });
 });

@@ -13,11 +13,13 @@ export interface ShellProps {
   covered?: boolean;
   /** What waits on the manager across every task, shown on the 总览 tab; nothing at 0. */
   todoCount?: number;
+  /** False in a build whose bridge cannot read 总览: the tab is left out rather than opening an empty page. */
+  overview?: boolean;
   children: ReactNode;
 }
 export const APP_NAME = 'FA Foundry';
 
-export function Shell({ screen, onScreen, strip, onGuide, covered, todoCount = 0, children }: ShellProps) {
+export function Shell({ screen, onScreen, strip, onGuide, covered, todoCount = 0, overview = true, children }: ShellProps) {
   const workspace = screen === 'analysis' || screen === 'workbench';
   const embedded = covered === true || workspace || screen === 'formulator';
   return (
@@ -28,8 +30,8 @@ export function Shell({ screen, onScreen, strip, onGuide, covered, todoCount = 0
           <span className="fnd-head__mark">{APP_NAME}</span>
         </span>
         <nav className="fnd-head__nav" aria-label="主导航">
-          <button type="button" className="fnd-head__tab" aria-current={screen === 'overview' ? 'page' : undefined}
-            onClick={() => onScreen('overview')}>总览{todoCount > 0 ? <><span className="fnd-head__count" aria-hidden>{todoCount}</span><span className="sr-only">，{todoCount} 项等你处理</span></> : null}</button>
+          {overview ? <button type="button" className="fnd-head__tab" aria-current={screen === 'overview' ? 'page' : undefined}
+            onClick={() => onScreen('overview')}>总览{todoCount > 0 ? <><span className="fnd-head__count" aria-hidden>{todoCount}</span><span className="sr-only">，{todoCount} 项等你处理</span></> : null}</button> : null}
           <button type="button" className="fnd-head__tab" aria-current={workspace ? 'page' : undefined}
             onClick={() => onScreen('analysis')}>工作区</button>
           <button type="button" className="fnd-head__tab" aria-current={screen === 'deliverables' ? 'page' : undefined}
