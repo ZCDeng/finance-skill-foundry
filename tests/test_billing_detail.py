@@ -261,3 +261,25 @@ def test_the_cli_proposes_and_confirms_the_caliber(pack, tmp_path, capsys):
     assert json.loads(capsys.readouterr().out)["effective"]["year_start_month"] == 7
     assert main(["--var", root, "--task", task.id, "collection-caliber"]) == 0
     assert json.loads(capsys.readouterr().out)["confirmed"]["note"] == "服务年度 7 月起"
+
+
+def test_a_bill_mixing_kept_and_left_out_fee_items_keeps_its_kept_part(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="收费明细")
+    manager = BillingDetailStore(task, actor="manager")
+    # One 账单号 per shop per month, with the property fee and the rent collected for the landlord on it.
+    receivable = _write(tmp_path / "应收.csv", [RECEIVABLE_HEADER, "B1,S1,商办物业服务费,2026-08,100,0,100,正常",
+                                                "B1,S1,商业租金代收,2026-08,300,0,300,正常"], "utf-8")
+    receipts = _write(tmp_path / "实收.csv", [RECEIPT_HEADER, "R1,2026-08-10,B1,200,银行,当期"], "utf-8")
+    ids = {"receivable": manager.add("receivable", [receivable], name="应收")["id"],
+           "receipt": manager.add("receipt", [receipts], name="实收")["id"]}
+    for detail in ids.values():
+        manager.confirm(detail)
+    result = manager.collection_run({**ids, "as_of": "2026-08-31", "excluded_fee_items": ["商业租金代收"]})["result"]
+    # The fee is a quarter of the bill, so a quarter of the 200 paid counts against it.
+    assert (result["figures"]["receivable"], result["figures"]["collected"]) == ("100.00", "50.00")
+    assert result["figures"]["advance_balance"] == "0.00"
+    mixed = next(issue for issue in result["quality"] if issue["code"] == "mixed_fee_bills")
+    assert (mixed["rows"], mixed["lines"]) == (2, ["应收.csv 第 2 行", "应收.csv 第 3 行"])
+    whole = manager.collection_run({**ids, "as_of": "2026-08-31"})["result"]
+    assert (whole["figures"]["receivable"], whole["figures"]["collected"]) == ("400.00", "200.00")
+    assert not any(issue["code"] == "mixed_fee_bills" for issue in whole["quality"])

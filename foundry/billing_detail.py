@@ -565,16 +565,20 @@ def _prepare(connection, metas: dict, params: dict) -> None:
             coalesce(contains({status}, '作废'), false) AS void, coalesce(contains({status}, '冲红'), false) AS red
         FROM receivable.raw AS r""")
     # One bill per 应收单号: a red-letter line nets with its original; a void bill counts for nothing. A 收费项目
-    # the 口径 leaves out (商业租金代收 is not a property fee) is set aside with the receipts against it.
+    # the 口径 leaves out (商业租金代收 is not a property fee) is set aside line by line, with the receipts against
+    # it. A bill that mixes kept and left-out lines keeps its kept lines, and its receipts count pro rata.
     excluded = ", ".join("'" + item.replace("'", "''") + "'" for item in params["excluded_fee_items"]) or "NULL"
     connection.execute(f"""
-        CREATE TEMP TABLE all_bills AS SELECT bill_id, any_value(property_id) AS property_id, any_value(fee_item) AS fee_item,
+        CREATE TEMP TABLE all_bills AS SELECT bill_id, any_value(property_id) AS property_id,
+            coalesce(any_value(fee_item) FILTER (WHERE NOT left_out), any_value(fee_item)) AS fee_item,
             any_value(project) AS project, any_value(customer_type) AS customer_type, min(period) AS period,
-            sum(gross) AS gross, sum(waiver) AS waiver, sum(net) AS net,
-            coalesce(any_value(fee_item) IN ({excluded}), false) AS excluded
-        FROM bill_lines WHERE NOT void AND bill_id IS NOT NULL AND period IS NOT NULL AND net IS NOT NULL
+            sum(gross) FILTER (WHERE NOT left_out) AS gross, sum(waiver) FILTER (WHERE NOT left_out) AS waiver,
+            coalesce(sum(net) FILTER (WHERE NOT left_out), 0) AS net, sum(net) AS net_all,
+            bool_and(left_out) AS excluded, bool_or(left_out) AND NOT bool_and(left_out) AS mixed
+        FROM (SELECT *, coalesce(fee_item IN ({excluded}), false) AS left_out FROM bill_lines)
+        WHERE NOT void AND bill_id IS NOT NULL AND period IS NOT NULL AND net IS NOT NULL
         GROUP BY bill_id""")
-    connection.execute("CREATE TEMP TABLE bills AS SELECT * EXCLUDE (excluded) FROM all_bills WHERE NOT excluded")
+    connection.execute("CREATE TEMP TABLE bills AS SELECT * EXCLUDE (excluded, mixed, net_all) FROM all_bills WHERE NOT excluded")
     rc = metas["receipt"]
     col = lambda field: _column(rc, field, "p")  # noqa: E731
     connection.execute(f"""
@@ -602,7 +606,9 @@ def _prepare(connection, metas: dict, params: dict) -> None:
                            "NULL::VARCHAR AS nature, NULL::VARCHAR AS type, NULL::VARCHAR AS owner, false AS related WHERE false")
     # Every receipt against its bill, placed by the bill's 账期 relative to the statistics year.
     connection.execute("""
-        CREATE TEMP TABLE placed AS SELECT x.*, b.period, b.property_id, b.fee_item, b.project, b.customer_type,
+        CREATE TEMP TABLE placed AS SELECT x.* REPLACE (CASE WHEN b.mixed AND b.net_all <> 0
+                THEN CAST(round(x.amount * b.net / b.net_all, 2) AS DECIMAL(20,2)) ELSE x.amount END AS amount),
+            b.period, b.property_id, b.fee_item, b.project, b.customer_type,
             CASE WHEN b.bill_id IS NULL THEN 'unmatched'
                  WHEN b.period < getvariable('year_start') THEN 'arrears'
                  WHEN b.period > getvariable('as_of_month') THEN 'advance'
@@ -751,6 +757,8 @@ def _compute(connection, metas: dict, params: dict) -> dict:
                "0", "bill_lines"),
         _issue(connection, metas, "receipt", "unreadable_receipts", "date IS NULL OR amount IS NULL", "0", "receipts"),
         _issue(connection, metas, "receipt", "receipts_without_bill", "place = 'unmatched'", "amount", "placed"),
+        _issue(connection, metas, "receivable", "mixed_fee_bills",
+               "NOT void AND bill_id IN (SELECT bill_id FROM all_bills WHERE mixed)", "net", "bill_lines"),
         _issue(connection, metas, "receivable", "bills_without_property",
                "NOT void AND property_id NOT IN (SELECT property_id FROM properties WHERE property_id IS NOT NULL)", "net", "bill_lines")
         if has_property else None,
