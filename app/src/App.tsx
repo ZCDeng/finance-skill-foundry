@@ -966,7 +966,13 @@ export function App() {
    */
   const openFromOverview = (task: TaskRow, target: OverviewTarget | 'close') => {
     const section = target === 'controls' || target === 'close' ? 'close' : target === 'results' || target === 'drafts' ? target : 'materials';
-    setTaskLifecycleView('active');
+    const view = task.lifecycle_status ?? 'active';
+    setTaskLifecycleView(view);
+    if (view !== 'active') {
+      // 成果库 also lists archived tasks: open one in the list it lives in, as 文稿 does.
+      setTasks((rows) => rows.some((row) => row.id === task.id) ? rows : [...rows, task]);
+      refreshTasks(view);
+    }
     setSections((held) => ({ ...held, [task.id]: section }));
     pickAnalysisTask(task.id);
     const find = (): Element | null => target === 'controls' ? document.getElementById('month-close-controls')
@@ -1159,6 +1165,16 @@ export function App() {
           onExport={exportFromGallery}
           busy={exporting}
           onBack={() => setOpened(null)}
+          onDetail={api.libraryDetail ? async (task, draftId) => {
+            const answer = await api.libraryDetail!(task.id, draftId);
+            if (!answer.ok) throw new Error(answer.message);
+            return answer.value;
+          } : undefined}
+          onFile={api.libraryFile ? (task, file, action) => {
+            void api.libraryFile!(task.id, file, action).then((answer) => take(answer, () => undefined));
+          } : undefined}
+          onOpenTask={(task, target) => openFromOverview(task, target)}
+          onSample={api.taskSample ? () => { setScreen('analysis'); void openSampleTask().catch((failure: unknown) => setProblem(failure instanceof Error ? failure.message : String(failure))); } : undefined}
         />
       ) : null}
     </Shell>
