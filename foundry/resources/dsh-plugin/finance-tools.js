@@ -110,7 +110,7 @@ const specTool = (command, description, properties, required = []) => ({
   description,
   parameters: { type: "object", required: ["spec"], additionalProperties: false,
     properties: { spec: { type: "object", required, properties, additionalProperties: true } } },
-  kind: ["drilldown-fact", "open-source-locator", "finance-controls-propose", "finance-controls-list", "workbook-inspect", "workbook-read", "prepare-explanation", "validate-explanation", "finance-background-list", "analysis-requirements-list", "finance-adjustment-list", "report-template-list", "structure-proposal-list", "structure-template-list"].includes(command) ? "read" : ["run-metric", "explain-variance", "finance-scenario-run", "finance-controls-run"].includes(command) ? "execute" : "edit",
+  kind: ["drilldown-fact", "open-source-locator", "finance-controls-propose", "finance-controls-list", "workbook-inspect", "workbook-read", "prepare-explanation", "validate-explanation", "finance-background-list", "analysis-requirements-list", "finance-adjustment-list", "report-template-list", "structure-proposal-list", "structure-template-list"].includes(command) ? "read" : ["run-metric", "explain-variance", "finance-scenario-run", "finance-controls-run", "collection-run"].includes(command) ? "execute" : "edit",
   argv: ({ spec }) => [command, "--spec", JSON.stringify(spec)],
 });
 const contextId = text("list_finance_context 或 finance_context_save 返回的当前任务口径版本 id");
@@ -355,6 +355,37 @@ export const FINANCE_TOOLS = {
     finding_type: { type: "string", enum: ["formula_control", "source_conflict", "unsupported_assumption", "not_updated", "basis_difference"] },
     note: text("一句理由，最多 500 字"),
   }, ["control_id", "finding_type"]),
+  detail_list: {
+    description: "列出本任务已导入的收费明细表（应收明细、实收明细、房产主数据）：行数、来源文件、各列名、系统按列名提的映射、经理确认的映射和还缺哪几列。收费明细在界面「资料」里由经理导入，助手不导入文件。只读。",
+    parameters: { type: "object", required: [], properties: {}, additionalProperties: false }, kind: "read", argv: () => ["detail-list"],
+  },
+  detail_propose: {
+    description: "为一张收费明细表提议每个标准字段对应哪一列（mapping：标准字段 → 原列名），供经理确认。应收明细字段 bill_id、property_id、fee_item、period、amount_gross、waiver、amount_net、due_date、status、project、customer_type；实收明细 receipt_id、date、bill_id、amount、property_id、method、nature；房产主数据 property_id、project、city、nature、type、owner、area、state。只是提议：经理在界面确认之前，这张表不能算收缴率。",
+    parameters: { type: "object", required: ["detail_id", "mapping"], additionalProperties: false, properties: {
+      detail_id: text("detail_list 返回的明细表 id"),
+      mapping: { type: "object", additionalProperties: { type: "string" }, description: "标准字段 → 明细表里的原列名" },
+    } },
+    kind: "edit", argv: (input) => ["detail-propose", "--detail", input.detail_id, "--mapping", JSON.stringify(input.mapping)],
+  },
+  collection_caliber: {
+    description: "读取本任务的收缴率口径：行业通行默认值（defaults）、经理确认的口径（confirmed）、等经理确认的提议（proposed）和计算实际采用的口径（effective）。只读。",
+    parameters: { type: "object", required: [], properties: {}, additionalProperties: false }, kind: "read", argv: () => ["collection-caliber"],
+  },
+  collection_caliber_propose: specTool("collection-caliber-propose", "按客户说法提议收缴率口径，经理在界面确认后才生效；没写的键沿用当前口径。params 可含：total_method（bounded 默认：(当期已收+本年清欠)÷(本年应收+年初往年欠费)，不超过 100%；all_receipts：本年全部实收÷本年应收，含清欠和预收，可能超过 100%）、year_start_month（年度起始月份，物业服务年度 7 月起填 7）、related_owners（算关联方的产权归属，默认 [\"地产\"]）、exclude_related（主口径是否剔除关联方）、excluded_fee_items（不算物业费、不进收缴率的收费项目，如 [\"商业租金代收\"]）。note 写一句客户原话或理由。不要自己确认，也不要说口径已生效。", {
+    params: { type: "object", description: "要改的口径键" },
+    note: boundedText(500, "客户原话或提议理由"),
+  }, ["params"]),
+  collection_run: specTool("collection-run", "用经理确认过列的收费明细计算收缴率：当期收缴率、当月收缴率、清欠率、综合收缴率、预收余额、减免率、户数收缴率，按账期归属而不是按收款日期。receivable、receipt 必填明细表 id，property 可选（按业态、产权分组和关联方需要它）。as_of 统计日 YYYY-MM-DD。默认用经理确认的口径；spec 里另写口径键就是试算，结果 caliber.status 为 trial，向经理说明是试算、不是确认口径。group_by 最多两项：fee_item、project、customer_type、city、nature、type、owner。reported 填套表报数（小数）可算相差多少个百分点。结果的 quality 和 labels 列出作废单、冲红行、找不到应收单的收款、找不到房产的应收、重复房产编号、款项性质和账期对不上的收款，每条带文件和行号。", {
+    receivable: text("应收明细表 id"), receipt: text("实收明细表 id"), property: text("房产主数据表 id，可选"),
+    as_of: text("统计日 YYYY-MM-DD"),
+    group_by: { type: "array", items: { type: "string", enum: ["fee_item", "project", "customer_type", "city", "nature", "type", "owner"] }, maxItems: 2 },
+    reported: { type: "object", properties: { collection_rate_current: text("套表报的本年收缴率，小数"), collection_rate_total: text("套表报的综合收缴率，小数") }, additionalProperties: false },
+  }, ["receivable", "receipt", "as_of"]),
+  collection_run_read: {
+    description: "按 id 重新读出一次收缴率计算的完整记录：参数、口径状态、输入明细的哈希和映射、结果。只读。",
+    parameters: { type: "object", required: ["run_id"], additionalProperties: false, properties: { run_id: text("collection_run 返回的 id") } },
+    kind: "read", argv: (input) => ["collection-run-read", "--run", input.run_id],
+  },
   structure_proposal_list: specTool("structure-proposal-list", "读取已加载工作簿的表结构提议：每张表判为可作数据表或排除、表头行、列角色、借贷列配对与方向、要排除的分节小计行、需向下填充的列、标题里读到的期间单位币种。blocked_reason 非空的表不能确认，unreadable_columns 表示它确实是张表但一列都没识别出来——复述给经理，不要放进确认清单。看板之类的展示页默认排除（presentation_sheet）；带 adoptable=true 的说明上面读到了表，经理同意采用时把它的 decision 改为 table 再提交。只读。不传 dataset_id 时列出本任务所有待确认文件。", {
     dataset_id: text("analysis-state 里的工作簿资料 id"),
   }),

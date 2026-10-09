@@ -158,6 +158,46 @@ def remove_samples(var: Path) -> dict:
     return {"trashed": moved}
 
 
+def add_billing(task, *, confirm: bool = False) -> dict:
+    """The 海口城市公司 收费明细 (billing_sample) filed into a practice task as three detail tables.
+
+    The export is written fresh into a temporary folder and read exactly as a manager's own export is;
+    in the practice task the columns are left for the manager to confirm. ``confirm`` is the reference
+    task's: it confirms them as the example does every other step. Filing twice files nothing new."""
+    import tempfile
+
+    from foundry import billing_sample
+    from foundry.billing_detail import BillingDetailStore
+
+    store = BillingDetailStore(task, actor="manager")
+    names = {kind: f"{billing_sample.CITY} {label}" for kind, label in billing_sample.NAMES.items()}
+    with exclusive(task.root / "sample-billing.lock", timeout=300):
+        present = {row["name"]: row for row in store.list()}
+        filed = {kind: present[name] for kind, name in names.items() if name in present}
+        if len(filed) < len(names):
+            with tempfile.TemporaryDirectory(prefix="huachen-billing-") as folder:
+                billing_sample.write(Path(folder))
+                for kind, name in names.items():
+                    if kind not in filed:
+                        paths = [Path(folder) / file_name for file_name in billing_sample.FILES[kind]]
+                        filed[kind] = store.add(kind, paths, name=name)
+        if confirm:
+            for kind, row in filed.items():
+                if not row.get("confirmation"):
+                    filed[kind] = store.confirm(row["id"])
+    return {kind: {"id": row["id"], "name": row["name"], "rows": row["row_count"], "confirmed": bool(row.get("confirmation"))}
+            for kind, row in filed.items()}
+
+
+def add_billing_to(var: Path, task_id: str) -> dict:
+    """``add_billing`` for the app's button: practice tasks only, never a real one."""
+    task = TaskStore(Path(var)).get(task_id)
+    marker = read_marker(task)
+    if marker is None or marker.get("kind") not in ("practice", "next_month"):
+        raise FoundryError("the example 收费明细 goes into a practice task only")
+    return {"task_id": task.id, "details": add_billing(task)}
+
+
 def export_pack(destination: Path) -> dict:
     """Copy the example files into a new folder of the manager's choosing, to open in Excel or import by hand.
 
@@ -170,4 +210,11 @@ def export_pack(destination: Path) -> dict:
     names = [*manifest["practice"], *manifest["next_month"], manifest["report"], manifest["notes"]]
     for name in names:
         shutil.copy2(pack_dir() / name, destination / name)
+    # The 收费明细 is written by its generator rather than copied: tens of megabytes the app need not carry.
+    from foundry import billing_sample
+
+    book = billing_sample.build()
+    billing_sample.write(destination, book)
+    names += [name for files in billing_sample.FILES.values() for name in files]
+    names.append(billing_sample.write_sample_workbook(destination / billing_sample.SAMPLE_WORKBOOK, book)["name"])
     return {"folder": str(destination), "files": names}

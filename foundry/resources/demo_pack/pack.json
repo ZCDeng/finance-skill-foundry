@@ -1,7 +1,7 @@
 {
   "pack": "huachen",
-  "version": 1,
-  "date": "2026-10-08",
+  "version": 2,
+  "date": "2026-10-09",
   "company": "华宸物业（虚构）",
   "period": "2026-08",
   "generator": "tests/fixtures/demo_pack/build_demo.py",
@@ -16,5 +16,10 @@
     "华宸物业_2026年09月_月结财务套表_GL-AP-AR-CF.xlsx"
   ],
   "report": "华宸物业_2026年08月_经理汇报稿.docx",
-  "notes": "演示说明.md"
+  "notes": "演示说明.md",
+  "billing": {
+    "generator": "foundry/billing_sample.py",
+    "city": "海口城市公司",
+    "as_of": "2026-08-31"
+  }
 }

@@ -435,6 +435,7 @@ def main(argv: list[str] | None = None) -> int:
     p_sample_reference.add_argument("--rebuild", action="store_true", help="move the current reference task to the trash and build it again")
     sub.add_parser("task-sample-status", help="list the practice tasks and whether a newer example pack is installed")
     sub.add_parser("task-sample-remove", help="move every practice task on the active list into the trash")
+    sub.add_parser("task-sample-billing", help="file the 海口城市公司 收费明细 into the practice task named by --task")
     p_sample_export = sub.add_parser("task-sample-export", help="copy the example files into a new or empty folder")
     p_sample_export.add_argument("--dest", required=True)
     p_templates_export = sub.add_parser("templates-export", help="copy the 补充数据模板 into a new or empty folder")
@@ -561,7 +562,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(task.id)
             return 0
-        if args.cmd in {"task-sample", "task-sample-next", "task-sample-reference", "task-sample-status", "task-sample-remove", "task-sample-export"}:
+        if args.cmd in {"task-sample", "task-sample-next", "task-sample-reference", "task-sample-status", "task-sample-remove", "task-sample-export", "task-sample-billing"}:
             from foundry import sample_task
 
             run = {
@@ -571,6 +572,7 @@ def main(argv: list[str] | None = None) -> int:
                 "task-sample-status": lambda: sample_task.sample_status(Path(args.var)),
                 "task-sample-remove": lambda: sample_task.remove_samples(Path(args.var)),
                 "task-sample-export": lambda: sample_task.export_pack(Path(args.dest)),
+                "task-sample-billing": lambda: sample_task.add_billing_to(Path(args.var), args.task),
             }[args.cmd]
             print(json.dumps(run(), ensure_ascii=False))
             return 0
