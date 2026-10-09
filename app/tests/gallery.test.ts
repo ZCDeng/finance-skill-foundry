@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 /**
  * The gallery's ordering, over the module's own comparator.
  *
- * Extracted rather than exercised through `deliverableGallery`, which spawns the
+ * Extracted rather than exercised through `galleryRows`, which spawns the
  * CLI: what is worth pinning here is the tie rule, and a tie needs no store.
  */
 function newestFirst<T extends { at: string; seq: number }>(rows: T[]): T[] {
@@ -40,7 +40,8 @@ describe('the deliverable gallery', () => {
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     const source = readFileSync(fileURLToPath(new URL('../electron/reads.ts', import.meta.url)), 'utf8');
-    expect(source).toContain('return b.row.seq - a.row.seq;');
-    expect(source).toContain("if (a.row.at !== b.row.at) return a.row.at < b.row.at ? 1 : -1;");
+    expect(source).toContain("if (a.at !== b.at) return a.at < b.at ? 1 : -1;");
+    expect(source).toContain("if (row.type === 'deliverable') return row.row.seq;");
+    expect(source).toContain('const later = ordinal(b) - ordinal(a);');
   });
 });

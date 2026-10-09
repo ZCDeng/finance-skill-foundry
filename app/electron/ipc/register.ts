@@ -12,10 +12,13 @@ import {
   analysisExportPath,
   deliverablePath,
   galleryRows,
+  libraryDetail,
   listTasks,
+  overviewRows,
   readDeliverable,
   showTask,
   sourceLocatorPreviewFile,
+  workbookOutputPath,
 } from '../reads.js';
 import { LocatorError, ScratchFences, locatorArgs, locatorHighlight, pathFreePayload, previewFence, taskRoot } from '../source-locator.js';
 import type { UniverPreviewHost } from '../univer.js';
@@ -153,6 +156,37 @@ export function registerIpc(
   );
 
   ipcMain.handle(CHANNELS.gallery, () => answer(() => galleryRows(binding)));
+
+  ipcMain.handle(CHANNELS.overview, () => answer(() => overviewRows(binding)));
+
+  ipcMain.handle(CHANNELS.libraryDetail, (_event, task: unknown, draft: unknown) =>
+    answer(() => libraryDetail({ ...binding, task: taskId(task) }, String(draft ?? ''))),
+  );
+
+  /**
+   * A file 成果库 lists, handed to the default program or shown in Finder.
+   * `file` is a filed export (digest and format) or a 写回 Excel copy (its id);
+   * either way the CLI names the path only after checking the bytes.
+   */
+  ipcMain.handle(CHANNELS.libraryFile, (_event, task: unknown, file: unknown, action: unknown) =>
+    answer(async () => {
+      const bound = { ...binding, task: taskId(task) };
+      const spec = (file ?? {}) as { kind?: unknown; sha?: unknown; format?: unknown; id?: unknown };
+      const found = spec.kind === 'export'
+        ? await analysisExportPath(bound, String(spec.sha ?? ''), String(spec.format ?? ''))
+        : spec.kind === 'workbook'
+          ? await workbookOutputPath(bound, String(spec.id ?? ''))
+          : (() => { throw new FoundryFailure(`not a library file: ${String(spec.kind)}`, null); })();
+      if (action === 'reveal') {
+        shell.showItemInFolder(found);
+        return { shown: found };
+      }
+      if (action !== 'open') throw new FoundryFailure(`not a library file action: ${String(action)}`, null);
+      const trouble = await shell.openPath(found);
+      if (trouble) throw new Error(`打不开 ${found}: ${trouble}`);
+      return { opened: found };
+    }),
+  );
 
   ipcMain.handle(CHANNELS.deliverableText, (_event, task: unknown, sha: unknown) =>
     answer(() => readDeliverable({ ...binding, task: taskId(task) }, String(sha ?? ''))),

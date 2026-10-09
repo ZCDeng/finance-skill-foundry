@@ -101,6 +101,7 @@ function groupByTask(rows: GalleryRow[]): TaskGroup[] {
       group.lines.push({ kind: 'old', key: entry.key, at: entry.at, row: entry.row });
       continue;
     }
+    if (entry.type !== 'draft' && entry.type !== 'export') continue;
     const source = entry.type === 'draft' ? entry.draft : entry.exported;
     const id = `${entry.task.id}:${source.draft_id}`;
     let line = revisions.get(id);
