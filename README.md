@@ -2,9 +2,9 @@
 
 把月结数字变成经营判断。FA Foundry 让 AI 直接读你们自己的月结套表，按财务的方法把利润偏离、现金、回款和全年预计算清楚，写成管理层能用的分析，每个数字都能点回 Excel 原单元格。分析由 AI 动手，口径、差异处置和结论由财务经理拍板。
 
-**[产品介绍网页](https://fa-foundry.pages.dev)** · **当前版本 0.10.1** · [下载（GitHub Release，已签名公证的 macOS 应用）](https://github.com/ZCDeng/finance-skill-foundry/releases/latest) · 仅支持 macOS Apple Silicon
+**[产品介绍网页](https://fa-foundry.pages.dev)** · **当前版本 0.10.2** · [下载（GitHub Release，已签名公证的 macOS 应用）](https://github.com/ZCDeng/finance-skill-foundry/releases/latest) · 仅支持 macOS Apple Silicon
 
-0.10.1 只修复 0.10.0 安装版里收缴率计算报错的问题，功能与 0.10.0 相同。
+0.10.2 是修复加固版，功能与 0.10.0 相同：安装包发布前在干净环境里核对能独立运行（不依赖本机 Python 或 Homebrew，不连外网、不自动下载扩展，只含 Apple Silicon 程序）；月结锁定时导入的 CSV 先按 UTF-8 读、读不通再按 GBK，用友、金蝶或中文 Excel 导出的 CSV 不再报错。0.10.1 修复了 0.10.0 安装版收缴率计算报错的问题。
 
 [代码审查](docs/reviews/2026-09-05-codex-review.md) · [产品与架构方案](docs/plans/2026-09-05-finance-analysis-workbench-plan.md) · [验收设计](docs/plans/2026-09-05-finance-analysis-workbench-test-spec.md) · [实施与验证记录](docs/plans/2026-09-05-execution-log.md)
 
