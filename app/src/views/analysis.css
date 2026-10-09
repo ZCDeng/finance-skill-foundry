@@ -497,4 +497,25 @@
 .analysis-health-cell--loss { background: var(--fnd-warning-fill); }
 .analysis-health-cell--edge { background: var(--fnd-level-watch-fill); }
 .analysis-health-cell--current { outline: 2px solid var(--fnd-selected); outline-offset: -2px; }
+/* 收费明细与收缴率 (BillingPanel): the tables, the 口径 card, the run form and the rates. */
+.analysis-billing { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.analysis-billing-tables { display: flex; flex-direction: column; gap: 8px; }
+.analysis-billing-table__summary { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.analysis-billing-table__name { font-weight: var(--fnd-weight-strong); overflow-wrap: anywhere; }
+.analysis-billing-caliber, .analysis-billing-run, .analysis-billing-result { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 16px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-surface); }
+.analysis-billing-caliber__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.analysis-billing-caliber__head h4, .analysis-billing-run h4 { margin: 0; }
+.analysis-billing-caliber__head select { margin-left: auto; width: auto; max-width: 100%; }
+.analysis-billing-caliber__lines { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.analysis-billing-proposal { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-left: 2px solid var(--fnd-selected); background: var(--fnd-bg); }
+.analysis-billing-proposal p { margin: 0; }
+.analysis-billing-check { display: inline-flex; align-items: center; gap: 8px; align-self: end; min-height: 36px; }
+.analysis-billing-facts { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0; }
+.analysis-billing-facts > div { display: flex; gap: 8px; align-items: baseline; }
+.analysis-billing-facts dt { color: var(--fnd-muted); font-size: var(--fnd-size-small); }
+.analysis-billing-facts dd { margin: 0; font-variant-numeric: tabular-nums; }
+.analysis-billing-reported { margin: 0; }
+.analysis-billing-groups td { text-align: right; }
+.analysis-billing-issues h5 { margin: 0 0 4px; font-size: var(--fnd-size-body); }
+.analysis-billing-issues ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
 }

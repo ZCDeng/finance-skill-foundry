@@ -59,6 +59,9 @@ const api = {
   taskSampleNext: () => ipcRenderer.invoke('foundry:task-sample-next'),
   taskSampleRemove: () => ipcRenderer.invoke('foundry:task-sample-remove'),
   templatesExport: () => ipcRenderer.invoke('foundry:templates-export'),
+  taskSampleBilling: (task: string) => ipcRenderer.invoke('foundry:task-sample-billing', task),
+  billingAdd: (task: string, kind: string) => ipcRenderer.invoke('billing:add', task, kind),
+  billingCall: (task: string, command: string, spec?: unknown) => ipcRenderer.invoke('billing:call', task, command, spec),
   taskNew: (title: string, period: string) =>
     ipcRenderer.invoke('foundry:task-new', title, period),
   harnessStatus: () => ipcRenderer.invoke('harness:status'),

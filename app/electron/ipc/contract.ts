@@ -74,6 +74,12 @@ export const CHANNELS = {
   taskSampleRemove: 'foundry:task-sample-remove',
   /** Copies the 补充数据模板 into a folder the manager picks; touches no task. */
   templatesExport: 'foundry:templates-export',
+  /** 收费明细: the example's three tables into a practice task, confirmed as the example's own. */
+  taskSampleBilling: 'foundry:task-sample-billing',
+  /** 收费明细: CSV files the manager picks, as one detail table. */
+  billingAdd: 'billing:add',
+  /** 收费明细: the reads, the manager's confirmations and the collection run, by a fixed list of commands. */
+  billingCall: 'billing:call',
   harnessStatus: 'harness:status',
   harnessOpen: 'harness:open',
   harnessLayout: 'harness:layout',
@@ -127,7 +133,7 @@ export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS];
  */
 export const WAIT_KINDS = [
   'finance.save', 'finance.pnl', 'finance.bridge', 'finance.scenario',
-  'analysis.run', 'materials.import', 'source.refresh',
+  'analysis.run', 'materials.import', 'source.refresh', 'billing.import', 'billing.run',
 ] as const;
 export type WaitKind = (typeof WAIT_KINDS)[number];
 export type WaitOutcome = 'ok' | 'error' | 'cancelled';

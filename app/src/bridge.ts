@@ -30,6 +30,65 @@ export interface TaskRow {
 
 export type SampleKind = 'practice' | 'reference' | 'next_month' | 'legacy';
 
+/** 收费明细 (foundry/billing_detail.py): a 应收明细, 实收明细 or 房产主数据 table, in DuckDB. */
+export type BillingKind = 'receivable' | 'receipt' | 'property';
+export type BillingCommand = 'detail-list' | 'detail-confirm' | 'collection-caliber' | 'collection-caliber-confirm'
+  | 'collection-run' | 'collection-run-read' | 'collection-run-list';
+export interface BillingMapping { mapping: Record<string, string>; by: string; at: string }
+export interface BillingDetail {
+  id: string; kind: BillingKind; name: string; created_at: string; added_by?: string;
+  files: { name: string; rows?: number; encoding: string; bytes: number }[];
+  columns: string[]; row_count: number;
+  proposal: BillingMapping | null; confirmation: BillingMapping | null;
+  /** The standard fields, with the name the guide uses. */
+  fields: { field: string; label: string; required: boolean }[];
+  /** Requirements the chosen columns do not meet yet, by label (应收净额/应收原额). */
+  missing: string[];
+}
+export interface CollectionCaliberParams {
+  year_start_month: number; total_method: 'bounded' | 'all_receipts';
+  related_owners: string[]; exclude_related: boolean; excluded_fee_items: string[];
+}
+export interface CollectionCaliberVersion {
+  version: number; params: CollectionCaliberParams; note: string;
+  status: 'proposed' | 'confirmed' | 'superseded'; by: string; at: string; confirmed_at?: string;
+}
+export interface CollectionCaliber {
+  defaults: CollectionCaliberParams; confirmed: CollectionCaliberVersion | null; proposed: CollectionCaliberVersion | null;
+  effective: CollectionCaliberParams; versions: CollectionCaliberVersion[];
+}
+/** Rates are decimals as text (0.8212), amounts are yuan as text; null where the base is zero. */
+export interface CollectionFigures {
+  receivable: string; collected: string; collection_rate_current: string | null;
+  month_receivable: string; month_collected: string; collection_rate_month: string | null;
+  arrears_opening: string; arrears_collected: string; arrears_recovery_rate: string | null;
+  collection_rate_total: string | null; outstanding: string; advance_balance: string;
+  waiver: string; waiver_rate: string | null; households: number; households_settled: number; household_rate: string | null;
+  properties_billed: number;
+  reported?: Record<string, { reported: string; computed: string | null; difference_points: string | null }>;
+}
+export interface CollectionIssue { code: string; rows: number; amount: string; lines: string[] }
+export interface CollectionRunCaliber { version: number | null; status: 'confirmed' | 'default' | 'trial'; differs: string[] }
+export interface CollectionRun {
+  id: string; created_at: string; run_by?: string;
+  params: CollectionCaliberParams & { as_of: string; group_by: string[]; reported: Record<string, string> };
+  caliber: CollectionRunCaliber;
+  inputs: Partial<Record<BillingKind, { id: string; name: string }>>;
+  result: {
+    window: { year_start: string; as_of: string; as_of_period: string };
+    figures: CollectionFigures;
+    related?: { owners: string[]; only: CollectionFigures; excluded: CollectionFigures };
+    groups?: { key: Record<string, string | null>; figures: CollectionFigures }[];
+    quality: CollectionIssue[];
+    labels?: CollectionIssue[];
+  };
+}
+export interface CollectionRunSummary {
+  id: string; created_at: string; run_by?: string; as_of: string; group_by: string[]; caliber: CollectionRunCaliber;
+  inputs: Partial<Record<BillingKind, string>>;
+  figures: Pick<CollectionFigures, 'collection_rate_current' | 'arrears_recovery_rate' | 'collection_rate_total'>;
+}
+
 export type TaskLifecycleStatus = 'active' | 'archived' | 'trashed';
 export type TaskLifecycleFilter = TaskLifecycleStatus | 'all';
 
@@ -221,6 +280,11 @@ export interface Bridge {
   taskSampleRemove?(): Promise<Answer<{ trashed: string[] }>>;
   /** The 补充数据模板 into a new folder inside one the manager picks, then that folder opened. */
   templatesExport?(): Promise<Answer<{ folder: string } | { cancelled: true }>>;
+  /** 收费明细: the example's three detail tables into a practice task; columns left for the manager to confirm. */
+  taskSampleBilling?(task: string): Promise<Answer<{ task_id: string; details: Partial<Record<BillingKind, { id: string; name: string; rows: number; confirmed: boolean }>> }>>;
+  /** 收费明细: CSV files the manager picks (several only when they are one table split up), as one detail table. */
+  billingAdd?(task: string, kind: BillingKind): Promise<Answer<BillingDetail | { cancelled: true }>>;
+  billingCall?(task: string, command: BillingCommand, spec?: Record<string, unknown>): Promise<Answer<unknown>>;
   /** Absent when this build has no harness install to embed. */
   harnessStatus?(): Promise<Answer<HarnessStatus>>;
   harnessOpen?(

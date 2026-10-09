@@ -284,7 +284,10 @@ class BillingDetailStore:
 
     def get(self, detail_id: Any) -> dict:
         meta = json.loads((self._folder(detail_id) / "meta.json").read_text(encoding="utf-8"))
-        return {**meta, "missing": self._missing(meta["kind"], self._mapping(meta))}
+        # The standard fields with the name the guide uses, so a window can offer them without its own copy.
+        fields = [{"field": field, "label": aliases[0], "required": any(field in options for options in REQUIRED[meta["kind"]])}
+                  for field, aliases in FIELDS[meta["kind"]].items()]
+        return {**meta, "fields": fields, "missing": self._missing(meta["kind"], self._mapping(meta))}
 
     def list(self) -> list[dict]:
         if not self.root.is_dir():
@@ -466,6 +469,22 @@ class BillingDetailStore:
             runs.mkdir(parents=True, exist_ok=True)
             write_json_atomic(runs / f"{run['id']}.json", run)
         return run
+
+    def runs(self) -> list[dict]:
+        """Every collection run of this task, oldest first, as the lines a list shows."""
+        folder = self.root / "runs"
+        if not folder.is_dir():
+            return []
+        rows = []
+        for path in folder.glob("*.json"):
+            run = json.loads(path.read_text(encoding="utf-8"))
+            figures = run["result"]["figures"]
+            rows.append({"id": run["id"], "created_at": run["created_at"], "run_by": run.get("run_by"),
+                         "as_of": run["params"]["as_of"], "group_by": run["params"]["group_by"], "caliber": run["caliber"],
+                         "inputs": {kind: entry["name"] for kind, entry in run["inputs"].items()},
+                         "figures": {key: figures.get(key) for key in
+                                     ("collection_rate_current", "arrears_recovery_rate", "collection_rate_total")}})
+        return sorted(rows, key=lambda row: (row["created_at"], row["id"]))
 
 
 # --- the calculation --------------------------------------------------------------------------
@@ -776,7 +795,7 @@ def _compute(connection, metas: dict, params: dict) -> dict:
 # --- the CLI ----------------------------------------------------------------------------------
 
 COMMANDS = {"detail-add", "detail-list", "detail-read", "detail-propose", "detail-confirm", "collection-run", "collection-run-read",
-            "collection-caliber", "collection-caliber-propose", "collection-caliber-confirm"}
+            "collection-run-list", "collection-caliber", "collection-caliber-propose", "collection-caliber-confirm"}
 
 
 def add_parsers(sub) -> None:
@@ -795,6 +814,7 @@ def add_parsers(sub) -> None:
     p.add_argument("--spec", required=True)
     p = sub.add_parser("collection-run-read")
     p.add_argument("--run", required=True)
+    sub.add_parser("collection-run-list", help="this task's collection runs, oldest first, with their headline rates")
     sub.add_parser("collection-caliber", help="the confirmed 收缴率口径, the defaults and any proposal waiting")
     p = sub.add_parser("collection-caliber-propose", help="propose a 收缴率口径 for the manager to confirm")
     p.add_argument("--spec", required=True, help='JSON: {"params": {...}, "note": "why"}')
@@ -826,6 +846,8 @@ def dispatch(args) -> bool:
         result = store.confirm(args.detail, None if args.mapping is None else _object(args.mapping, "mapping"))
     elif args.cmd == "collection-run":
         result = store.collection_run(_object(args.spec, "collection spec"))
+    elif args.cmd == "collection-run-list":
+        result = store.runs()
     elif args.cmd == "collection-caliber":
         result = store.caliber()
     elif args.cmd == "collection-caliber-propose":

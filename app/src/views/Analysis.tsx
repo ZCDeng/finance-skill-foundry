@@ -20,6 +20,7 @@ import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs.js';
 import { DatasetPreview } from './analysis/DatasetPreview.js';
 import { MaterialsFileList, materialsAnchor } from './analysis/MaterialsFileList.js';
 import { SourceRefreshPanel } from './analysis/SourceRefreshPanel.js';
+import { BillingPanel } from './analysis/BillingPanel.js';
 import { WorkbookPanel } from './analysis/WorkbookPanel.js';
 import { RollforwardPanel } from './analysis/RollforwardPanel.js';
 import { FinanceWorkbench, type FinanceOutcome, type ScopeRequest } from './analysis/FinanceWorkbench.js';
@@ -421,6 +422,9 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           {bridge()?.financeCall && view.datasets.length > 0 && <ScopePanel scope={analysisScope} datasetCount={view.datasets.length}
             disabled={busy} onSaved={() => void refresh(task.id)} />}
           <WorkbookOverview taskId={task.id} datasets={view.datasets} />
+          {bridge()?.billingCall && <BillingPanel taskId={task.id} period={task.period} refreshKey={materialsRefresh}
+            practice={task.sample === 'practice' || task.sample === 'next_month'}
+            readOnly={Boolean(task.lifecycle_status && task.lifecycle_status !== 'active')} />}
           <section className="analysis-more-actions" aria-labelledby="analysis-more-actions">
             <div><h3 id="analysis-more-actions">更多操作</h3><p className="analysis-note">换新导出的来源、把结果写回 Excel，或用这个月的数起草下月套表。</p></div>
             <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />

@@ -557,7 +557,7 @@ export function App() {
     const id = await buildReference(false);
     if (!id) throw new Error(referenceFailure.current || '参考结果没有生成出来，请稍后再试。');
     showSampleTask(id, guideSection(target));
-    if (target === 'scope' || target === 'structure' || target === 'datasets') {
+    if (target === 'scope' || target === 'structure' || target === 'datasets' || target === 'billing') {
       setTimeout(() => materialsAnchor(target)?.scrollIntoView?.({ block: 'start' }), 60);
     }
   }, [buildReference, showSampleTask]);
@@ -1018,7 +1018,7 @@ export function App() {
               onOwnData={() => { closeGuide(); requestAnimationFrame(() => document.getElementById('analysis-question')?.focus()); }}
               onOpen={(target: GuideTarget) => {
                 setAnalysisSection(guideSection(target));
-                if (target === 'scope' || target === 'structure' || target === 'datasets') {
+                if (target === 'scope' || target === 'structure' || target === 'datasets' || target === 'billing') {
                   setTimeout(() => materialsAnchor(target)?.scrollIntoView?.({ block: 'start' }), 60);
                 }
               }} />
