@@ -515,6 +515,55 @@ describe('analysis IPC task and session binding', () => {
     expect(await invoke(CHANNELS.financeSourceRefresh, task, { scope: {} })).toEqual({ ok: true, value: { cancelled: true } });
     expect(mocks.run).toHaveBeenCalledTimes(1);
   });
+
+  it('builds the 收费明细 flags itself from a fixed list of commands, as the manager, with room for millions of rows', async () => {
+    registerIpc({ varRoot: '/store' });
+    const as = { varRoot: '/store', task, actor: 'manager' };
+    const detail = 'c'.repeat(32);
+    await invoke(CHANNELS.billingCall, task, 'detail-list');
+    expect(mocks.run).toHaveBeenLastCalledWith(as, 'detail-list', [], { timeoutMs: undefined });
+    await invoke(CHANNELS.billingCall, task, 'detail-confirm', { detail, mapping: { bill_id: '应收单号' } });
+    expect(mocks.run).toHaveBeenLastCalledWith(as, 'detail-confirm', ['--detail', detail, '--mapping', '{"bill_id":"应收单号"}'], { timeoutMs: undefined });
+    await invoke(CHANNELS.billingCall, task, 'collection-caliber-confirm', { version: 2 });
+    expect(mocks.run).toHaveBeenLastCalledWith(as, 'collection-caliber-confirm', ['--version', '2'], { timeoutMs: undefined });
+    await invoke(CHANNELS.billingCall, task, 'collection-run', { as_of: '2026-08-31' });
+    expect(mocks.run).toHaveBeenLastCalledWith(as, 'collection-run', ['--spec', '{"as_of":"2026-08-31"}'], { timeoutMs: 30 * 60_000 });
+    const calls = mocks.run.mock.calls.length;
+    expect((await invoke(CHANNELS.billingCall, task, 'detail-add', {})).ok).toBe(false);
+    expect((await invoke(CHANNELS.billingCall, task, 'collection-caliber-propose', {})).ok).toBe(false);
+    expect((await invoke(CHANNELS.billingCall, task, 'detail-confirm', { detail: '../x' })).ok).toBe(false);
+    expect((await invoke(CHANNELS.billingCall, task, 'toString')).ok).toBe(false);
+    expect(mocks.run).toHaveBeenCalledTimes(calls);
+  });
+
+  it('reads the 收费明细 of an archived task but adds, confirms and runs nothing there', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.run.mockImplementation(async (_binding, command) => command === 'task-show'
+      ? JSON.stringify({ task: { lifecycle_status: 'archived' } }) : '{}');
+    expect((await invoke(CHANNELS.billingCall, task, 'collection-state')).ok).toBe(true);
+    for (const [command, spec] of [['detail-confirm', { detail: 'c'.repeat(32) }], ['collection-caliber-confirm', { version: 1 }], ['collection-run', { as_of: '2026-08-31' }]] as const) {
+      expect(await invoke(CHANNELS.billingCall, task, command, spec)).toMatchObject({ ok: false, refused: true });
+    }
+    expect((await invoke(CHANNELS.billingAdd, task, 'receipt')).ok).toBe(false);
+    expect((await invoke(CHANNELS.taskSampleBilling, task)).ok).toBe(false);
+    expect(mocks.chooser).not.toHaveBeenCalled();
+    expect(mocks.run.mock.calls.map((call) => call[1]).filter((name) => name !== 'task-show')).toEqual(['collection-state']);
+  });
+
+  it('adds a detail table only from files the native picker returned, named after them', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.chooser.mockResolvedValue({ canceled: false, filePaths: ['/chosen/应收_2025.csv', '/chosen/应收_2026.csv'] });
+    expect((await invoke(CHANNELS.billingAdd, task, 'receivable')).ok).toBe(true);
+    expect(mocks.chooser.mock.calls[0][0].properties).toContain('multiSelections');
+    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, actor: 'manager' }, 'detail-add',
+      ['--kind', 'receivable', '--name', '应收_2025 等 2 个文件', '--path', '/chosen/应收_2025.csv', '--path', '/chosen/应收_2026.csv'], { timeoutMs: 30 * 60_000 });
+    expect((await invoke(CHANNELS.billingAdd, task, 'ledger')).ok).toBe(false);
+    mocks.chooser.mockResolvedValue({ canceled: true, filePaths: [] });
+    expect(await invoke(CHANNELS.billingAdd, task, 'receipt')).toEqual({ ok: true, value: { cancelled: true } });
+    expect(mocks.run.mock.calls.filter((call) => call[1] === 'detail-add')).toHaveLength(1);
+    await invoke(CHANNELS.taskSampleBilling, task);
+    expect(mocks.run).toHaveBeenLastCalledWith({ varRoot: '/store', task, actor: 'manager' }, 'task-sample-billing', [], { timeoutMs: 30 * 60_000 });
+  });
 });
 
 describe('embedded workspace IPC', () => {

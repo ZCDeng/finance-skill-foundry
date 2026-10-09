@@ -32,8 +32,9 @@ export function fileMeta(dataset: DatasetSnapshot, datasets: DatasetSnapshot[] =
 }
 
 /** Where the month-close page and the guide land on the 资料 page; a structure to-do falls back to the list. */
-export function materialsAnchor(target: 'scope' | 'structure' | 'datasets'): Element | null {
+export function materialsAnchor(target: 'scope' | 'structure' | 'datasets' | 'billing'): Element | null {
   if (target === 'scope') return document.querySelector('.analysis-scope-card');
+  if (target === 'billing') return document.querySelector('.analysis-billing');
   if (target === 'structure') return document.querySelector('[data-structure-todo]') ?? document.querySelector('.analysis-source-list');
   return document.querySelector('.analysis-source-list');
 }

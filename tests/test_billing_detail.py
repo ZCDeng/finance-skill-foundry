@@ -180,6 +180,14 @@ def test_the_cli_adds_confirms_and_runs(pack, tmp_path, capsys):
     assert json.loads(capsys.readouterr().out)["result"] == run["result"]
     assert main(["--var", root, "--task", task.id, "detail-list"]) == 0
     assert [row["kind"] for row in json.loads(capsys.readouterr().out)] == ["receivable", "receipt", "property"]
+    assert main(["--var", root, "--task", task.id, "collection-run-list"]) == 0
+    listed = json.loads(capsys.readouterr().out)
+    assert [row["id"] for row in listed] == [run["id"]]
+    assert listed[0]["figures"]["collection_rate_current"] == run["result"]["figures"]["collection_rate_current"]
+    assert listed[0]["caliber"] == run["caliber"] and listed[0]["as_of"] == "2026-08-31"
+    assert main(["--var", root, "--task", task.id, "collection-state"]) == 0
+    state = json.loads(capsys.readouterr().out)
+    assert state["runs"] == listed and len(state["details"]) == 3 and state["caliber"]["effective"]["total_method"] == "bounded"
 
 
 def test_names_billing_systems_use_are_proposed():

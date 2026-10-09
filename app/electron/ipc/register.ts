@@ -447,6 +447,73 @@ export function registerIpc(
         objectJson({ ...(rawSpec as Record<string, unknown>), path: selected.filePaths[0] }),
       ]);
     }));
+  /**
+   * 收费明细. A detail table can hold millions of rows, so loading one and running the
+   * rates get minutes rather than the usual two; the renderer names a fixed command and
+   * an object, and the flags are built here.
+   */
+  const LONG_MS = 30 * 60_000;
+  const detailId = (value: unknown) => {
+    const id = String(value ?? '');
+    if (!/^[0-9a-f]{32}$/.test(id)) throw new Error('invalid detail table id');
+    return id;
+  };
+  const wholeNumber = (value: unknown) => {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) throw new Error('invalid 口径 version');
+    return value;
+  };
+  const billingArgs: Record<string, (spec: Record<string, unknown>) => string[]> = {
+    'detail-list': () => [],
+    'collection-caliber': () => [],
+    'collection-run-list': () => [],
+    'collection-state': () => [],
+    'detail-confirm': (spec) => ['--detail', detailId(spec.detail),
+      ...(spec.mapping === undefined ? [] : ['--mapping', objectJson(spec.mapping)])],
+    'collection-caliber-confirm': (spec) => [
+      ...(spec.version === undefined ? [] : ['--version', String(wholeNumber(spec.version))]),
+      ...(spec.params === undefined ? [] : ['--params', objectJson(spec.params)])],
+    'collection-run': (spec) => ['--spec', objectJson(spec)],
+    'collection-run-read': (spec) => ['--run', detailId(spec.run)],
+  };
+  // An archived or trashed task can be read, never added to: the same rule as its conversation.
+  const billingWrites = new Set(['detail-confirm', 'collection-caliber-confirm', 'collection-run']);
+  const activeTask = async (rawTask: unknown) => {
+    const known = await analysisCall(rawTask, 'task-show');
+    if (String(known.task?.lifecycle_status ?? 'active') !== 'active') throw new FoundryRefusal('归档或回收站任务只能查看收费明细，恢复后才能导入、确认或计算。', REFUSED);
+  };
+  ipcMain.handle(CHANNELS.billingCall, (_e, rawTask: unknown, command: unknown, spec: unknown = {}) =>
+    answer(async () => {
+      const name = String(command ?? '');
+      const build = Object.hasOwn(billingArgs, name) ? billingArgs[name] : undefined;
+      if (!build) throw new Error('unsupported billing command');
+      const args = build(spec && typeof spec === 'object' && !Array.isArray(spec) ? spec as Record<string, unknown> : {});
+      if (billingWrites.has(name)) await activeTask(rawTask);
+      return JSON.parse(await runFoundry({ ...binding, task: taskId(rawTask) }, name, args,
+        { timeoutMs: name === 'collection-run' ? LONG_MS : undefined }));
+    }));
+  const BILLING_KINDS: Record<string, string> = { receivable: '应收明细', receipt: '实收明细', property: '房产主数据' };
+  ipcMain.handle(CHANNELS.billingAdd, (_e, rawTask: unknown, rawKind: unknown) =>
+    answer(async () => {
+      const task = taskId(rawTask);
+      const kind = String(rawKind ?? '');
+      if (!Object.hasOwn(BILLING_KINDS, kind)) throw new Error('unknown detail kind');
+      await activeTask(task);
+      const selected = await chooseFiles('billing.import', {
+        title: `选择${BILLING_KINDS[kind]}（CSV，可多选同一张表拆开的文件）`,
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'CSV 文件', extensions: ['csv'] }],
+      });
+      if (selected.canceled || selected.filePaths.length === 0) return { cancelled: true as const };
+      const files = selected.filePaths;
+      const first = path.basename(files[0]).replace(/\.csv$/i, '');
+      const name = (files.length > 1 ? `${first} 等 ${files.length} 个文件` : first).slice(0, 200);
+      return JSON.parse(await runFoundry({ ...binding, task }, 'detail-add',
+        ['--kind', kind, '--name', name, ...files.flatMap((file) => ['--path', file])], { timeoutMs: LONG_MS }));
+    }));
+  ipcMain.handle(CHANNELS.taskSampleBilling, (_e, rawTask: unknown) => answer(async () => {
+    await activeTask(rawTask);
+    return JSON.parse(await runFoundry({ ...binding, task: taskId(rawTask) }, 'task-sample-billing', [], { timeoutMs: LONG_MS }));
+  }));
   ipcMain.handle(CHANNELS.rollforwardExport, (_e, rawTask: unknown, rawRun: unknown, rawName: unknown) =>
     answer(async () => {
       const task = taskId(rawTask);
