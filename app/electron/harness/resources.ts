@@ -34,9 +34,8 @@ export function entryPath(layout: Layout): string {
 /**
  * The period bundle this app installs into the harness profile.
  *
- * Packed it rides beside the asar, because installing it means handing a
- * directory path to a package manager and to a symlink -- neither of which can
- * be a path inside an archive. Unpacked it is the kit's own `dsh-plugin/`, one
+ * Packed it rides beside the asar, because each harness profile symlinks to it
+ * and a symlink cannot point inside an archive. Unpacked it is the kit's own `dsh-plugin/`, one
  * level up from the app, so an edit in the checkout is what the profile links
  * to.
  */

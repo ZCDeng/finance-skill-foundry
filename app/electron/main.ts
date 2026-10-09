@@ -88,11 +88,16 @@ function varRoot(): string {
  * meant. An operator's own `FOUNDRY_FORMULATOR_BIN` still wins; a build with no
  * staged Formulator sets nothing and the kit falls back to PATH, which is what
  * keeps a checkout working before `npm run formulator` has ever been run.
+ *
+ * A packaged app never falls back. A bundle missing its own Formulator is a
+ * broken build, and on a developer's Mac the PATH fallback would find some other
+ * Formulator and hide that; naming the missing path makes the failure say so.
  */
 function nameFormulator(here: Layout): void {
   if (process.env.FOUNDRY_FORMULATOR_BIN) return;
   const packed = packedFormulatorBin(here);
-  if (existsSync(packed)) process.env.FOUNDRY_FORMULATOR_BIN = packed;
+  if (here.packaged || existsSync(packed)) process.env.FOUNDRY_FORMULATOR_BIN = packed;
+  if (here.packaged && !existsSync(packed)) console.error(`[foundry] this app carries no Formulator at ${packed}`);
 }
 
 /**
@@ -114,12 +119,13 @@ function layout(): Layout {
  *
  * An explicit `FOUNDRY_BIN` first, then the one this app carries, then whatever
  * is on PATH. The last is not a fallback anyone should rely on -- it is what
- * keeps a checkout usable before `npm run foundry` has ever been run.
+ * keeps a checkout usable before `npm run foundry` has ever been run. A packaged
+ * app never takes it: see `nameFormulator`.
  */
 function foundryBin(here: Layout): string {
   if (process.env.FOUNDRY_BIN) return process.env.FOUNDRY_BIN;
   const packed = packedFoundryBin(here);
-  return existsSync(packed) ? packed : 'foundry';
+  return here.packaged || existsSync(packed) ? packed : 'foundry';
 }
 
 /**
@@ -141,7 +147,8 @@ function foundryBin(here: Layout): string {
 function nameFoundry(here: Layout): void {
   if (process.env.FOUNDRY_BIN) return;
   const packed = packedFoundryBin(here);
-  if (existsSync(packed)) process.env.FOUNDRY_BIN = packed;
+  if (here.packaged || existsSync(packed)) process.env.FOUNDRY_BIN = packed;
+  if (here.packaged && !existsSync(packed)) console.error(`[foundry] this app carries no foundry at ${packed}`);
 }
 
 /** The bundle's package name, which is also its directory inside a node_modules. */

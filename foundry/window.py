@@ -30,6 +30,7 @@ from foundry.catalog import (
     table_hash,
     write_table,
 )
+from foundry import duckdb_offline
 from foundry.errors import LockRefused, WindowBusy
 from foundry.fsutil import write_json_atomic as _write_json
 from foundry.fsutil import write_text_atomic as _write_text_atomic
@@ -318,7 +319,7 @@ class Window:
         # would otherwise leave a catalog whose inputs are gone.
         staging_inputs = self.root / "inputs.staging"
         shutil.rmtree(staging_inputs, ignore_errors=True)
-        con = duckdb.connect(str(staging))
+        con = duckdb_offline.connect(str(staging))
         try:
             manifest = self._load_into(
                 con,
@@ -571,7 +572,7 @@ class Window:
         if manifest.get("window_id") != self.id:
             raise LockRefused("manifest window does not match catalog window")
         manifest_tables = self._manifest_tables(manifest)
-        con = duckdb.connect(str(self.catalog_path()))
+        con = duckdb_offline.connect(str(self.catalog_path()))
         try:
             actual_tables = {str(row[0]) for row in con.execute("SHOW TABLES").fetchall()}
             if actual_tables != set(manifest_tables):
@@ -588,7 +589,7 @@ class Window:
         finally:
             checkpoint_and_close(con)
         self._write_con = None
-        self._ro_con = duckdb.connect(str(self.catalog_path()), read_only=True)
+        self._ro_con = duckdb_offline.connect(str(self.catalog_path()), read_only=True)
         manifest["locked"] = True
         _write_json(self.lock_path, manifest)
         self._set_state("Locked")
@@ -691,7 +692,7 @@ class Window:
         if self.state in QUERYABLE:
             raise LockRefused("catalog is read-only after lock")
         if self._write_con is None:
-            self._write_con = duckdb.connect(str(self.catalog_path()))
+            self._write_con = duckdb_offline.connect(str(self.catalog_path()))
         self._write_con.execute(sql)
 
     def register_handle(self, name: str) -> Handle:
@@ -744,7 +745,7 @@ class Window:
         if self.state not in QUERYABLE:
             raise LockRefused(f"catalog not readable in state {self.state}")
         if self._ro_con is None:
-            self._ro_con = duckdb.connect(str(self.catalog_path()), read_only=True)
+            self._ro_con = duckdb_offline.connect(str(self.catalog_path()), read_only=True)
         return self._ro_con
 
     def _list_extras(
