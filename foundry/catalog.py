@@ -15,6 +15,7 @@ import duckdb
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
+from foundry.analysis_data import decode_text
 from foundry.errors import LockRefused
 
 MAX_SAFE_XLSX_INTEGER = 9_007_199_254_740_991
@@ -258,7 +259,8 @@ def _load_tabular(path: Path) -> tuple[list[str], list[tuple[Any, ...]]]:
     if suffix not in TABULAR_EXTS:
         raise LockRefused(f"unsupported import format: {path.suffix}")
     if suffix == ".csv":
-        text = path.read_text(encoding="utf-8-sig")
+        # 用友、金蝶 and a Chinese-locale Excel save CSV as GBK; read it the way 收费明细 and analysis data do.
+        text, _ = decode_text(path.read_bytes())
         reader = csv.reader(io.StringIO(text), strict=True)
         try:
             raw_headers = next(reader)
