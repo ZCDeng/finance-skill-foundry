@@ -208,3 +208,78 @@ def test_an_overpaid_bill_and_a_property_listed_twice_inflate_nothing(tmp_path):
     assert figures["advance_balance"] == "100.00"
     repeated = next(issue for issue in result["quality"] if issue["code"] == "repeated_properties")
     assert repeated["lines"] == ["房产.csv 第 4 行"]
+
+
+def test_the_caliber_is_proposed_by_anyone_and_confirmed_only_by_the_manager(pack):
+    task, manager, ids = pack
+    spec = {**ids, "as_of": "2026-08-31"}
+    assert manager.collection_run(spec)["caliber"] == {"version": None, "status": "default", "differs": []}
+    assistant = BillingDetailStore(task)
+    # 「我们对外报的综合收缴率是本年全部实收除以本年应收」
+    proposed = assistant.caliber_propose({"total_method": "all_receipts"}, "集团对外报本年全部实收 ÷ 本年应收")
+    assert proposed["proposed"]["by"] == "assistant" and proposed["effective"]["total_method"] == "bounded"
+    assert assistant.collection_run(spec)["caliber"]["status"] == "default"
+    with pytest.raises(FoundryError, match="only the manager"):
+        assistant.caliber_confirm()
+    with pytest.raises(FoundryError, match="no excluded_fee"):
+        assistant.caliber_propose({"excluded_fee": ["商业租金代收"]})
+    confirmed = manager.caliber_confirm()
+    assert confirmed["confirmed"]["version"] == 1 and confirmed["proposed"] is None
+    run = assistant.collection_run(spec)
+    assert run["caliber"] == {"version": 1, "status": "confirmed", "differs": []}
+    assert run["result"]["figures"]["collection_rate_total"] == "0.7432"
+    # A different setting in the spec is a trial, and says which keys it moved.
+    trial = assistant.collection_run({**spec, "total_method": "bounded"})
+    assert trial["caliber"] == {"version": 1, "status": "trial", "differs": ["total_method"]}
+    assert trial["result"]["figures"]["collection_rate_total"] == "0.4783"
+    # The manager may also confirm values of her own; the earlier version is superseded, not lost.
+    mine = manager.caliber_confirm(params={"exclude_related": True})
+    assert mine["confirmed"]["version"] == 2 and mine["effective"]["total_method"] == "bounded"
+    assert [entry["status"] for entry in mine["versions"]] == ["superseded", "confirmed"]
+
+
+def test_a_fee_item_left_out_takes_its_receipts_with_it(pack):
+    _task, manager, ids = pack
+    figures = manager.collection_run({**ids, "as_of": "2026-08-31", "excluded_fee_items": ["商办物业服务费"]})["result"]["figures"]
+    # B3, B6 and B9 are 商办: 540 receivable, 160 collected, 30 of last year's 30 recovered.
+    assert (figures["receivable"], figures["collected"]) == ("540.00", "160.00")
+    assert (figures["arrears_opening"], figures["arrears_collected"]) == ("30.00", "30.00")
+    assert figures["collection_rate_total"] == "0.3333"
+    # Their receipts are set aside with them, not mistaken for prepayments without a bill.
+    assert figures["advance_balance"] == "110.00"
+
+
+def test_the_cli_proposes_and_confirms_the_caliber(pack, tmp_path, capsys):
+    task, _manager, _ids = pack
+    root = str(tmp_path / "var")
+    assert main(["--var", root, "--task", task.id, "collection-caliber-propose", "--spec",
+                 json.dumps({"params": {"year_start_month": 7}, "note": "服务年度 7 月起"})]) == 0
+    assert json.loads(capsys.readouterr().out)["proposed"]["params"]["year_start_month"] == 7
+    assert main(["--var", root, "--task", task.id, "collection-caliber-confirm"]) != 0
+    assert "only the manager" in capsys.readouterr().err
+    assert main(["--var", root, "--task", task.id, "--actor", "manager", "collection-caliber-confirm", "--version", "1"]) == 0
+    assert json.loads(capsys.readouterr().out)["effective"]["year_start_month"] == 7
+    assert main(["--var", root, "--task", task.id, "collection-caliber"]) == 0
+    assert json.loads(capsys.readouterr().out)["confirmed"]["note"] == "服务年度 7 月起"
+
+
+def test_a_bill_mixing_kept_and_left_out_fee_items_keeps_its_kept_part(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="收费明细")
+    manager = BillingDetailStore(task, actor="manager")
+    # One 账单号 per shop per month, with the property fee and the rent collected for the landlord on it.
+    receivable = _write(tmp_path / "应收.csv", [RECEIVABLE_HEADER, "B1,S1,商办物业服务费,2026-08,100,0,100,正常",
+                                                "B1,S1,商业租金代收,2026-08,300,0,300,正常"], "utf-8")
+    receipts = _write(tmp_path / "实收.csv", [RECEIPT_HEADER, "R1,2026-08-10,B1,200,银行,当期"], "utf-8")
+    ids = {"receivable": manager.add("receivable", [receivable], name="应收")["id"],
+           "receipt": manager.add("receipt", [receipts], name="实收")["id"]}
+    for detail in ids.values():
+        manager.confirm(detail)
+    result = manager.collection_run({**ids, "as_of": "2026-08-31", "excluded_fee_items": ["商业租金代收"]})["result"]
+    # The fee is a quarter of the bill, so a quarter of the 200 paid counts against it.
+    assert (result["figures"]["receivable"], result["figures"]["collected"]) == ("100.00", "50.00")
+    assert result["figures"]["advance_balance"] == "0.00"
+    mixed = next(issue for issue in result["quality"] if issue["code"] == "mixed_fee_bills")
+    assert (mixed["rows"], mixed["lines"]) == (2, ["应收.csv 第 2 行", "应收.csv 第 3 行"])
+    whole = manager.collection_run({**ids, "as_of": "2026-08-31"})["result"]
+    assert (whole["figures"]["receivable"], whole["figures"]["collected"]) == ("400.00", "200.00")
+    assert not any(issue["code"] == "mixed_fee_bills" for issue in whole["quality"])

@@ -12,7 +12,10 @@ The rates follow industry-common practice (方案 notes/billing-detail-collectio
 amounts not households, receivables net of waivers, receipts attributed to the bill's 账期 and never
 to the day they arrived, prepayments counted only once applied to a bill that has fallen due, void
 bills left out, red-letter reversals netted with their originals. Where companies differ the
-difference is a parameter of the run (total_method, year_start_month, related_owners), never a branch.
+difference is a parameter of the 口径 (total_method, year_start_month, related_owners, exclude_related,
+excluded_fee_items), never a branch. The 口径 is versioned like a column mapping: the assistant may propose
+one from what the client says, only the manager confirms it, and every run says whether it used the confirmed
+口径, the defaults, or a trial that differs from them.
 """
 
 from __future__ import annotations
@@ -94,6 +97,10 @@ GROUP_FIELDS = {"fee_item": "receivable", "project": "receivable", "customer_typ
                 "city": "property", "nature": "property", "type": "property", "owner": "property"}
 TOTAL_METHODS = ("bounded", "all_receipts")
 DEFAULT_RELATED_OWNERS = ("地产",)
+# The industry-common defaults (方案 1A–3A); a client's own practice is a confirmed variant of these.
+DEFAULT_CALIBER = {"year_start_month": 1, "total_method": "bounded", "related_owners": list(DEFAULT_RELATED_OWNERS),
+                   "exclude_related": False, "excluded_fee_items": []}
+CALIBER_KEYS = tuple(DEFAULT_CALIBER)
 
 
 # --- reading the files ------------------------------------------------------------------------
@@ -337,12 +344,84 @@ class BillingDetailStore:
             write_json_atomic(folder / "meta.json", meta)
         return self.get(detail_id)
 
+    # The 口径: proposed by anyone, confirmed only by the manager, versioned.
+
+    def _caliber_file(self) -> Path:
+        return self.root / "caliber.json"
+
+    def _caliber_record(self) -> dict:
+        path = self._caliber_file()
+        if not path.is_file():
+            return {"versions": [], "confirmed": None}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def caliber(self) -> dict:
+        record = self._caliber_record()
+        versions = {entry["version"]: entry for entry in record["versions"]}
+        confirmed = versions.get(record["confirmed"])
+        latest = record["versions"][-1] if record["versions"] else None
+        pending = latest if latest and latest["status"] == "proposed" else None
+        return {"defaults": DEFAULT_CALIBER, "confirmed": confirmed, "proposed": pending,
+                "effective": dict(confirmed["params"]) if confirmed else dict(DEFAULT_CALIBER),
+                "versions": record["versions"]}
+
+    def caliber_propose(self, params: Any, note: Any = "") -> dict:
+        """A variant of the 口径 for the manager to confirm; keys left out keep the effective value."""
+        note = str(note or "").strip()
+        if len(note) > 500:
+            raise FoundryError("the note on a 口径 proposal is at most 500 characters")
+        with exclusive(self.task.lock_path, timeout=10):
+            record = self._caliber_record()
+            current = self.caliber()["effective"]
+            chosen = _caliber_params({**current, **_caliber_object(params)})
+            for entry in record["versions"]:
+                if entry["status"] == "proposed":
+                    entry["status"] = "superseded"
+            record["versions"].append({"version": len(record["versions"]) + 1, "params": chosen, "note": note,
+                                       "status": "proposed", "by": self.actor, "at": now_iso()})
+            self.root.mkdir(parents=True, exist_ok=True)
+            write_json_atomic(self._caliber_file(), record)
+        return self.caliber()
+
+    def caliber_confirm(self, version: Any = None, params: Any = None) -> dict:
+        """The manager's word on the 口径: a proposed version, or the values she chose herself."""
+        if self.actor != MANAGER:
+            raise FoundryError("only the manager confirms the 口径; propose it instead")
+        with exclusive(self.task.lock_path, timeout=10):
+            record = self._caliber_record()
+            if params is not None:
+                record["versions"].append({"version": len(record["versions"]) + 1,
+                                           "params": _caliber_params({**DEFAULT_CALIBER, **_caliber_object(params)}),
+                                           "note": "", "status": "proposed", "by": MANAGER, "at": now_iso()})
+                version = record["versions"][-1]["version"]
+            if version is None:
+                pending = [entry for entry in record["versions"] if entry["status"] == "proposed"]
+                if not pending:
+                    raise FoundryError("no 口径 proposal is waiting; give the values to confirm")
+                version = pending[-1]["version"]
+            entry = next((entry for entry in record["versions"] if entry["version"] == version), None)
+            if entry is None or entry["status"] == "superseded":
+                raise FoundryError(f"no 口径 version {version} waiting to be confirmed")
+            for other in record["versions"]:
+                if other["status"] in ("proposed", "confirmed") and other is not entry:
+                    other["status"] = "superseded"
+            entry.update(status="confirmed", confirmed_by=MANAGER, confirmed_at=now_iso())
+            record["confirmed"] = entry["version"]
+            self.root.mkdir(parents=True, exist_ok=True)
+            write_json_atomic(self._caliber_file(), record)
+        return self.caliber()
+
     # The collection run.
 
     def collection_run(self, spec: Any) -> dict:
         if not isinstance(spec, dict):
             raise FoundryError("collection spec must be an object")
-        params = _params(spec)
+        standing = self.caliber()
+        params = _params({**standing["effective"], **spec})
+        differs = [key for key in CALIBER_KEYS if params[key] != standing["effective"][key]]
+        caliber = {"version": standing["confirmed"]["version"] if standing["confirmed"] else None,
+                   "status": "trial" if differs else "confirmed" if standing["confirmed"] else "default",
+                   "differs": differs}
         metas = {}
         for kind in ("receivable", "receipt", "property"):
             if spec.get(kind) in (None, "") and kind == "property":
@@ -374,6 +453,7 @@ class BillingDetailStore:
             "created_at": now_iso(),
             "run_by": self.actor,
             "params": params,
+            "caliber": caliber,
             "inputs": {kind: {"id": meta["id"], "name": meta["name"], "database_sha256": meta["database_sha256"],
                               "mapping": meta["confirmation"]["mapping"],
                               "files": [{"name": entry["name"], "sha256": entry["sha256"]} for entry in meta["files"]]}
@@ -391,10 +471,16 @@ class BillingDetailStore:
 # --- the calculation --------------------------------------------------------------------------
 
 
-def _params(spec: dict) -> dict:
-    as_of = str(spec.get("as_of") or "")
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", as_of):
-        raise FoundryError("as_of is the statistics date, YYYY-MM-DD")
+def _caliber_object(params: Any) -> dict:
+    if not isinstance(params, dict):
+        raise FoundryError("the 口径 is an object of " + ", ".join(CALIBER_KEYS))
+    unknown = sorted(set(params) - set(CALIBER_KEYS))
+    if unknown:
+        raise FoundryError(f"the 口径 has no {', '.join(unknown)}; it takes {', '.join(CALIBER_KEYS)}")
+    return params
+
+
+def _caliber_params(spec: dict) -> dict:
     start = spec.get("year_start_month", 1)
     if not isinstance(start, int) or not 1 <= start <= 12:
         raise FoundryError("year_start_month is 1 to 12 (7 for a July-to-June service year)")
@@ -404,14 +490,28 @@ def _params(spec: dict) -> dict:
     related = spec.get("related_owners", list(DEFAULT_RELATED_OWNERS))
     if not isinstance(related, list) or not all(isinstance(item, str) and item.strip() for item in related):
         raise FoundryError("related_owners is a list of 产权归属 values")
+    excluded = spec.get("excluded_fee_items", [])
+    if not isinstance(excluded, list) or not all(isinstance(item, str) and item.strip() for item in excluded):
+        raise FoundryError("excluded_fee_items is a list of 收费项目 left out of the rates, such as 商业租金代收")
+    exclude_related = spec.get("exclude_related", False)
+    if not isinstance(exclude_related, bool):
+        raise FoundryError("exclude_related is true or false")
+    return {"year_start_month": start, "total_method": method,
+            "related_owners": [item.strip() for item in related], "exclude_related": exclude_related,
+            "excluded_fee_items": sorted({item.strip() for item in excluded})}
+
+
+def _params(spec: dict) -> dict:
+    as_of = str(spec.get("as_of") or "")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", as_of):
+        raise FoundryError("as_of is the statistics date, YYYY-MM-DD")
     group_by = spec.get("group_by", [])
     if not isinstance(group_by, list) or any(field not in GROUP_FIELDS for field in group_by) or len(group_by) > 2:
         raise FoundryError(f"group_by takes up to two of: {', '.join(GROUP_FIELDS)}")
     reported = spec.get("reported", {})
     if not isinstance(reported, dict) or any(key not in ("collection_rate_current", "collection_rate_total") for key in reported):
         raise FoundryError("reported takes collection_rate_current and collection_rate_total, as rates (0.9214)")
-    return {"as_of": as_of, "year_start_month": start, "total_method": method,
-            "related_owners": [item.strip() for item in related], "exclude_related": bool(spec.get("exclude_related", False)),
+    return {"as_of": as_of, **_caliber_params(spec),
             "group_by": list(group_by), "reported": {key: str(Decimal(str(value))) for key, value in reported.items()}}
 
 
@@ -464,13 +564,21 @@ def _prepare(connection, metas: dict, params: dict) -> None:
             {_month(col('period'))} AS period, {gross} AS gross, {waiver} AS waiver, {net} AS net,
             coalesce(contains({status}, '作废'), false) AS void, coalesce(contains({status}, '冲红'), false) AS red
         FROM receivable.raw AS r""")
-    # One bill per 应收单号: a red-letter line nets with its original; a void bill counts for nothing.
-    connection.execute("""
-        CREATE TEMP TABLE bills AS SELECT bill_id, any_value(property_id) AS property_id, any_value(fee_item) AS fee_item,
+    # One bill per 应收单号: a red-letter line nets with its original; a void bill counts for nothing. A 收费项目
+    # the 口径 leaves out (商业租金代收 is not a property fee) is set aside line by line, with the receipts against
+    # it. A bill that mixes kept and left-out lines keeps its kept lines, and its receipts count pro rata.
+    excluded = ", ".join("'" + item.replace("'", "''") + "'" for item in params["excluded_fee_items"]) or "NULL"
+    connection.execute(f"""
+        CREATE TEMP TABLE all_bills AS SELECT bill_id, any_value(property_id) AS property_id,
+            coalesce(any_value(fee_item) FILTER (WHERE NOT left_out), any_value(fee_item)) AS fee_item,
             any_value(project) AS project, any_value(customer_type) AS customer_type, min(period) AS period,
-            sum(gross) AS gross, sum(waiver) AS waiver, sum(net) AS net
-        FROM bill_lines WHERE NOT void AND bill_id IS NOT NULL AND period IS NOT NULL AND net IS NOT NULL
+            sum(gross) FILTER (WHERE NOT left_out) AS gross, sum(waiver) FILTER (WHERE NOT left_out) AS waiver,
+            coalesce(sum(net) FILTER (WHERE NOT left_out), 0) AS net, sum(net) AS net_all,
+            bool_and(left_out) AS excluded, bool_or(left_out) AND NOT bool_and(left_out) AS mixed
+        FROM (SELECT *, coalesce(fee_item IN ({excluded}), false) AS left_out FROM bill_lines)
+        WHERE NOT void AND bill_id IS NOT NULL AND period IS NOT NULL AND net IS NOT NULL
         GROUP BY bill_id""")
+    connection.execute("CREATE TEMP TABLE bills AS SELECT * EXCLUDE (excluded, mixed, net_all) FROM all_bills WHERE NOT excluded")
     rc = metas["receipt"]
     col = lambda field: _column(rc, field, "p")  # noqa: E731
     connection.execute(f"""
@@ -498,13 +606,16 @@ def _prepare(connection, metas: dict, params: dict) -> None:
                            "NULL::VARCHAR AS nature, NULL::VARCHAR AS type, NULL::VARCHAR AS owner, false AS related WHERE false")
     # Every receipt against its bill, placed by the bill's 账期 relative to the statistics year.
     connection.execute("""
-        CREATE TEMP TABLE placed AS SELECT x.*, b.period, b.property_id, b.fee_item, b.project, b.customer_type,
+        CREATE TEMP TABLE placed AS SELECT x.* REPLACE (CASE WHEN b.mixed AND b.net_all <> 0
+                THEN CAST(round(x.amount * b.net / b.net_all, 2) AS DECIMAL(20,2)) ELSE x.amount END AS amount),
+            b.period, b.property_id, b.fee_item, b.project, b.customer_type,
             CASE WHEN b.bill_id IS NULL THEN 'unmatched'
                  WHEN b.period < getvariable('year_start') THEN 'arrears'
                  WHEN b.period > getvariable('as_of_month') THEN 'advance'
                  ELSE 'current' END AS place
-        FROM receipts AS x LEFT JOIN bills AS b USING (bill_id)
-        WHERE x.date IS NOT NULL AND x.amount IS NOT NULL AND x.date <= getvariable('as_of')""")
+        FROM receipts AS x LEFT JOIN all_bills AS b USING (bill_id)
+        WHERE x.date IS NOT NULL AND x.amount IS NOT NULL AND x.date <= getvariable('as_of')
+          AND NOT coalesce(b.excluded, false)""")
     # One row per bill: what it owes, what was paid on it before the year began and within it, and where its
     # 账期 falls. A bill is never collected beyond what it owes; anything over is a credit carried forward.
     connection.execute("""
@@ -646,6 +757,8 @@ def _compute(connection, metas: dict, params: dict) -> dict:
                "0", "bill_lines"),
         _issue(connection, metas, "receipt", "unreadable_receipts", "date IS NULL OR amount IS NULL", "0", "receipts"),
         _issue(connection, metas, "receipt", "receipts_without_bill", "place = 'unmatched'", "amount", "placed"),
+        _issue(connection, metas, "receivable", "mixed_fee_bills",
+               "NOT void AND bill_id IN (SELECT bill_id FROM all_bills WHERE mixed)", "net", "bill_lines"),
         _issue(connection, metas, "receivable", "bills_without_property",
                "NOT void AND property_id NOT IN (SELECT property_id FROM properties WHERE property_id IS NOT NULL)", "net", "bill_lines")
         if has_property else None,
@@ -662,7 +775,8 @@ def _compute(connection, metas: dict, params: dict) -> dict:
 
 # --- the CLI ----------------------------------------------------------------------------------
 
-COMMANDS = {"detail-add", "detail-list", "detail-read", "detail-propose", "detail-confirm", "collection-run", "collection-run-read"}
+COMMANDS = {"detail-add", "detail-list", "detail-read", "detail-propose", "detail-confirm", "collection-run", "collection-run-read",
+            "collection-caliber", "collection-caliber-propose", "collection-caliber-confirm"}
 
 
 def add_parsers(sub) -> None:
@@ -681,6 +795,12 @@ def add_parsers(sub) -> None:
     p.add_argument("--spec", required=True)
     p = sub.add_parser("collection-run-read")
     p.add_argument("--run", required=True)
+    sub.add_parser("collection-caliber", help="the confirmed 收缴率口径, the defaults and any proposal waiting")
+    p = sub.add_parser("collection-caliber-propose", help="propose a 收缴率口径 for the manager to confirm")
+    p.add_argument("--spec", required=True, help='JSON: {"params": {...}, "note": "why"}')
+    p = sub.add_parser("collection-caliber-confirm", help="the manager confirms a proposed 口径, or her own values")
+    p.add_argument("--version", type=int)
+    p.add_argument("--params", help="JSON: the 口径 to confirm instead of a proposal")
 
 
 def dispatch(args) -> bool:
@@ -706,6 +826,13 @@ def dispatch(args) -> bool:
         result = store.confirm(args.detail, None if args.mapping is None else _object(args.mapping, "mapping"))
     elif args.cmd == "collection-run":
         result = store.collection_run(_object(args.spec, "collection spec"))
+    elif args.cmd == "collection-caliber":
+        result = store.caliber()
+    elif args.cmd == "collection-caliber-propose":
+        spec = _object(args.spec, "caliber proposal")
+        result = store.caliber_propose(spec.get("params"), spec.get("note", ""))
+    elif args.cmd == "collection-caliber-confirm":
+        result = store.caliber_confirm(args.version, None if args.params is None else _object(args.params, "caliber"))
     else:
         if not re.fullmatch(r"[0-9a-f]{32}", str(args.run)):
             raise FoundryError("run id must be 32 hex characters")

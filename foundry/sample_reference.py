@@ -14,6 +14,8 @@ filled in by the example and not by a manager. The steps are the guide's 跟着�
    the KPI board and every city company.
 4. 文稿：a paragraph on the group's collection whose every number cites the run, two of them traced
    back to the board's own cells.
+5. 收费明细：海口城市公司's billing export filed, its columns confirmed, the industry-common 口径
+   confirmed as it stands, and the rates run by 房产性质 against the 套表's 本年收缴率 for the city.
 
 Two differences are left 待外部确认 on purpose: the example shows what a close looks like while it
 waits on another department, which is where most real closes stand.
@@ -218,6 +220,22 @@ def _decision(label: str) -> dict[str, Any]:
             "decided_by_name": DECIDER}
 
 
+def billing(task) -> dict:
+    """Step 5: the 收费明细 filed and confirmed, the default 口径 confirmed, and the rates run."""
+    from foundry import billing_sample
+    from foundry.billing_detail import DEFAULT_CALIBER, BillingDetailStore
+    from foundry.sample_task import add_billing
+
+    details = add_billing(task, confirm=True)
+    store = BillingDetailStore(task, actor="manager")
+    store.caliber_confirm(params=DEFAULT_CALIBER)
+    return store.collection_run({
+        **{kind: row["id"] for kind, row in details.items()},
+        "as_of": billing_sample.AS_OF_TEXT, "group_by": ["nature"],
+        "reported": {"collection_rate_current": billing_sample.REPORTED_CURRENT},
+    })
+
+
 def build_reference(task) -> dict:
     """Take a freshly filed practice task through the whole route; any step that fails raises."""
     reference = Reference(task)
@@ -228,4 +246,5 @@ def build_reference(task) -> dict:
     if run.get("execution_status") != "succeeded":
         raise FoundryError(f"the example collection run failed: {run.get('error')}")
     draft = reference.draft(run)
-    return {"run_id": run["id"], "draft_id": draft["id"]}
+    collection = billing(task)
+    return {"run_id": run["id"], "draft_id": draft["id"], "collection_run_id": collection["id"]}

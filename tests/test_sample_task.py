@@ -111,10 +111,37 @@ def test_status_flags_an_older_practice_task_and_remove_trashes_only_practice_ta
 
 
 def test_export_copies_the_files_into_a_new_folder_and_never_overwrites(tmp_path):
+    import openpyxl
+
+    from foundry import billing_sample
+
     exported = export_pack(tmp_path / "示例资料")
     assert sorted(path.name for path in (tmp_path / "示例资料").iterdir()) == sorted(exported["files"])
+    assert {*billing_sample.FILES["receipt"], billing_sample.SAMPLE_WORKBOOK} <= set(exported["files"])
+    sample = openpyxl.load_workbook(tmp_path / "示例资料" / billing_sample.SAMPLE_WORKBOOK, read_only=True)
+    assert sample.sheetnames == ["房产主数据", "应收明细", "实收明细"]
+    assert 1000 < sample["应收明细"].max_row < 10000
     with pytest.raises(FoundryError):
         export_pack(tmp_path / "示例资料")
+
+
+def test_the_billing_detail_goes_into_a_practice_task_once_and_waits_for_the_manager(tmp_path):
+    from foundry.billing_detail import BillingDetailStore
+    from foundry.sample_task import add_billing_to
+
+    var = tmp_path / "var"
+    real = TaskStore(var).create(title="华南区 8 月回款")
+    with pytest.raises(FoundryError, match="practice task only"):
+        add_billing_to(var, real.id)
+    practice = create_sample_task(var)["id"]
+    first = add_billing_to(var, practice)["details"]
+    assert add_billing_to(var, practice)["details"] == first
+    assert {kind: row["confirmed"] for kind, row in first.items()} == {"property": False, "receivable": False, "receipt": False}
+    store = BillingDetailStore(TaskStore(var).get(practice))
+    # Every column is named the way the guide's checklist names it, so the proposal is complete.
+    assert all(not row["missing"] for row in store.list())
+    with pytest.raises(FoundryError, match="not confirmed"):
+        store.collection_run({kind: row["id"] for kind, row in first.items()} | {"as_of": "2026-08-31"})
 
 
 def test_the_cli_prints_the_task_and_marks_practice_tasks_in_the_list(tmp_path, capsys):

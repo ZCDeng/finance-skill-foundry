@@ -1,6 +1,6 @@
 {
   "pack": "huachen",
-  "version": 1,
+  "version": 2,
   "note": "What the 跟着做 route tells the reader they should see. The guide prints these figures and the tests compute them, so an engine or pack change that moves one fails a test instead of leaving the guide wrong.",
   "formula_issues": 9,
   "controls": {"confirmed": 83, "pass": 79, "breaks": 4},
@@ -16,5 +16,29 @@
   "report_operating_cash_flow": "18431.94",
   "book_operating_cash_flow": "17431.94",
   "report_operating_cost": "266854.5",
-  "next_month": {"matched": 10, "auto_apply": 9, "differs": "05·合并资产负债表"}
+  "next_month": {"matched": 10, "auto_apply": 9, "differs": "05·合并资产负债表"},
+  "billing": {
+    "city": "海口城市公司",
+    "as_of": "2026-08-31",
+    "rows": {"property": 11470, "receivable": 410902, "receipt": 359957},
+    "sha256": {"华宸物业_海口_房产主数据.csv": "a49ac158c1542cbe3c8c1d194a90519431083d66bdebfd0e26b2cc3ba5ed1778", "华宸物业_海口_应收明细_2025.csv": "d3abf6b997bf7cab73e424c3bccc3f319b4975f5cef6c257df3be2c2f55eeed1", "华宸物业_海口_应收明细_2026.csv": "ff27a627fbedb137c43b3cb264b9dfcb8127853bcb006533752a79af9c4af729", "华宸物业_海口_实收明细.csv": "c16ea0c09b71c98ade70203af29a2ab664445dfbd6a58d5067f97937cebbef55"},
+    "current": "82.12",
+    "reported_current": "83.76",
+    "difference_points": "-1.64",
+    "arrears_recovery": "36.56",
+    "total": "73.16",
+    "total_excluding_related": "78.85",
+    "residential_current": "83.59",
+    "residential_recovery": "42.40",
+    "commercial_current": "75.51",
+    "commercial_recovery": "21.22",
+    "waiver_rate": "1.26",
+    "waiver_rate_yunhai": "14.78",
+    "void_bills": 260,
+    "red_letter_lines": 90,
+    "bills_without_property": 32,
+    "advance_labelled_current": "448473.72",
+    "arrears_labelled_current": "9421.90",
+    "variant_total": "85.46"
+  }
 }
