@@ -51,6 +51,16 @@ export const CHANNELS = {
   tasks: 'foundry:tasks',
   task: 'foundry:task',
   gallery: 'foundry:gallery',
+  /** 总览: every active task's month-close line and its to-dos, in one read. */
+  overview: 'foundry:overview',
+  /** 成果库's side panel: one draft's text, checks and what it rests on. The renderer names a task and a draft id. */
+  libraryDetail: 'foundry:library-detail',
+  /**
+   * Open a filed export or a 写回 Excel copy in the default program, or show it
+   * in Finder. The renderer names a task and the file by digest and format or
+   * by output id; main asks the CLI where the task filed it.
+   */
+  libraryFile: 'foundry:library-file',
   deliverableText: 'foundry:deliverable-text',
   deliverableOpen: 'foundry:deliverable-open',
   /**

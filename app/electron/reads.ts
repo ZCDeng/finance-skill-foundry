@@ -120,7 +120,88 @@ export interface AnalysisDeliverables {
 export type GalleryRow =
   | { type: 'deliverable'; key: string; at: string; task: TaskRow; row: DeliverableRow }
   | { type: 'draft'; key: string; at: string; task: TaskRow; draft: AnalysisDraftRow }
-  | { type: 'export'; key: string; at: string; task: TaskRow; exported: AnalysisExportRow };
+  | { type: 'export'; key: string; at: string; task: TaskRow; exported: AnalysisExportRow }
+  | { type: 'chart'; key: string; at: string; task: TaskRow; chart: ChartRow }
+  | { type: 'workbook'; key: string; at: string; task: TaskRow; output: WorkbookOutputRow }
+  | { type: 'collection'; key: string; at: string; task: TaskRow; run: CollectionRunRow };
+
+/** One 归档图: a chart saved from a run, with the names of the files that run read. */
+export interface ChartRow {
+  id: string;
+  label: string;
+  run_id: string | null;
+  created_at: string;
+  datasets: string[];
+}
+
+/** One 写回 Excel copy: a new workbook made from a snapshot and a reviewed patch. */
+export interface WorkbookOutputRow {
+  id: string;
+  filename: string;
+  sha256: string;
+  created_at: string;
+  /** The snapshot it was written from, by name. */
+  dataset: string;
+  applied: number;
+  kept: number;
+}
+
+/** One 收缴率 run, with the 口径 it ran under: confirmed, the default nobody confirmed, or a trial. */
+export interface CollectionRunRow {
+  id: string;
+  created_at: string;
+  run_by: string | null;
+  as_of: string;
+  group_by: string[];
+  caliber: { version: number | null; status: 'confirmed' | 'default' | 'trial'; differs: string[] };
+  inputs: Record<string, string>;
+  figures: Record<string, string | null>;
+}
+
+/** One to-do on 总览: a blocking line of a task's month-close status, or a 收费明细 / 口径 waiting on the manager. */
+export interface OverviewTodo {
+  kind: 'scope' | 'source' | 'structure' | 'controls' | 'exceptions' | 'review' | 'collection' | 'signoff';
+  text: string;
+  /** Where on the task it is handled: scope, datasets, structure, controls, results, drafts or billing. */
+  target?: string;
+}
+
+/** One active task on 总览, with its month-close line as `finance-close-status` gives it. */
+export interface OverviewTask {
+  task: TaskRow;
+  headline?: { state: string; text: string; detail?: string };
+  blocks?: { key: string; label: string; state: 'done' | 'attention' | 'blocked' | 'not_started' }[];
+  conclusion?: { level: string; text: string };
+  todo: OverviewTodo[];
+  /** The example reference task is still being built. */
+  building?: boolean;
+  /** This task could not be read; the others still are. */
+  error?: string;
+}
+
+/** What `overview` answers. */
+export interface Overview {
+  schema_version: 1;
+  tasks: OverviewTask[];
+  todo_count: number;
+}
+
+/** What `library-detail` answers for one draft: its text, its checks, what it rests on and the task's versions. */
+export interface LibraryDetail {
+  schema_version: 1;
+  task_id: string;
+  draft: {
+    draft_id: string; revision: number; title: string; created_at: string;
+    review_status: string | null; publication_status: string | null; parent_id: string | null; body: string;
+  };
+  checks: { key: string; label: string; status: string }[];
+  rests_on: {
+    run_id: string; label: string; seq?: number | null; created_at?: string | null; execution_status?: string | null;
+    missing?: boolean; datasets: { id: string; name: string; hash: string }[];
+  }[];
+  requirements: { seq: number | null; scope: Record<string, unknown> } | null;
+  versions: { draft_id: string; revision: number; title: string; created_at: string }[];
+}
 
 /** The read surface, one entry per screen question. */
 export const READS = {
@@ -128,6 +209,9 @@ export const READS = {
   task: 'task-show',
   deliverables: 'deliverables',
   analysis: 'analysis-deliverables',
+  overview: 'overview',
+  library: 'library',
+  libraryDetail: 'library-detail',
 } as const;
 
 export type ReadName = keyof typeof READS;
@@ -150,58 +234,6 @@ export function listAnalysisDeliverables(binding: Binding, env?: FoundryEnv): Pr
 }
 
 /**
- * The deliverable gallery, newest first, with the task each version belongs to.
- *
- * Composed here from two calls rather than added to the CLI as a third: the
- * gallery is a presentation question ("what has this machine produced lately"),
- * and the store already answers both halves. A CLI command for it would exist
- * only to save this loop.
- */
-export async function deliverableGallery(
-  binding: Omit<Binding, 'task'>,
-  env?: FoundryEnv,
-  known?: TaskRow[],
-): Promise<{ task: TaskRow; row: DeliverableRow }[]> {
-  const tasks = known ?? await listTasks(binding, env);
-  const answers = await perTask(tasks, (task) => listDeliverables({ ...binding, task: task.id }, env));
-  const gathered = tasks.flatMap((task, index) => answers[index].map((row) => ({ task, row })));
-  // Newest first, and `seq` breaks the ties rather than leaving them to input
-  // order. Timestamps are second-resolution and `emit-brief` files the brief and
-  // the workpaper in the same instant, so a tie is the normal case, not an edge:
-  // sorting on `at` alone leaves those two ascending inside a descending list.
-  return gathered.sort((a, b) => {
-    if (a.row.at !== b.row.at) return a.row.at < b.row.at ? 1 : -1;
-    return b.row.seq - a.row.seq;
-  });
-}
-
-/** How many per-task CLI reads 成果库 runs at once; each is its own foundry process. */
-const TASK_READS_AT_ONCE = 4;
-
-/**
- * One read per task, a few at a time, answered in task order. They start in
- * task order too, and the first failure stops new ones from starting.
- */
-async function perTask<T>(tasks: TaskRow[], read: (task: TaskRow) => Promise<T>): Promise<T[]> {
-  const answers: T[] = new Array(tasks.length);
-  let next = 0;
-  let failed = false;
-  const worker = async () => {
-    while (!failed && next < tasks.length) {
-      const index = next++;
-      try {
-        answers[index] = await read(tasks[index]);
-      } catch (error) {
-        failed = true;
-        throw error;
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(TASK_READS_AT_ONCE, tasks.length) }, worker));
-  return answers;
-}
-
-/**
  * Which kind goes first when two rows share a second.
  *
  * An export is made after the revision it came from, so within one second it
@@ -209,19 +241,25 @@ async function perTask<T>(tasks: TaskRow[], read: (task: TaskRow) => Promise<T>)
  * old flow writes elsewhere and goes last. Ranking kinds instead of guessing
  * keeps the list the same on every read.
  */
-const SAME_SECOND_RANK: Record<GalleryRow['type'], number> = { export: 0, draft: 1, deliverable: 2 };
+const SAME_SECOND_RANK: Record<GalleryRow['type'], number> = {
+  export: 0, draft: 1, workbook: 2, chart: 3, collection: 4, deliverable: 5,
+};
 
-/** A row's own sequence inside its kind: the old flow's seq, the draft's seq, the source revision. */
+/** A row's own sequence inside its kind: the old flow's seq, the draft's seq, the source revision; none for the rest. */
 function ordinal(row: GalleryRow): number {
-  return row.type === 'deliverable' ? row.row.seq : row.type === 'draft' ? row.draft.seq : row.exported.revision;
+  if (row.type === 'deliverable') return row.row.seq;
+  if (row.type === 'draft') return row.draft.seq;
+  if (row.type === 'export') return row.exported.revision;
+  return 0;
 }
 
 /**
  * 成果库's order: newest first, and total.
  *
- * Two old-flow rows compare exactly as `deliverableGallery` does -- time, then
- * seq -- and everything else falls through to the kind and then the key, so
- * the order never depends on which task or which store answered first.
+ * Two old-flow rows compare by time, then seq, so a brief and a workpaper
+ * filed in one instant keep their own order; everything else falls through
+ * to the kind and then the key, so the order never depends on which task or
+ * which store answered first.
  */
 export function newestFirst(a: GalleryRow, b: GalleryRow): number {
   if (a.at !== b.at) return a.at < b.at ? 1 : -1;
@@ -232,30 +270,33 @@ export function newestFirst(a: GalleryRow, b: GalleryRow): number {
 }
 
 /**
- * 成果库: the old flow's versions, the newest draft of each revision chain, and
- * every filed export, as one list.
+ * 成果库: every version and file the tasks outside the trash produced, as one list.
  *
- * Composed here for the same reason as `deliverableGallery`: each store already
- * answers its half. The analysis half is its own read because drafts and
- * exports live in the analysis store, and it carries their review and
- * publication state as the store saved it; nothing here decides a status.
+ * One `library` call reads every task in one process; it used to be two
+ * processes per task, which a store with twenty tasks felt. The CLI decides
+ * nothing here either: each row carries the state its own store saved.
  */
 export async function galleryRows(binding: Omit<Binding, 'task'>, env?: FoundryEnv): Promise<GalleryRow[]> {
-  const tasks = (await listTasks(binding, env, 'all')).filter((task) => (task.lifecycle_status ?? 'active') !== 'trashed');
-  const rows: GalleryRow[] = (await deliverableGallery(binding, env, tasks)).map(({ task, row }) => ({
-    type: 'deliverable', key: `deliverable:${task.id}:${row.seq}`, at: row.at, task, row,
-  }));
-  const answers = await perTask(tasks, (task) => listAnalysisDeliverables({ ...binding, task: task.id }, env));
-  for (const [index, task] of tasks.entries()) {
-    const { drafts, exports } = answers[index];
-    for (const draft of drafts) {
-      rows.push({ type: 'draft', key: `draft:${draft.draft_id}`, at: draft.created_at, task, draft });
-    }
-    for (const exported of exports) {
-      rows.push({ type: 'export', key: `export:${exported.export_id}`, at: exported.created_at, task, exported });
-    }
-  }
-  return rows.sort(newestFirst);
+  const rows = await runFoundryJson<GalleryRow[]>(binding, READS.library, [], env);
+  return [...rows].sort(newestFirst);
+}
+
+/** 总览: every active task's month-close line and what is waiting on the manager, in one process. */
+export function overviewRows(binding: Omit<Binding, 'task'>, env?: FoundryEnv): Promise<Overview> {
+  return runFoundryJson<Overview>(binding, READS.overview, [], env);
+}
+
+/** One draft as 成果库's side panel shows it. The renderer names a task and a draft id, nothing else. */
+export async function libraryDetail(binding: Binding, draftId: string, env?: FoundryEnv): Promise<LibraryDetail> {
+  if (!/^[0-9a-f]{32}$/.test(draftId)) throw new Error(`not a draft id: ${draftId}`);
+  return runFoundryJson<LibraryDetail>(binding, READS.libraryDetail, ['--draft', draftId], env);
+}
+
+/** Where a 写回 Excel copy was filed, from its id; the CLI checks its bytes against its record. */
+export async function workbookOutputPath(binding: Binding, outputId: string, env?: FoundryEnv): Promise<string> {
+  if (!/^[0-9a-f]{32}$/.test(outputId)) throw new Error(`not a workbook output id: ${outputId}`);
+  const found = await runFoundryJson<{ path: string }>(binding, 'workbook-output-path', ['--output', outputId], env);
+  return found.path;
 }
 
 /**

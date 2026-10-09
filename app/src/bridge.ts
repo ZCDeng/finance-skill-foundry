@@ -186,7 +186,92 @@ export interface AnalysisExportRow {
 export type GalleryRow =
   | { type: 'deliverable'; key: string; at: string; task: TaskRow; row: DeliverableRow }
   | { type: 'draft'; key: string; at: string; task: TaskRow; draft: AnalysisDraftRow }
-  | { type: 'export'; key: string; at: string; task: TaskRow; exported: AnalysisExportRow };
+  | { type: 'export'; key: string; at: string; task: TaskRow; exported: AnalysisExportRow }
+  | { type: 'chart'; key: string; at: string; task: TaskRow; chart: ChartRow }
+  | { type: 'workbook'; key: string; at: string; task: TaskRow; output: WorkbookOutputRow }
+  | { type: 'collection'; key: string; at: string; task: TaskRow; run: CollectionRunRow };
+
+/** One 归档图: a chart saved from a run, with the names of the files that run read. */
+export interface ChartRow {
+  id: string;
+  label: string;
+  run_id: string | null;
+  created_at: string;
+  datasets: string[];
+}
+
+/** One 写回 Excel copy: a new workbook made from a snapshot and a reviewed patch. */
+export interface WorkbookOutputRow {
+  id: string;
+  filename: string;
+  sha256: string;
+  created_at: string;
+  /** The snapshot it was written from, by name. */
+  dataset: string;
+  applied: number;
+  kept: number;
+}
+
+/** One 收缴率 run, with the 口径 it ran under: confirmed, the default nobody confirmed, or a trial. */
+export interface CollectionRunRow {
+  id: string;
+  created_at: string;
+  run_by: string | null;
+  as_of: string;
+  group_by: string[];
+  caliber: { version: number | null; status: 'confirmed' | 'default' | 'trial'; differs: string[] };
+  inputs: Record<string, string>;
+  figures: Record<string, string | null>;
+}
+
+/** One to-do on 总览: a blocking line of a task's month-close status, or a 收费明细 / 口径 waiting on the manager. */
+export interface OverviewTodo {
+  kind: 'scope' | 'source' | 'structure' | 'controls' | 'exceptions' | 'review' | 'collection' | 'signoff';
+  text: string;
+  /** Where on the task it is handled: scope, datasets, structure, controls, results, drafts or billing. */
+  target?: string;
+}
+
+/** One active task on 总览, with its month-close line as `finance-close-status` gives it. */
+export interface OverviewTask {
+  task: TaskRow;
+  headline?: { state: string; text: string; detail?: string };
+  blocks?: { key: string; label: string; state: 'done' | 'attention' | 'blocked' | 'not_started' }[];
+  conclusion?: { level: string; text: string };
+  todo: OverviewTodo[];
+  /** The example reference task is still being built. */
+  building?: boolean;
+  /** This task could not be read; the others still are. */
+  error?: string;
+}
+
+/** What `overview` answers. */
+export interface Overview {
+  schema_version: 1;
+  tasks: OverviewTask[];
+  todo_count: number;
+}
+
+/** What `library-detail` answers for one draft: its text, its checks, what it rests on and the task's versions. */
+export interface LibraryDetail {
+  schema_version: 1;
+  task_id: string;
+  draft: {
+    draft_id: string; revision: number; title: string; created_at: string;
+    review_status: string | null; publication_status: string | null; parent_id: string | null; body: string;
+  };
+  checks: { key: string; label: string; status: string }[];
+  rests_on: {
+    run_id: string; label: string; seq?: number | null; created_at?: string | null; execution_status?: string | null;
+    missing?: boolean; datasets: { id: string; name: string; hash: string }[];
+  }[];
+  requirements: { seq: number | null; scope: Record<string, unknown> } | null;
+  versions: { draft_id: string; revision: number; title: string; created_at: string }[];
+}
+
+
+/** A file 成果库 can hand to the default program: a filed export by digest and format, or a 写回 Excel copy by id. */
+export type LibraryFile = { kind: 'export'; sha: string; format: ExportFormat } | { kind: 'workbook'; id: string };
 
 export type Intent = 'author' | 'period' | 'followup' | 'analysis';
 
@@ -241,6 +326,12 @@ export interface Bridge {
   task(id: string): Promise<Answer<TaskDetail>>;
   /** 成果库: old-flow versions, the newest draft of each revision chain and every filed export, newest first. */
   gallery(): Promise<Answer<GalleryRow[]>>;
+  /** 总览: every active task's month-close line and its to-dos. Absent in a build without it. */
+  overview?(): Promise<Answer<Overview>>;
+  /** 成果库's side panel for one draft. */
+  libraryDetail?(task: string, draft: string): Promise<Answer<LibraryDetail>>;
+  /** Open a filed export or a 写回 Excel copy, or show it in Finder. */
+  libraryFile?(task: string, file: LibraryFile, action: 'open' | 'reveal'): Promise<Answer<{ opened?: string; shown?: string }>>;
   /**
    * Hand one filed analysis export to the default program. The renderer names
    * the task, the digest and the format; main resolves the file through the CLI.

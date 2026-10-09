@@ -40,6 +40,10 @@ const api = {
   tasks: (lifecycle?: string) => ipcRenderer.invoke('foundry:tasks', lifecycle),
   task: (id: string) => ipcRenderer.invoke('foundry:task', id),
   gallery: () => ipcRenderer.invoke('foundry:gallery'),
+  overview: () => ipcRenderer.invoke('foundry:overview'),
+  libraryDetail: (task: string, draft: string) => ipcRenderer.invoke('foundry:library-detail', task, draft),
+  libraryFile: (task: string, file: unknown, action: 'open' | 'reveal') =>
+    ipcRenderer.invoke('foundry:library-file', task, file, action),
   deliverableText: (task: string, sha: string) =>
     ipcRenderer.invoke('foundry:deliverable-text', task, sha),
   deliverableOpen: (task: string, sha: string, ext: string) =>

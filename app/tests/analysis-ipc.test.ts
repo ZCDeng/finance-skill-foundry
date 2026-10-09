@@ -374,19 +374,46 @@ describe('analysis IPC task and session binding', () => {
     expect(result.message).toContain('No application knows how to open this file');
   });
 
-  it('answers 成果库 with the old flow, the newest drafts and the filed exports in one list', async () => {
+  it('answers 成果库 with the old flow, the newest drafts and the filed exports in one list, from one read', async () => {
     registerIpc({ varRoot: '/store' });
     const at = '2026-09-27T03:00:00Z';
-    mocks.run.mockImplementation(async (_binding, command) => command === 'task-list'
-      ? JSON.stringify([{ id: task, title: '八月', period: '2026-08', skill_id: null, created_at: at, windows: 1 }])
-      : command === 'deliverables'
-        ? JSON.stringify([{ seq: 1, kind: 'brief', window_id: task, sha256: '1'.repeat(64), bytes: 1, cause: 'emit-brief', session_id: null, at }])
-        : JSON.stringify({ task_id: task, drafts: [{ draft_id: '2'.repeat(32), revision: 2, versions: 2, title: '八月', created_at: at, seq: 2,
-          review_status: 'unreviewed', publication_status: 'draft' }], exports: [] }));
+    const row = { id: task, title: '八月', period: '2026-08', skill_id: null, created_at: at, windows: 1 };
+    mocks.run.mockImplementation(async (_binding, command) => command === 'library'
+      ? JSON.stringify([
+        { type: 'deliverable', key: `deliverable:${task}:1`, at, task: row,
+          row: { seq: 1, kind: 'brief', window_id: task, sha256: '1'.repeat(64), bytes: 1, cause: 'emit-brief', session_id: null, at } },
+        { type: 'draft', key: `draft:${'2'.repeat(32)}`, at, task: row, draft: { draft_id: '2'.repeat(32), revision: 2, versions: 2,
+          title: '八月', created_at: at, seq: 2, review_status: 'unreviewed', publication_status: 'draft' } },
+      ])
+      : '[]');
     const result = await invoke(CHANNELS.gallery);
     expect(result.ok).toBe(true);
-    expect(result.value.map((row: { key: string }) => row.key)).toEqual([`draft:${'2'.repeat(32)}`, `deliverable:${task}:1`]);
-    expect(mocks.run.mock.calls.map((call) => call[1])).toEqual(['task-list', 'deliverables', 'analysis-deliverables']);
+    expect(result.value.map((entry: { key: string }) => entry.key)).toEqual([`draft:${'2'.repeat(32)}`, `deliverable:${task}:1`]);
+    expect(mocks.run.mock.calls.map((call) => call[1])).toEqual(['library']);
+  });
+
+  it('answers 总览 from one read and 成果库 detail only for a draft id', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.run.mockResolvedValue(JSON.stringify({ schema_version: 1, tasks: [], todo_count: 0 }));
+    expect((await invoke(CHANNELS.overview)).value).toEqual({ schema_version: 1, tasks: [], todo_count: 0 });
+    expect(mocks.run).toHaveBeenLastCalledWith(expect.objectContaining({ varRoot: '/store' }), 'overview', [], undefined);
+    const refused = await invoke(CHANNELS.libraryDetail, task, '../x');
+    expect(refused.ok).toBe(false);
+    mocks.run.mockResolvedValue(JSON.stringify({ schema_version: 1 }));
+    await invoke(CHANNELS.libraryDetail, task, '3'.repeat(32));
+    expect(mocks.run).toHaveBeenLastCalledWith(expect.objectContaining({ varRoot: '/store', task }), 'library-detail', ['--draft', '3'.repeat(32)], undefined);
+  });
+
+  it('opens or shows a 成果库 file only by digest and format or by output id', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.run.mockResolvedValue(JSON.stringify({ path: '/store/x.xlsx' }));
+    mocks.openPath.mockResolvedValue('');
+    const opened = await invoke(CHANNELS.libraryFile, task, { kind: 'workbook', id: '4'.repeat(32) }, 'open');
+    expect(opened.value).toEqual({ opened: '/store/x.xlsx' });
+    expect(mocks.run).toHaveBeenLastCalledWith(expect.objectContaining({ varRoot: '/store', task }), 'workbook-output-path', ['--output', '4'.repeat(32)], undefined);
+    expect((await invoke(CHANNELS.libraryFile, task, { kind: 'workbook', id: '/etc/passwd' }, 'open')).ok).toBe(false);
+    expect((await invoke(CHANNELS.libraryFile, task, { kind: 'path', id: '4'.repeat(32) }, 'open')).ok).toBe(false);
+    expect((await invoke(CHANNELS.libraryFile, task, { kind: 'export', sha: 'c'.repeat(64), format: 'docx' }, 'delete')).ok).toBe(false);
   });
 
   it('allows only bounded finance business commands through one IPC call', async () => {
