@@ -83,8 +83,19 @@ function machoArchs(path) {
       readSync(fd, table, 0, table.length, 8);
       return Array.from({length: count}, (_, i) => table.readUInt32BE(i * size));
     }
+    if (magicBE === 0xbebafeca || magicBE === 0xbfbafeca) {
+      // A fat header written little-endian. Nothing produces these, but nothing forbids them.
+      const count = head.readUInt32LE(4);
+      if (count === 0 || count > 16) return null;
+      const size = magicBE === 0xbebafeca ? 20 : 32;
+      const table = Buffer.alloc(count * size);
+      readSync(fd, table, 0, table.length, 8);
+      return Array.from({length: count}, (_, i) => table.readUInt32LE(i * size));
+    }
     const magicLE = head.readUInt32LE(0);
     if (magicLE === 0xfeedfacf || magicLE === 0xfeedface) return [head.readUInt32LE(4)];
+    // Big-endian thin files (PowerPC, say): the same magic, byte-swapped, and a big-endian CPU type.
+    if (magicBE === 0xfeedfacf || magicBE === 0xfeedface) return [head.readUInt32BE(4)];
     return null;
   } finally {
     closeSync(fd);

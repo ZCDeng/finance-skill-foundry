@@ -106,6 +106,22 @@ describe('packaged bundle completeness', () => {
     expect(() => checkPackagedBundle(app)).toThrow('not arm64: Contents/Resources/dsh/node_modules/node-pty/prebuilds/darwin-x64/pty.node (x86_64)');
   });
 
+  it('reads byte-swapped thin and fat headers too', () => {
+    const base = mkdtempSync(join(tmpdir(), 'foundry-packed-bundle-'));
+    dirs.push(base);
+    const ppc = Buffer.alloc(32);
+    ppc.writeUInt32BE(0xfeedface, 0);
+    ppc.writeUInt32BE(0x00000012, 4);
+    writeFileSync(join(base, 'ppc'), ppc);
+    expect(machoArchs(join(base, 'ppc'))).toEqual([0x12]);
+    const swappedFat = Buffer.alloc(8 + 20);
+    swappedFat.writeUInt32BE(0xbebafeca, 0);
+    swappedFat.writeUInt32LE(1, 4);
+    swappedFat.writeUInt32LE(ARM64, 8);
+    writeFileSync(join(base, 'fat'), swappedFat);
+    expect(machoArchs(join(base, 'fat'))).toEqual([ARM64]);
+  });
+
   it('does not mistake a Java class file for a universal binary', () => {
     const base = mkdtempSync(join(tmpdir(), 'foundry-packed-bundle-'));
     dirs.push(base);
