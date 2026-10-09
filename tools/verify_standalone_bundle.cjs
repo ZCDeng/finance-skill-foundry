@@ -55,7 +55,10 @@ const cli = (vars, args) =>
 
 const LOOPBACK = /^(127\.0\.0\.1|\[::1\]|localhost):/;
 
-/** Every connection `pids` hold to a host that is not this machine. Listening sockets are not connections. */
+/**
+ * Every socket `pids` hold that reaches past this machine: a connection to another
+ * host, or a server listening on anything but loopback.
+ */
 function remoteSockets(pids) {
   if (pids.length === 0) return [];
   let out = '';
@@ -64,9 +67,17 @@ function remoteSockets(pids) {
   } catch (error) {
     out = String(error.stdout ?? ''); // lsof exits 1 when nothing matched
   }
-  return out.split('\n').slice(1).filter(Boolean)
-    .map((line) => line.trim().split(/\s+/).find((field) => field.includes('->')))
-    .filter((name) => name && !LOOPBACK.test(name.split('->')[1]));
+  const found = [];
+  for (const line of out.split('\n').slice(1).filter(Boolean)) {
+    const fields = line.trim().split(/\s+/);
+    const connection = fields.find((field) => field.includes('->'));
+    if (connection && !LOOPBACK.test(connection.split('->')[1])) found.push(connection);
+    if (!connection && line.includes('(LISTEN)')) {
+      const address = fields[fields.indexOf('(LISTEN)') - 1];
+      if (!LOOPBACK.test(address)) found.push(`listening on ${address}`);
+    }
+  }
+  return found;
 }
 
 /** The pid and every descendant, with each one's command line, from one `ps` snapshot. */
@@ -205,7 +216,7 @@ async function main() {
   });
 
   await step('frozen Formulator serves the locked catalog', async () => {
-    const out = execFileSync(process.execPath, [join(KIT, 'app/scripts/gate-formulator.mjs'), '--bin', foundry, '--formulator', formulator], {
+    const out = execFileSync(process.execPath, [join(KIT, 'app/scripts/gate-formulator.mjs'), '--bin', foundry, '--formulator', formulator, '--var', join(scratch, 'gate-var')], {
       encoding: 'utf8', env: {...BARE, PATH: BARE.PATH}, timeout: 180_000,
     });
     const connectors = out.match(/connectors: (.*)/)?.[1] ?? '';

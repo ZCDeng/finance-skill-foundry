@@ -93,6 +93,8 @@ extraResources:
       - '!**/node-pty/prebuilds/darwin-x64/**'
       - '!**/node-pty/prebuilds/linux-*/**'
       - '!**/node-pty/prebuilds/win32-*/**'
+      # And the Windows console host it vendors beside them.
+      - '!**/node-pty/third_party/**'
   # The pin, so an installed app can say which runtime it carries.
   - from: extra/dsh
     to: dsh
