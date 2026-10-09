@@ -190,6 +190,17 @@ def test_the_cli_adds_confirms_and_runs(pack, tmp_path, capsys):
     assert state["runs"] == listed and len(state["details"]) == 3 and state["caliber"]["effective"]["total_method"] == "bounded"
 
 
+def test_a_run_needs_no_source_file_beside_the_code(pack, tmp_path, monkeypatch):
+    # The packaged app carries bytecode only; 0.10.0 failed every run reading this module's source.
+    import foundry.billing_detail as billing_detail
+
+    task, manager, ids = pack
+    monkeypatch.setattr(billing_detail, "__file__", str(tmp_path / "missing" / "billing_detail.py"))
+    run = manager.collection_run({**ids, "as_of": "2026-08-31"})
+    assert run["engine_version"] == billing_detail.COLLECTION_ENGINE_VERSION
+    assert "code_sha256" not in run
+
+
 def test_names_billing_systems_use_are_proposed():
     assert propose_mapping("receipt", ["实收单号", "缴费日期", "账单号", "实收金额"]) == {
         "receipt_id": "实收单号", "date": "缴费日期", "bill_id": "账单号", "amount": "实收金额"}

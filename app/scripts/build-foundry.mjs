@@ -102,7 +102,53 @@ function selfTest() {
       env: { HOME: process.env.HOME ?? '', PATH: '/usr/bin:/bin' },
     });
   }
+  collectionSelfTest(join(scratch, 'collection'));
   rmSync(scratch, { recursive: true, force: true });
+}
+
+/**
+ * 收费明细 through to a collection run, on the frozen binary.
+ *
+ * `probe` never reaches DuckDB's detail tables or the collection engine, and
+ * 0.10.0 shipped a run that hashed its own `.py` file -- which the bundle does
+ * not carry, only bytecode. Every 收缴率 failed in the packaged app while every
+ * test passed in a checkout. The rows are the hand-worked ones in
+ * tests/test_billing_detail.py, cut down: 当期 100 of 300 应收.
+ */
+function collectionSelfTest(scratch) {
+  const env = { HOME: process.env.HOME ?? '', PATH: '/usr/bin:/bin' };
+  const files = join(scratch, 'files');
+  const vars = join(scratch, 'var');
+  mkdirSync(files, { recursive: true });
+  const write = (name, lines) => {
+    const path = join(files, name);
+    writeFileSync(path, lines.join('\r\n') + '\r\n');
+    return path;
+  };
+  const receivables = write('应收.csv', [
+    '应收单号,房产编号,收费项目,账期,应收原额,减免额,应收净额,单据状态',
+    'B1,P1,住宅物业服务费,2026-01,100,0,100,正常',
+    'B2,P2,住宅物业服务费,2026-02,200,0,200,正常',
+  ]);
+  const receipts = write('实收.csv', [
+    '收款单号,收款日期,应收单号,收款金额,收款方式,款项性质',
+    'R1,2026-01-15,B1,100,微信,当期',
+  ]);
+  const run = (args) =>
+    execFileSync(BIN, ['--var', vars, ...args], { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'inherit'] }).trim();
+  const task = run(['task-new', '--title', 'self-test']);
+  const as = ['--task', task, '--actor', 'manager'];
+  const ids = {};
+  for (const [kind, name, path] of [['receivable', '应收', receivables], ['receipt', '实收', receipts]]) {
+    ids[kind] = JSON.parse(run([...as, 'detail-add', '--kind', kind, '--name', name, '--path', path])).id;
+    run([...as, 'detail-confirm', '--detail', ids[kind]]);
+  }
+  const result = JSON.parse(run([...as, 'collection-run', '--spec', JSON.stringify({ ...ids, as_of: '2026-08-31' })]));
+  const rate = result.result.figures.collection_rate_current;
+  if (rate !== '0.3333') {
+    throw new Error(`self-test: collection run gave 当期收缴率 ${JSON.stringify(rate)}, expected "0.3333"`);
+  }
+  console.log(`self-test: collection run ok (当期收缴率 ${rate})`);
 }
 
 function check() {
@@ -201,6 +247,11 @@ execFileSync(
 mkdirSync(dirname(STAGE), { recursive: true });
 execFileSync('cp', ['-R', join(BUILD, 'dist', 'foundry'), STAGE]);
 
+console.log('self-test: the kit\'s own fixture period …');
+selfTest();
+
+// Stamped only once the self-test passed: `--check` trusts the stamp, so a
+// bundle that failed its self-test must not leave one behind.
 const version = JSON.parse(
   execFileSync(python, ['-c', 'import json,tomllib,pathlib;print(json.dumps(tomllib.loads(pathlib.Path("' + join(KIT, 'pyproject.toml') + '").read_text())["project"]))'], { encoding: 'utf8' }),
 );
@@ -217,9 +268,6 @@ writeFileSync(
     '',
   ].join('\n'),
 );
-
-console.log('self-test: the kit\'s own fixture period …');
-selfTest();
 
 const problems = check();
 if (problems.length) {
