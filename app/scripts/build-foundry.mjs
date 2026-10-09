@@ -16,10 +16,11 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { foundrySourceHash, stampedHash } from './source-hash.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = join(HERE, '..');
@@ -33,50 +34,13 @@ const STAMP = join(STAGE, 'BUILT');
  * A fingerprint of everything this freeze embeds.
  *
  * The freeze takes the whole `foundry` package -- its Python and the resources
- * tree it carries in `--add-data` -- and copies it inside the bundle. Nothing
- * afterwards ever looks at the checkout again, so a bundle can be arbitrarily
- * older than the source it was made from and behave perfectly while doing the
- * wrong thing.
- *
- * That is not hypothetical. Two agent presets grew a `preset.yml` naming what
- * they are; the file was written, the packaged mirror was synced, both suites
- * were green, and the packaged app still installed presets with no display text
- * at all -- because the frozen CLI carried the resources tree from an earlier
- * freeze and `--check` only asked whether the binary existed.
- *
- * Path and content, both: a renamed file with identical bytes is a different
- * tree, and `install_presets` walks directories by name.
+ * tree it carries in `--add-data` -- and copies it inside the bundle. That is not
+ * a hypothetical drift: two agent presets grew a `preset.yml` naming what they
+ * are, both suites were green, and the packaged app still installed presets with
+ * no display text at all -- because the frozen CLI carried the resources tree
+ * from an earlier freeze and `--check` only asked whether the binary existed.
  */
-function sourceHash() {
-  const root = join(KIT, 'foundry');
-  const hash = createHash('sha256');
-  const walk = (dir) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
-      a.name < b.name ? -1 : 1,
-    )) {
-      if (entry.name === '__pycache__' || entry.name.endsWith('.pyc')) continue;
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) walk(path);
-      else {
-        hash.update(relative(root, path).split('/').join('/'));
-        hash.update(readFileSync(path));
-      }
-    }
-  };
-  walk(root);
-  hash.update('build-foundry.mjs');
-  hash.update(readFileSync(fileURLToPath(import.meta.url)));
-  return hash.digest('hex');
-}
-
-/** The fingerprint the stamp recorded, or null when it predates them. */
-function stampedHash() {
-  if (!existsSync(STAMP)) return null;
-  const line = readFileSync(STAMP, 'utf8')
-    .split('\n')
-    .find((row) => row.startsWith('source: '));
-  return line ? line.slice(8).trim() : null;
-}
+const sourceHash = () => foundrySourceHash(KIT, fileURLToPath(import.meta.url));
 
 /**
  * What the frozen bundle must be able to do before it counts as built.
@@ -113,23 +77,27 @@ function selfTest() {
  * 0.10.0 shipped a run that hashed its own `.py` file -- which the bundle does
  * not carry, only bytecode. Every 收缴率 failed in the packaged app while every
  * test passed in a checkout. The rows are the hand-worked ones in
- * tests/test_billing_detail.py, cut down: 当期 100 of 300 应收.
+ * tests/test_billing_detail.py, cut down: 当期 100 of 300 应收. The 应收 file is
+ * GBK, as 收费系统 exports usually are.
  */
 function collectionSelfTest(scratch) {
   const env = { HOME: process.env.HOME ?? '', PATH: '/usr/bin:/bin' };
   const files = join(scratch, 'files');
   const vars = join(scratch, 'var');
   mkdirSync(files, { recursive: true });
-  const write = (name, lines) => {
+  const write = (name, lines, encoding = 'UTF-8') => {
     const path = join(files, name);
-    writeFileSync(path, lines.join('\r\n') + '\r\n');
+    const text = lines.join('\r\n') + '\r\n';
+    // GBK is what a Chinese-locale Excel saves as CSV. The bundle decodes it in
+    // Python's own codecs, so this proves they were frozen in, not that DuckDB can.
+    writeFileSync(path, encoding === 'UTF-8' ? text : execFileSync('/usr/bin/iconv', ['-f', 'UTF-8', '-t', encoding], { input: text }));
     return path;
   };
   const receivables = write('应收.csv', [
     '应收单号,房产编号,收费项目,账期,应收原额,减免额,应收净额,单据状态',
     'B1,P1,住宅物业服务费,2026-01,100,0,100,正常',
     'B2,P2,住宅物业服务费,2026-02,200,0,200,正常',
-  ]);
+  ], 'GBK');
   const receipts = write('实收.csv', [
     '收款单号,收款日期,应收单号,收款金额,收款方式,款项性质',
     'R1,2026-01-15,B1,100,微信,当期',
@@ -140,7 +108,12 @@ function collectionSelfTest(scratch) {
   const as = ['--task', task, '--actor', 'manager'];
   const ids = {};
   for (const [kind, name, path] of [['receivable', '应收', receivables], ['receipt', '实收', receipts]]) {
-    ids[kind] = JSON.parse(run([...as, 'detail-add', '--kind', kind, '--name', name, '--path', path])).id;
+    const added = JSON.parse(run([...as, 'detail-add', '--kind', kind, '--name', name, '--path', path]));
+    const encoding = added.files?.[0]?.encoding;
+    if (kind === 'receivable' && encoding !== 'gb18030') {
+      throw new Error(`self-test: the GBK 应收 file was read as ${JSON.stringify(encoding)}, expected "gb18030"`);
+    }
+    ids[kind] = added.id;
     run([...as, 'detail-confirm', '--detail', ids[kind]]);
   }
   const result = JSON.parse(run([...as, 'collection-run', '--spec', JSON.stringify({ ...ids, as_of: '2026-08-31' })]));
@@ -162,7 +135,7 @@ function check() {
     problems.push('the packaged resources tree is incomplete (formulator-plugin)');
   }
   if (problems.length === 0) {
-    const stamped = stampedHash();
+    const stamped = stampedHash(STAMP);
     const current = sourceHash();
     if (stamped === null) {
       problems.push('the frozen CLI carries no source fingerprint (it predates this check)');

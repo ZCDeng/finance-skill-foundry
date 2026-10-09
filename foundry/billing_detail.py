@@ -35,6 +35,7 @@ from typing import Any
 
 import duckdb
 
+from foundry import duckdb_offline
 from foundry.analysis_data import decode_text
 from foundry.errors import FoundryError
 from foundry.fsutil import write_json_atomic
@@ -231,7 +232,7 @@ class BillingDetailStore:
         assert columns is not None
         names = [f"c{number}" for number in range(1, len(columns) + 1)]
         database = folder / "detail.duckdb"
-        connection = duckdb.connect(str(database))
+        connection = duckdb_offline.connect(str(database))
         try:
             # One thread keeps each file's rows in file order, so row_number() is the line in the file.
             connection.execute("SET threads TO 1")
@@ -443,7 +444,7 @@ class BillingDetailStore:
                 raise FoundryError(f"grouping by {field} needs that column confirmed in the {KIND_LABELS[GROUP_FIELDS[field]]}")
         if params["exclude_related"] and ("property" not in metas or "owner" not in metas["property"]["confirmation"]["mapping"]):
             raise FoundryError("leaving related parties out needs the property master's 产权归属 column")
-        connection = duckdb.connect(":memory:")
+        connection = duckdb_offline.connect(":memory:")
         try:
             for kind, meta in metas.items():
                 path = str(self._folder(meta["id"]) / "detail.duckdb").replace("'", "''")

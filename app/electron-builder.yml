@@ -1,6 +1,6 @@
 appId: com.foundry.finance-skill-foundry
 productName: FA Foundry
-afterPack: scripts/check-packaged-font.cjs
+afterPack: scripts/check-packaged-bundle.cjs
 directories:
   output: release
   buildResources: build
@@ -45,6 +45,13 @@ extraResources:
       - 'manifest.json'
       - '*.woff2'
       - 'IBMPlexMono-Regular.ttf'
+  # The brand face's license (OFL §2). Vite carries the WOFF2 faces into the
+  # archive but not the license: the `/*!` comment in `fonts.css` does not survive
+  # minification, so without this file 0.10.1 shipped Asap Sharp unlicensed.
+  - from: src/assets/fonts/asap-sharp
+    to: fonts/asap-sharp
+    filter:
+      - 'OFL.txt'
   # `node_modules` is named on its own line. electron-builder skips a directory
   # by that name inside extraResources unless it is asked for explicitly, and the
   # failure is quiet: the bundle builds, `dsh/` arrives holding only the pin
@@ -79,6 +86,15 @@ extraResources:
       # The compiler's incremental-build scratch: file hashes and a dependency
       # graph for a machine that is not the buyer's.
       - '!**/*.tsbuildinfo'
+      # node-pty publishes prebuilt binaries for every platform in one package.
+      # This app is Apple Silicon only (`mac.target` below); the Intel, Linux and
+      # Windows ones are dead weight, and the Intel pair were the only x86_64
+      # Mach-O files in 0.10.1.
+      - '!**/node-pty/prebuilds/darwin-x64/**'
+      - '!**/node-pty/prebuilds/linux-*/**'
+      - '!**/node-pty/prebuilds/win32-*/**'
+      # And the Windows console host it vendors beside them.
+      - '!**/node-pty/third_party/**'
   # The pin, so an installed app can say which runtime it carries.
   - from: extra/dsh
     to: dsh
@@ -89,6 +105,11 @@ extraResources:
     to: dsh/assets/fonts
     filter:
       - 'NotoSansSC-variable.woff2'
+  # And that font's license beside it (OFL §2).
+  - from: src/assets/fonts/noto-sans-sc
+    to: dsh/assets/fonts
+    filter:
+      - 'OFL.txt'
   # The frozen `foundry` CLI. The app shells out to it for every read and for the
   # wiring steps, so without it a packed build only works where the kit is
   # already installed.
@@ -115,8 +136,10 @@ extraResources:
       - '**/*'
       - '!**/.DS_Store'
 
-  # The period bundle, as a directory the profile installer can hand to a package
-  # manager and symlink to. Neither of those can be a path inside an archive.
+  # The period bundle, as a real directory. The harness's own copy lives in
+  # `dsh/node_modules/finance-skill-foundry-dsh`; this one is what each harness
+  # profile symlinks to, and a symlink cannot point inside an archive. No package
+  # manager runs on the buyer's machine (see `electron/harness/wiring.ts`).
   - from: ../dsh-plugin
     to: dsh-plugin
     filter:
@@ -130,8 +153,14 @@ mac:
   # every `build/` directory, and an icon left there never reaches a clean
   # checkout. Without one the bundle ships Electron's own.
   icon: resources/icon.icns
+  # Apple Silicon only, named rather than inherited from the build host: a build
+  # run from an x64 Node under Rosetta would otherwise produce an x64 shell
+  # around arm64 Python bundles. `scripts/check-packaged-bundle.cjs` asserts every
+  # Mach-O file in the result is arm64.
   target:
-    - dir
+    - target: dir
+      arch:
+        - arm64
   # `npm run package` stays unsigned so any machine can build; first open goes through
   # right-click → Open. The release build signs and notarizes instead:
   #   CSC_NAME="<Name> (<TEAMID>)" npm run package:signed   # no "Developer ID Application:" prefix

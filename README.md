@@ -134,4 +134,6 @@ FOUNDRY_DSH_BIN="$PWD/app/extra/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js" .v
 
 桌面真实交互脚本为 `tools/verify_desktop_workbench.cjs` 和 `tools/verify_desktop_sessions.cjs`，使用已有 Playwright（`PLAYWRIGHT_MODULE` 指定其模块路径），无需添加项目依赖。会话脚本测试打包应用时另设 `QA_APP` 为应用可执行路径，`QA_FOUNDRY` 为包内 CLI；默认使用开发应用，此时先在 `app/` 下 `npm run build`，再运行 `npx vite --port 5273 --strictPort`。
 
+发布前在装好的应用上跑一次独立分发检查：`node tools/verify_standalone_bundle.cjs "/Applications/FA Foundry.app"`。它用空 HOME 和 `PATH=/usr/bin:/bin` 依次核对包内文件和字体齐全且全部为 arm64、冻结 CLI 自检、GBK 收费明细算出收缴率、包内 PDF 和 DOCX 转换、冻结 Data Formulator 的连接器，最后冷启动应用，确认没有启动包外程序、没有连外网。打包时 `app/scripts/check-packaged-bundle.cjs` 也会做其中的静态部分，缺文件或混入 Intel 二进制会直接停下。
+
 最后一条请使用实际冻包中的可执行路径。详细结果、桌面交互证据及尚未验证的边界见[实施记录](docs/plans/2026-09-05-execution-log.md)。

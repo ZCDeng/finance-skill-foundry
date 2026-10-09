@@ -292,10 +292,8 @@ function resolvesTo(target: string, pluginDir: string): boolean {
  * comes from and what a valid one looks like, and a second copier in this
  * process would be a second thing to keep in step.
  *
- * This is the one wiring step that still needs the Python side on the machine.
- * A packed app carries the runtime and the bundle; it does not yet carry
- * `foundry` itself, so `FOUNDRY_BIN` has to name one. That is a real gap and it
- * is named here rather than papered over.
+ * `foundryBin` is the frozen CLI the packed app carries in `Resources/foundry`;
+ * only a checkout run falls back to one on PATH (see `foundryBin` in main.ts).
  */
 export async function installPresets(opts: {
   foundryBin: string;

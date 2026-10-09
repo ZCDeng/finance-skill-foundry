@@ -12,7 +12,7 @@
  * So the gate drives a real locked window and asks the running server which
  * connectors it has.
  *
- *   node scripts/gate-formulator.mjs [--bin <frozen foundry>] [--formulator <frozen df>]
+ *   node scripts/gate-formulator.mjs [--bin <frozen foundry>] [--formulator <frozen df>] [--var <scratch dir>]
  */
 
 import { execFileSync } from 'node:child_process';
@@ -31,7 +31,7 @@ function flag(name, fallback) {
 
 const FOUNDRY = flag('--bin', join(APP, 'extra', 'foundry', 'foundry'));
 const FORMULATOR = flag('--formulator', join(APP, 'extra', 'formulator', 'data_formulator'));
-const VAR = join(APP, 'extra', 'formulator-build', 'gate-var');
+const VAR = flag('--var', join(APP, 'extra', 'formulator-build', 'gate-var'));
 const FIXTURES = join(KIT, 'fixtures', 'period-smoke');
 
 for (const [label, path] of [['foundry', FOUNDRY], ['formulator', FORMULATOR]]) {

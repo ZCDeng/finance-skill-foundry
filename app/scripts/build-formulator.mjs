@@ -23,6 +23,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { foundrySourceHash, stampedHash } from './source-hash.mjs';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = join(HERE, '..');
 const KIT = join(APP, '..');
@@ -36,6 +38,8 @@ const BUILD = join(APP, 'extra', 'formulator-build');
 const NAME = 'data_formulator';
 const BIN = join(STAGE, NAME);
 const STAMP = join(STAGE, 'BUILT');
+// The `foundry` this bundle carries for its connector, and how it was frozen.
+const sourceHash = () => foundrySourceHash(KIT, fileURLToPath(import.meta.url));
 
 function check() {
   const problems = [];
@@ -50,6 +54,20 @@ function check() {
   // and the failure is silent.
   if (!existsSync(join(STAGE, '_internal', 'foundry'))) {
     problems.push('the bundle does not carry foundry, so the locked-catalog connector cannot load');
+  }
+  if (problems.length === 0) {
+    // The CLI bundle has the same check. Without one here the two could carry
+    // different `foundry`s, and the connector would read a catalog with code
+    // older than the code that wrote it.
+    const stamped = stampedHash(STAMP);
+    const current = sourceHash();
+    if (stamped === null) {
+      problems.push('the frozen Formulator carries no source fingerprint (it predates this check)');
+    } else if (stamped !== current) {
+      problems.push(
+        `the frozen Formulator is not this checkout: it carries ${stamped.slice(0, 12)}, the source is ${current.slice(0, 12)}`,
+      );
+    }
   }
   return problems;
 }
@@ -168,6 +186,7 @@ writeFileSync(
   [
     'data-formulator 0.7.0 (carries foundry, duckdb, openpyxl)',
     'frozen-by: scripts/build-formulator.mjs (PyInstaller, one-dir)',
+    `source: ${sourceHash()}`,
     '',
     'Not in version control. Regenerate with `npm run formulator`.',
     '',
