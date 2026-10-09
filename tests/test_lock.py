@@ -240,6 +240,30 @@ def test_table_identifier_collision_refuses_import(tmp_path: Path) -> None:
         )
 
 
+def test_gbk_csv_imports_like_utf8(tmp_path: Path) -> None:
+    """用友、金蝶 and a Chinese-locale Excel write CSV as GBK; the lock reads it, not refuses it."""
+    drop = tmp_path / "drop"
+    gl = drop / "gl.csv"
+    gl.parent.mkdir(parents=True, exist_ok=True)
+    gl.write_bytes("account_code,科目名称,amount\n1001,库存现金,2.50\n".encode("gbk"))
+    window = WindowStore(tmp_path / "var").create()
+    window.import_tables(coa=_coa(drop), units=_units(drop), named=[{"id": "gl", "path": gl}], drop_dir=drop)
+    window.lock()
+    assert window.query('SELECT "科目名称", SUM(amount) FROM gl GROUP BY "科目名称"') == [("库存现金", 2.5)]
+
+
+def test_utf8_csv_without_chinese_is_not_reread_as_gbk(tmp_path: Path) -> None:
+    """Valid UTF-8 stays UTF-8: `café` must not become `caf茅` in a table nobody can correct after lock."""
+    drop = tmp_path / "drop"
+    gl = drop / "gl.csv"
+    gl.parent.mkdir(parents=True, exist_ok=True)
+    gl.write_bytes("account_code,vendor,amount\n1001,café,2.50\n".encode("utf-8"))
+    window = WindowStore(tmp_path / "var").create()
+    window.import_tables(coa=_coa(drop), units=_units(drop), named=[{"id": "gl", "path": gl}], drop_dir=drop)
+    window.lock()
+    assert window.query("SELECT vendor FROM gl") == [("café",)]
+
+
 def test_csv_amount_is_decimal_but_account_code_remains_text(tmp_path: Path) -> None:
     drop = tmp_path / "drop"
     gl = drop / "gl.csv"
