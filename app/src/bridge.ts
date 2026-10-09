@@ -33,7 +33,7 @@ export type SampleKind = 'practice' | 'reference' | 'next_month' | 'legacy';
 /** 收费明细 (foundry/billing_detail.py): a 应收明细, 实收明细 or 房产主数据 table, in DuckDB. */
 export type BillingKind = 'receivable' | 'receipt' | 'property';
 export type BillingCommand = 'detail-list' | 'detail-confirm' | 'collection-caliber' | 'collection-caliber-confirm'
-  | 'collection-run' | 'collection-run-read' | 'collection-run-list';
+  | 'collection-run' | 'collection-run-read' | 'collection-run-list' | 'collection-state';
 export interface BillingMapping { mapping: Record<string, string>; by: string; at: string }
 export interface BillingDetail {
   id: string; kind: BillingKind; name: string; created_at: string; added_by?: string;

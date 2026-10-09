@@ -50,9 +50,10 @@ function mount({ details, caliber, runs = [] as CollectionRun[], extra = {} as P
   details: BillingDetail[]; caliber: CollectionCaliber; runs?: CollectionRun[]; extra?: Partial<Bridge>;
 }) {
   const billingCall = vi.fn(async (_task: string, command: string, spec?: Record<string, unknown>) => {
-    const value = command === 'detail-list' ? details
-      : command === 'collection-caliber' ? caliber
-      : command === 'collection-run-list' ? runs.map((row) => ({ id: row.id, created_at: row.created_at, as_of: row.params.as_of, group_by: row.params.group_by, caliber: row.caliber, inputs: {}, figures: {} }))
+    const value = command === 'collection-state' ? {
+      details, caliber,
+      runs: runs.map((row) => ({ id: row.id, created_at: row.created_at, as_of: row.params.as_of, group_by: row.params.group_by, caliber: row.caliber, inputs: {}, figures: {} })),
+    }
       : command === 'collection-run-read' ? runs.find((row) => row.id === spec?.run)
       : command === 'collection-run' ? (runs.push(run('9', 'confirmed')), runs.at(-1))
       : {};
@@ -141,4 +142,26 @@ it('offers the example’s 收费明细 in a practice task only, and nothing cha
   expect(screen.queryByRole('button', { name: '导入示例收费明细' })).toBeNull();
   rerender(<BillingPanel taskId="t" readOnly />);
   expect((screen.getByRole('button', { name: '导入应收明细' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it('puts a newer assistant proposal in front of the old confirmation, and finds it without a manual refresh', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    const confirmed = table('receivable', '1', true);
+    const details = [confirmed];
+    const billingCall = mount({ details, caliber: { defaults, confirmed: null, proposed: null, effective: defaults, versions: [] } });
+    render(<BillingPanel taskId="t" period="2026-08" />);
+    expect(await screen.findByText('列已确认')).toBeTruthy();
+    // The assistant proposes 账期 from another column, later than the confirmation.
+    details[0] = { ...confirmed, columns: [...confirmed.columns, '所属账期'],
+      proposal: { mapping: { ...confirmed.proposal!.mapping, period: '所属账期' }, by: 'assistant', at: '2026-10-09T09:00:00Z' } };
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(await screen.findByText('助手提议了新的对应')).toBeTruthy();
+    await waitFor(() => expect((screen.getByLabelText('海口 receivable 账期') as HTMLSelectElement).value).toBe('所属账期'));
+    fireEvent.click(screen.getByRole('button', { name: '确认这些列' }));
+    await waitFor(() => expect(billingCall).toHaveBeenCalledWith('t', 'detail-confirm', expect.objectContaining({
+      mapping: expect.objectContaining({ period: '所属账期' }) })));
+  } finally {
+    vi.useRealTimers();
+  }
 });

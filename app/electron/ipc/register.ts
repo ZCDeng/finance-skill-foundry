@@ -466,6 +466,7 @@ export function registerIpc(
     'detail-list': () => [],
     'collection-caliber': () => [],
     'collection-run-list': () => [],
+    'collection-state': () => [],
     'detail-confirm': (spec) => ['--detail', detailId(spec.detail),
       ...(spec.mapping === undefined ? [] : ['--mapping', objectJson(spec.mapping)])],
     'collection-caliber-confirm': (spec) => [
@@ -474,12 +475,19 @@ export function registerIpc(
     'collection-run': (spec) => ['--spec', objectJson(spec)],
     'collection-run-read': (spec) => ['--run', detailId(spec.run)],
   };
+  // An archived or trashed task can be read, never added to: the same rule as its conversation.
+  const billingWrites = new Set(['detail-confirm', 'collection-caliber-confirm', 'collection-run']);
+  const activeTask = async (rawTask: unknown) => {
+    const known = await analysisCall(rawTask, 'task-show');
+    if (String(known.task?.lifecycle_status ?? 'active') !== 'active') throw new FoundryRefusal('归档或回收站任务只能查看收费明细，恢复后才能导入、确认或计算。', REFUSED);
+  };
   ipcMain.handle(CHANNELS.billingCall, (_e, rawTask: unknown, command: unknown, spec: unknown = {}) =>
     answer(async () => {
       const name = String(command ?? '');
       const build = Object.hasOwn(billingArgs, name) ? billingArgs[name] : undefined;
       if (!build) throw new Error('unsupported billing command');
       const args = build(spec && typeof spec === 'object' && !Array.isArray(spec) ? spec as Record<string, unknown> : {});
+      if (billingWrites.has(name)) await activeTask(rawTask);
       return JSON.parse(await runFoundry({ ...binding, task: taskId(rawTask) }, name, args,
         { timeoutMs: name === 'collection-run' ? LONG_MS : undefined }));
     }));
@@ -489,6 +497,7 @@ export function registerIpc(
       const task = taskId(rawTask);
       const kind = String(rawKind ?? '');
       if (!Object.hasOwn(BILLING_KINDS, kind)) throw new Error('unknown detail kind');
+      await activeTask(task);
       const selected = await chooseFiles('billing.import', {
         title: `选择${BILLING_KINDS[kind]}（CSV，可多选同一张表拆开的文件）`,
         properties: ['openFile', 'multiSelections'],
@@ -501,8 +510,10 @@ export function registerIpc(
       return JSON.parse(await runFoundry({ ...binding, task }, 'detail-add',
         ['--kind', kind, '--name', name, ...files.flatMap((file) => ['--path', file])], { timeoutMs: LONG_MS }));
     }));
-  ipcMain.handle(CHANNELS.taskSampleBilling, (_e, rawTask: unknown) => answer(async () =>
-    JSON.parse(await runFoundry({ ...binding, task: taskId(rawTask) }, 'task-sample-billing', [], { timeoutMs: LONG_MS }))));
+  ipcMain.handle(CHANNELS.taskSampleBilling, (_e, rawTask: unknown) => answer(async () => {
+    await activeTask(rawTask);
+    return JSON.parse(await runFoundry({ ...binding, task: taskId(rawTask) }, 'task-sample-billing', [], { timeoutMs: LONG_MS }));
+  }));
   ipcMain.handle(CHANNELS.rollforwardExport, (_e, rawTask: unknown, rawRun: unknown, rawName: unknown) =>
     answer(async () => {
       const task = taskId(rawTask);

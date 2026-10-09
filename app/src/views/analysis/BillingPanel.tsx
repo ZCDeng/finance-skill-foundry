@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Calculator, FilePlus2, Sparkles } from 'lucide-react';
 import {
   bridge, timeWait, when,
@@ -109,15 +109,29 @@ export function BillingPanel({ taskId, period, practice, readOnly, refreshKey }:
     const api = bridge(); if (!api?.billingCall) throw new Error('此版本暂不支持收费明细。');
     return unwrap(await api.billingCall(taskId, command, spec)) as T;
   }, [taskId]);
+  const seen = useRef({ signature: '', newest: '' });
+  const shown = useRef<string | undefined>(undefined);
+  /** One read of the tables, the 口径 and the run list; the shown run is read again only when asked or a new run lands. */
   const load = useCallback(async (show?: string) => {
-    const [tables, standing, history] = await Promise.all([
-      call<BillingDetail[]>('detail-list'), call<CollectionCaliber>('collection-caliber'), call<CollectionRunSummary[]>('collection-run-list'),
-    ]);
-    setDetails(tables); setCaliber(standing); setRuns(history);
-    const pick = show ?? history.at(-1)?.id;
+    const state = await call<{ details: BillingDetail[]; caliber: CollectionCaliber; runs: CollectionRunSummary[] }>('collection-state');
+    const signature = JSON.stringify(state);
+    const newest = state.runs.at(-1)?.id ?? '';
+    const before = seen.current;
+    seen.current = { signature, newest };
+    if (!show && signature === before.signature) return;
+    // Keep the run the manager picked, unless a newer run has landed since.
+    const pick = show ?? (shown.current && newest === before.newest ? shown.current : newest || undefined);
+    setDetails(state.details); setCaliber(state.caliber); setRuns(state.runs);
+    shown.current = pick;
     setRun(pick ? await call<CollectionRun>('collection-run-read', { run: pick }) : null);
   }, [call]);
-  useEffect(() => { setRun(null); void load().catch(() => {}); }, [load, refreshKey]);
+  useEffect(() => { seen.current = { signature: '', newest: '' }; shown.current = undefined; setRun(null); void load().catch(() => {}); }, [load, refreshKey]);
+  // The assistant proposes columns and 口径 and runs trials from the conversation beside this page; read again
+  // every few seconds while the window is in view, so what it proposed is here to confirm.
+  useEffect(() => {
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void load().catch(() => {}); }, 8000);
+    return () => window.clearInterval(timer);
+  }, [load]);
   const act = async (name: string, work: () => Promise<string | void>) => {
     if (working) return;
     setWorking(name); setError(''); setMessage('');
@@ -180,18 +194,21 @@ export function BillingPanel({ taskId, period, practice, readOnly, refreshKey }:
     {message && <p role="status" className="analysis-message">{message}</p>}
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
     {run && <RunView run={run} runs={runs} onPick={(id) => void act('read', async () => {
+      shown.current = id;
       setRun(await call<CollectionRun>('collection-run-read', { run: id }));
     })} />}
   </section>;
 }
 
 function DetailCard({ row, disabled, onConfirm }: { row: BillingDetail; disabled: boolean; onConfirm(mapping: Record<string, string>): void }) {
-  const standing = row.confirmation?.mapping ?? row.proposal?.mapping ?? {};
+  const proposal = row.proposal?.mapping;
+  // A proposal made after the last confirmation, and different from it, is what waits to be confirmed: show it.
+  const waiting = Boolean(proposal && row.confirmation && row.proposal!.at > row.confirmation.at
+    && JSON.stringify(proposal) !== JSON.stringify(row.confirmation.mapping));
+  const standing = (waiting ? proposal : row.confirmation?.mapping ?? proposal) ?? {};
   const [mapping, setMapping] = useState<Record<string, string>>(standing);
   const key = JSON.stringify(standing);
   useEffect(() => { setMapping(JSON.parse(key)); }, [key]);
-  const proposal = row.proposal?.mapping;
-  const waiting = proposal && row.confirmation && JSON.stringify(proposal) !== JSON.stringify(row.confirmation.mapping) && row.proposal?.by !== 'manager';
   const missing = row.fields.filter((field) => field.required && !mapping[field.field])
     .filter((field) => !(field.field === 'amount_net' && mapping.amount_gross) && !(field.field === 'amount_gross' && mapping.amount_net));
   const used = new Set(Object.values(mapping));
@@ -202,7 +219,7 @@ function DetailCard({ row, disabled, onConfirm }: { row: BillingDetail; disabled
       {row.confirmation ? <Badge variant="secondary">列已确认</Badge> : <Badge variant="destructive">待确认列</Badge>}
       {waiting ? <Badge variant="outline">助手提议了新的对应</Badge> : null}
     </span></DisclosureSummary>
-    <p className="analysis-note">{row.confirmation ? '下面是经理确认过的对应。' : row.proposal?.by === 'system' ? '系统按列名认出了下面这些列，看一眼再确认。' : '下面是助手提议的对应，看一眼再确认。'}
+    <p className="analysis-note">{waiting ? '下面是助手新提议的对应，和之前确认的不同；看一眼再确认。' : row.confirmation ? '下面是经理确认过的对应。' : row.proposal?.by === 'system' ? '系统按列名认出了下面这些列，看一眼再确认。' : '下面是助手提议的对应，看一眼再确认。'}
       带 * 的必须有；没有的列选「不用」。</p>
     <div className="analysis-edit-grid">
       {row.fields.map((field) => <FieldShell key={field.field} label={field.label} required={field.required && !['amount_net', 'amount_gross'].includes(field.field)}>

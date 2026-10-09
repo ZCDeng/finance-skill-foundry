@@ -795,7 +795,7 @@ def _compute(connection, metas: dict, params: dict) -> dict:
 # --- the CLI ----------------------------------------------------------------------------------
 
 COMMANDS = {"detail-add", "detail-list", "detail-read", "detail-propose", "detail-confirm", "collection-run", "collection-run-read",
-            "collection-run-list", "collection-caliber", "collection-caliber-propose", "collection-caliber-confirm"}
+            "collection-run-list", "collection-state", "collection-caliber", "collection-caliber-propose", "collection-caliber-confirm"}
 
 
 def add_parsers(sub) -> None:
@@ -815,6 +815,7 @@ def add_parsers(sub) -> None:
     p = sub.add_parser("collection-run-read")
     p.add_argument("--run", required=True)
     sub.add_parser("collection-run-list", help="this task's collection runs, oldest first, with their headline rates")
+    sub.add_parser("collection-state", help="detail-list, collection-caliber and collection-run-list in one read")
     sub.add_parser("collection-caliber", help="the confirmed 收缴率口径, the defaults and any proposal waiting")
     p = sub.add_parser("collection-caliber-propose", help="propose a 收缴率口径 for the manager to confirm")
     p.add_argument("--spec", required=True, help='JSON: {"params": {...}, "note": "why"}')
@@ -848,6 +849,8 @@ def dispatch(args) -> bool:
         result = store.collection_run(_object(args.spec, "collection spec"))
     elif args.cmd == "collection-run-list":
         result = store.runs()
+    elif args.cmd == "collection-state":
+        result = {"details": store.list(), "caliber": store.caliber(), "runs": store.runs()}
     elif args.cmd == "collection-caliber":
         result = store.caliber()
     elif args.cmd == "collection-caliber-propose":

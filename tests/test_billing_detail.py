@@ -185,6 +185,9 @@ def test_the_cli_adds_confirms_and_runs(pack, tmp_path, capsys):
     assert [row["id"] for row in listed] == [run["id"]]
     assert listed[0]["figures"]["collection_rate_current"] == run["result"]["figures"]["collection_rate_current"]
     assert listed[0]["caliber"] == run["caliber"] and listed[0]["as_of"] == "2026-08-31"
+    assert main(["--var", root, "--task", task.id, "collection-state"]) == 0
+    state = json.loads(capsys.readouterr().out)
+    assert state["runs"] == listed and len(state["details"]) == 3 and state["caliber"]["effective"]["total_method"] == "bounded"
 
 
 def test_names_billing_systems_use_are_proposed():

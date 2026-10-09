@@ -536,6 +536,20 @@ describe('analysis IPC task and session binding', () => {
     expect(mocks.run).toHaveBeenCalledTimes(calls);
   });
 
+  it('reads the 收费明细 of an archived task but adds, confirms and runs nothing there', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.run.mockImplementation(async (_binding, command) => command === 'task-show'
+      ? JSON.stringify({ task: { lifecycle_status: 'archived' } }) : '{}');
+    expect((await invoke(CHANNELS.billingCall, task, 'collection-state')).ok).toBe(true);
+    for (const [command, spec] of [['detail-confirm', { detail: 'c'.repeat(32) }], ['collection-caliber-confirm', { version: 1 }], ['collection-run', { as_of: '2026-08-31' }]] as const) {
+      expect(await invoke(CHANNELS.billingCall, task, command, spec)).toMatchObject({ ok: false, refused: true });
+    }
+    expect((await invoke(CHANNELS.billingAdd, task, 'receipt')).ok).toBe(false);
+    expect((await invoke(CHANNELS.taskSampleBilling, task)).ok).toBe(false);
+    expect(mocks.chooser).not.toHaveBeenCalled();
+    expect(mocks.run.mock.calls.map((call) => call[1]).filter((name) => name !== 'task-show')).toEqual(['collection-state']);
+  });
+
   it('adds a detail table only from files the native picker returned, named after them', async () => {
     registerIpc({ varRoot: '/store' });
     mocks.chooser.mockResolvedValue({ canceled: false, filePaths: ['/chosen/应收_2025.csv', '/chosen/应收_2026.csv'] });
@@ -546,7 +560,7 @@ describe('analysis IPC task and session binding', () => {
     expect((await invoke(CHANNELS.billingAdd, task, 'ledger')).ok).toBe(false);
     mocks.chooser.mockResolvedValue({ canceled: true, filePaths: [] });
     expect(await invoke(CHANNELS.billingAdd, task, 'receipt')).toEqual({ ok: true, value: { cancelled: true } });
-    expect(mocks.run).toHaveBeenCalledTimes(1);
+    expect(mocks.run.mock.calls.filter((call) => call[1] === 'detail-add')).toHaveLength(1);
     await invoke(CHANNELS.taskSampleBilling, task);
     expect(mocks.run).toHaveBeenLastCalledWith({ varRoot: '/store', task, actor: 'manager' }, 'task-sample-billing', [], { timeoutMs: 30 * 60_000 });
   });
