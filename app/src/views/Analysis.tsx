@@ -495,6 +495,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         </>}
         {view && tab === 'dashboard' && <DashboardView state={board} runs={view.runs} analyses={view.analyses} datasets={view.datasets}
           superseded={view.superseded_datasets} readOnly={readOnly} onOpenResult={(run) => {
+            // The run the card reads, not the version's primary one: RunPanel opens on the run kept here.
+            writeCopy(`${task.id}:run`, run.id);
             setSelectedAnalysis(run.analysis_id);
             chooseTab('results');
           }} />}

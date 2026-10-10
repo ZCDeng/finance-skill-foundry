@@ -147,6 +147,63 @@ def test_a_session_sees_only_the_cards_on_runs_it_may_read(tmp_path):
         narrow.dashboard_propose({"card": _rank(run)})
 
 
+def test_a_session_proposing_a_card_is_answered_with_the_cards_it_may_read(tmp_path):
+    manager, run, bindings = _board(tmp_path)
+    narrow_ids = {bindings["kpi"]}
+    hidden = manager.dashboard_save({"parent_id": None, "cards": [_gap(run)]})
+    other = FinanceStore(manager.task, actor="manager")
+    context = other.save_context({"bindings": {"kpi": bindings["kpi"]}, "scopes": {"kpi": {"currency": "CNY", "unit": "万元"}}})
+    scenario = other.save_scenario({
+        "context_id": context["id"], "kind": "collection_health", "label": "只读集团",
+        "inputs": {"entities": [{"name": "集团", "values": {
+            "revenue": _cell("营业收入"), "cost": _cell("营业成本"), "period_expense": _cell("期间费用"),
+            "collection_rate_current": _cell("本年账单收缴率")}}]},
+    })
+    readable = other.run_scenario({"scenario_id": scenario["id"]})
+    assert readable["execution_status"] == "succeeded"
+
+    narrow = FinanceStore(manager.task, snapshot_ids=narrow_ids, actor="assistant")
+    answered = narrow.dashboard_propose({"card": _gap(readable, title="只看集团")})
+    assert [card["title"] for card in answered["cards"]] == ["只看集团"]
+    stored = manager.dashboard_read({})["dashboard"]
+    assert [card["title"] for card in stored["cards"]] == [hidden["cards"][0]["title"], "只看集团"]
+
+
+def test_two_saves_on_one_board_never_both_build_on_the_same_version(tmp_path, monkeypatch):
+    import threading
+
+    from foundry import dashboards
+
+    manager, run, bindings = _board(tmp_path)
+    first = manager.dashboard_save({"parent_id": None, "cards": [_gap(run)]})
+    inside, release = threading.Event(), threading.Event()
+    arrange = dashboards.arrange
+
+    def slow_arrange(*args, **kwargs):
+        inside.set()
+        assert release.wait(5)
+        return arrange(*args, **kwargs)
+
+    monkeypatch.setattr(dashboards, "arrange", slow_arrange)
+    saved = {}
+    accepting = threading.Thread(target=lambda: saved.update(board=manager.dashboard_save(
+        {"parent_id": first["id"], "cards": [{**first["cards"][0], "state": "accepted"}]})))
+    accepting.start()
+    assert inside.wait(5)
+    assistant = FinanceStore(manager.task, snapshot_ids=set(bindings.values()), actor="assistant")
+    proposed = {}
+    proposing = threading.Thread(target=lambda: proposed.update(board=assistant.dashboard_propose({"card": _rank(run)})))
+    proposing.start()
+    proposing.join(0.3)
+    assert proposing.is_alive(), "the proposal read the board while the manager's save was still writing it"
+    release.set()
+    accepting.join(5)
+    proposing.join(5)
+    assert proposed["board"]["parent_id"] == saved["board"]["id"]
+    states = {card["title"]: card["state"] for card in manager.dashboard_read({})["dashboard"]["cards"]}
+    assert states == {"集团距生死线": "accepted", "距生死线（从低到高）": "explore"}
+
+
 def test_the_app_arranges_the_board_as_the_manager_and_an_unstamped_call_cannot(tmp_path, capsys):
     from foundry.cli import main
 

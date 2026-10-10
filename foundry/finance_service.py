@@ -2688,19 +2688,26 @@ class FinanceStore:
         current = self._dashboard()
         if current is None:
             return {"dashboard": None}
-        cards = current.get("cards", [])
-        if self.allowed is not None:
-            # A session sees the cards on runs it may read; the board itself names no files.
-            run_of = self._dashboard_runs()
-            readable = []
-            for card in cards:
-                try:
-                    run_of(card["run_id"])
-                except FoundryError:
-                    continue
-                readable.append(card)
-            cards = readable
-        return {"dashboard": {**current, "cards": cards}}
+        return {"dashboard": self._dashboard_in_view(current) if self.allowed is not None else current}
+
+    def _dashboard_in_view(self, board):
+        """The board as a session sees it: the cards on runs it may read; the board itself names no files."""
+        run_of = self._dashboard_runs()
+        readable = []
+        for card in board.get("cards", []):
+            try:
+                run_of(card["run_id"])
+            except FoundryError:
+                continue
+            readable.append(card)
+        return {**board, "cards": readable}
+
+    def _dashboard_lock(self):
+        """Held from reading the board's head to writing the next version, so two saves never both build on one head.
+        Its own file: _write takes task.lock inside it."""
+        from foundry.locking import exclusive
+
+        return exclusive(self.analysis._inside(self.analysis.root / "dashboards.lock"), timeout=10)
 
     def dashboard_save(self, spec):
         from foundry.dashboards import arrange
@@ -2708,20 +2715,24 @@ class FinanceStore:
         if not isinstance(spec, dict) or not isinstance(spec.get("cards"), list):
             raise FoundryError("dashboard save requires cards")
         self._manager_only("arrange the dashboard")
-        current = self._dashboard()
-        if (spec.get("parent_id") or None) != (current["id"] if current else None):
-            raise FoundryError("the dashboard changed since it was read; read it again")
-        cards = arrange(spec["cards"], current.get("cards", []) if current else [], run_of=self._dashboard_runs())
-        return self._write("dashboards", parent_id=current["id"] if current else None, bindings={}, cards=cards)
+        with self._dashboard_lock():
+            current = self._dashboard()
+            if (spec.get("parent_id") or None) != (current["id"] if current else None):
+                raise FoundryError("the dashboard changed since it was read; read it again")
+            cards = arrange(spec["cards"], current.get("cards", []) if current else [], run_of=self._dashboard_runs())
+            return self._write("dashboards", parent_id=current["id"] if current else None, bindings={}, cards=cards)
 
     def dashboard_propose(self, spec):
         from foundry.dashboards import propose
 
         if not isinstance(spec, dict) or not isinstance(spec.get("card"), dict):
             raise FoundryError("dashboard propose requires a card")
-        current = self._dashboard()
-        cards = propose(spec["card"], current.get("cards", []) if current else [], run_of=self._dashboard_runs())
-        return self._write("dashboards", parent_id=current["id"] if current else None, bindings={}, cards=cards)
+        with self._dashboard_lock():
+            current = self._dashboard()
+            cards = propose(spec["card"], current.get("cards", []) if current else [], run_of=self._dashboard_runs())
+            written = self._write("dashboards", parent_id=current["id"] if current else None, bindings={}, cards=cards)
+        # A session is answered with what it may read, as dashboard_read answers it; the stored board keeps every card.
+        return self._dashboard_in_view(written) if self.allowed is not None else written
 
     def analysis_circle_select(self, spec):
         from foundry.circle_select import authorize_workbook, match_draft_table, reject_forbidden_spec
