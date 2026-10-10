@@ -6,13 +6,19 @@ import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/pop
 import { DisclosureSummary } from '../../components/Disclosure.js';
 import { askWith } from '../guide/ask.js';
 import { askAboutFigure, sourceText, type FigureSourceInfo } from './figureSource.js';
+import { PinButton } from './PinButton.js';
+import type { CardDraft } from './dashboard.js';
 import './FigureSource.css';
 
 /**
  * A figure a manager can open to see where it came from. A figure without a value (—) stays plain text: there is
  * nothing to trace. The card only reads; 问助手解释 fills the conversation and sends nothing.
  */
-export function FigureSource({ text, info, hang = false, exact = false }: { text: string; info?: FigureSourceInfo; hang?: boolean; exact?: boolean }) {
+export function FigureSource({ text, info, hang = false, exact = false, pin }: {
+  text: string; info?: FigureSourceInfo; hang?: boolean; exact?: boolean;
+  /** The card 钉到看板 puts on the task's board; without one the source card offers no pin. */
+  pin?: CardDraft | null;
+}) {
   const [copied, setCopied] = useState(false);
   if (!info || text.trim() === '' || text === '—') return <Figure text={text} hang={hang} exact={exact} />;
   const copy = () => {
@@ -58,6 +64,7 @@ export function FigureSource({ text, info, hang = false, exact = false }: { text
       <div className="fnd-source-card__actions">
         <Button type="button" variant="outline" size="sm" onClick={copy}><Copy size={14} strokeWidth={1.5} aria-hidden />{copied ? '已复制' : '复制来源'}</Button>
         <Button type="button" variant="outline" size="sm" onClick={() => askWith(askAboutFigure(info))}><MessageSquare size={14} strokeWidth={1.5} aria-hidden />问助手解释</Button>
+        <PinButton draft={pin} />
       </div>
       <p className="fnd-source-card__note">问助手只填进对话框，改好再发送。</p>
     </PopoverContent>

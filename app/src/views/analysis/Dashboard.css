@@ -1,0 +1,62 @@
+@layer components {
+.dashboard { display: grid; gap: var(--fnd-space-content); min-width: 0; }
+.dashboard > .analysis-note { margin: 0; }
+
+.dashboard__summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.dashboard__counts { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: var(--fnd-size-small); color: var(--fnd-muted); }
+.dashboard__tools { display: flex; flex-wrap: wrap; gap: 8px; }
+/* The same words and fill the result page uses for a result read from a replaced file. */
+.dashboard__stale { color: var(--fnd-ink); padding: 0 8px; border-radius: var(--fnd-radius-pill); background: var(--fnd-level-watch-fill); font-size: var(--fnd-size-label); }
+
+.dashboard__group-title { margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; }
+.dashboard__proposed { display: grid; gap: 8px; }
+.dashboard__proposed > .analysis-note { margin: 0; }
+
+/* Figures sit four or so to a row like the result page's KPI cards; a chart takes a wider cell. */
+.dashboard__figures { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); }
+.dashboard__charts { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); }
+
+.dashboard-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-container);
+  background: var(--fnd-surface);
+  box-shadow: var(--fnd-shadow-sm);
+}
+/* A proposal is not on the board yet: drawn as an outline until the manager pins it. */
+.dashboard-card[data-state='explore'] { border-style: dashed; box-shadow: none; }
+
+.dashboard-card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.dashboard-card__title { margin: 0; min-width: 0; font-size: var(--fnd-size-body); font-weight: 500; line-height: 20px; color: var(--fnd-ink);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.dashboard-card__state { flex-shrink: 0; padding: 0 8px; border-radius: var(--fnd-radius-pill); font-size: var(--fnd-size-label); line-height: 20px;
+  color: var(--fnd-muted); border: 1px solid var(--fnd-line); }
+.dashboard-card__state[data-state='pinned'] { color: var(--fnd-ink); border-color: transparent; background: var(--fnd-level-watch-fill); }
+.dashboard-card__state[data-state='accepted'] { color: var(--fnd-level-ok); border-color: currentColor; }
+
+.dashboard-card__note { margin: 0; font-size: var(--fnd-size-small); color: var(--fnd-muted); overflow-wrap: anywhere; }
+.dashboard-card__subject { margin: 0; font-size: var(--fnd-size-small); color: var(--fnd-muted); overflow-wrap: anywhere; }
+.dashboard-card__value { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
+  font-size: var(--fnd-size-title); line-height: 28px; font-weight: var(--fnd-weight-strong); font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums; }
+.dashboard-card__value .analysis-health-level { font-family: var(--fnd-font-prose); font-weight: 400; font-size: var(--fnd-size-small); }
+
+.dashboard-card__beside { display: flex; flex-direction: column; gap: 4px; margin: 0; padding-top: 8px; border-top: 1px solid var(--fnd-line); }
+.dashboard-card__beside > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; }
+.dashboard-card__beside dt { color: var(--fnd-muted); font-size: var(--fnd-size-small); }
+.dashboard-card__beside dd { margin: 0; text-align: right; font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+.dashboard-card__foot { margin-top: auto; display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid var(--fnd-line); }
+.dashboard-card__basis { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; font-size: var(--fnd-size-label); color: var(--fnd-muted); }
+.dashboard-card__actions { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+
+.dashboard__templates { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; text-align: left; }
+.dashboard__templates > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
+  padding: 12px 16px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-surface); }
+.dashboard__templates > li > div { display: grid; gap: 4px; min-width: 0; flex: 1 1 240px; }
+.dashboard__templates .analysis-note { margin: 0; }
+.dashboard__empty .dashboard__templates { width: min(100%, 640px); }
+}

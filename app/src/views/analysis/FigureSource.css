@@ -97,4 +97,8 @@
 /* The line under a result's heading: which files it read and whether any has been replaced since. */
 .analysis-freshness { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; font-size: var(--fnd-size-small); color: var(--fnd-muted); }
 .analysis-freshness__stale { color: var(--fnd-ink); padding: 0 8px; border-radius: var(--fnd-radius-pill); background: var(--fnd-level-watch-fill); }
+
+/* 钉到看板: beside a source card's other actions, and under a profit bridge. */
+.fnd-pin { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.fnd-pin__said { font-size: var(--fnd-size-label); color: var(--fnd-muted); }
 }

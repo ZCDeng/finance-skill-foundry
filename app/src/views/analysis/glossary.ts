@@ -149,6 +149,14 @@ const RULES: Rule[] = [
   [/report source expands beyond the source limit/i, '这份文件解压后过大，无法导入，请拆分后重试。'],
   [/report review requires either a draft_id or a document/i, '请先导入一份报告，或打开已保存的文稿，再复核数字。'],
   [/report review requires a draft saved with a structured document/i, '这份文稿没有保存结构化内容，无法逐项复核数字；请重新导入原报告后再复核。'],
+  // 看板 (foundry/dashboards.py).
+  [/the dashboard changed since it was read|dashboard card is not on this board/i, '看板刚在别处更新过，已重新读取，请再操作一次。'],
+  [/only the manager can arrange the dashboard/i, '看板只能由你整理和认可。'],
+  [/the board already has this card|two dashboard cards show the same thing/i, '看板上已经有这张卡。'],
+  [/a dashboard holds at most (\d+) cards/i, (match) => `看板最多放 ${match[1]} 张卡，先移除几张再加。`],
+  [/a figure card must name exactly one row/i, '这个数在结果里对不上唯一的一行，没有钉上。'],
+  [/a rank card needs at least two rows/i, '这次结果里能排名的不到两行，没有加上这张卡。'],
+  [/a dashboard card reads a run that succeeded/i, '这次计算没有成功，不能放到看板上。'],
   // Data files.
   [/unsupported format \.xls\b/i, '这是老格式的 Excel（.xls），暂时不能直接读取。请在 Excel 里打开它，「文件 › 另存为」选「Excel 工作簿（.xlsx）」，再加入另存的那份。原文件不用改动。'],
   [/unsupported format \.(\w+)/i, (match) => `暂不支持 .${match[1]} 文件。可以加入的格式：Excel（.xlsx）、CSV、JSON、Markdown 和纯文本。`],

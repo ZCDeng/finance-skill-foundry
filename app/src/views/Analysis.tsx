@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowUp, FilePlus2, MessageSquare, RefreshCw } from 'lucide-react';
 import { bridge, timeWait, when, type Answer, type AnalysisDraft, type AnalysisRevision, type AnalysisState, type DatasetSnapshot, type FinanceDrilldown,
   type TaskRow } from '../bridge.js';
@@ -18,6 +18,8 @@ import { Button } from '../components/ui/button.js';
 import { Textarea } from '../components/ui/textarea.js';
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs.js';
 import { DatasetPreview } from './analysis/DatasetPreview.js';
+import { DashboardView, useDashboard } from './analysis/Dashboard.js';
+import { DashboardPinContext } from './analysis/dashboard.js';
 import { MaterialsFileList, materialsAnchor } from './analysis/MaterialsFileList.js';
 import { SourceRefreshPanel } from './analysis/SourceRefreshPanel.js';
 import { BillingPanel } from './analysis/BillingPanel.js';
@@ -33,9 +35,9 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '
 import { DisclosureSummary } from '../components/Disclosure.js';
 import { Loading, SkeletonCards, SkeletonRows } from '../components/Loading.js';
 
-type Tab = 'datasets' | 'results' | 'drafts' | 'close' | 'methods';
+type Tab = 'datasets' | 'results' | 'dashboard' | 'drafts' | 'close' | 'methods';
 type Selection = { analysis?: string; draft?: string };
-export type AnalysisSection = 'materials' | 'results' | 'drafts' | 'close' | 'methods';
+export type AnalysisSection = 'materials' | 'results' | 'dashboard' | 'drafts' | 'close' | 'methods';
 export type AnalysisChatOptions = { submit?: boolean; requestId?: string; targetTaskId?: string };
 type Props = {
   task: TaskRow | null;
@@ -51,7 +53,7 @@ type Props = {
   /** 成果库 asks for one draft version of a task; a new count is a new request. */
   draftRequest?: { count: number; taskId: string; draftId: string };
 };
-const TABS: [Tab, string][] = [['datasets', '资料'], ['results', '分析结果'], ['drafts', '文稿'], ['close', '月结'], ['methods', '方法']];
+const TABS: [Tab, string][] = [['datasets', '资料'], ['results', '分析结果'], ['dashboard', '看板'], ['drafts', '文稿'], ['close', '月结'], ['methods', '方法']];
 /** Each page's own 使用指南 article, opened from the 「?」 beside 刷新. */
 const PAGE_ARTICLES: Partial<Record<Tab, string>> = { datasets: 'page-datasets', results: 'page-results', drafts: 'page-drafts', close: 'page-close' };
 const EXAMPLES = ['本月利润为什么没有达到预算？', '哪些客户需要优先跟进回款？', '回款晚两周，现金余额会怎样？'];
@@ -85,6 +87,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   const [financeRunning, setFinanceRunning] = useState<Record<string, string>>({});
   // How the last one ended, kept here and per task for the same reasons.
   const [financeOutcome, setFinanceOutcome] = useState<Record<string, FinanceOutcome>>({});
+  // The task's board, read here so 钉到看板 on the result page and the 看板 tab change the same one.
+  const board = useDashboard(task?.id);
   const currentTask = useRef(task?.id);
   currentTask.current = task?.id;
   const active = useRef(true);
@@ -105,6 +109,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     onSectionChange?.(next === 'datasets' ? 'materials' : next);
   }, [onSectionChange]);
   useEffect(() => { if (section) setTab(section === 'materials' ? 'datasets' : section); }, [section]);
+  // The assistant may have proposed a card since the board was read.
+  useEffect(() => { if (tab === 'dashboard') void board.load().catch(() => undefined); }, [tab, board.load]);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   const refresh = useCallback(async (taskId: string, options?: { scope?: boolean | 'quiet' }) => {
     // A completed operation may belong to a task the manager has left. It must
@@ -328,7 +334,11 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       onRefresh={() => refresh(task.id)}>{(close) => analysisDefinition(close)}</FinanceWorkbench>
     : null;
   const counts: Record<Tab, number> = { datasets: view?.datasets.length ?? 0, results: view?.runs.filter((run) => runPresentationRole(run) === 'business').length ?? 0,
+    dashboard: board.dashboard?.cards.filter((card) => card.state !== 'explore').length ?? 0,
     drafts: view?.drafts.length ?? 0, close: 0, methods: view?.methods.length ?? 0 };
+  const readOnly = Boolean(task?.lifecycle_status && task.lifecycle_status !== 'active');
+  const canPin = Boolean(bridge()?.financeCall) && !readOnly;
+  const pinBoard = useMemo(() => (canPin ? { pin: board.pin } : null), [canPin, board.pin]);
   async function saveDraft(taskId: string, spec: Record<string, unknown>): Promise<AnalysisDraft> {
     const api = bridge();
     const recoveryRef = spec.recovery_ref as { operation_id: string; revision: number } | undefined;
@@ -400,6 +410,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         void perform((taskId) => refresh(taskId, { scope: true }));
       }}>
         <RefreshCw size={13} aria-hidden />刷新</Button></div></div></Tabs>
+      <DashboardPinContext.Provider value={pinBoard}>
       <section role="tabpanel" id={`analysis-panel-${tab}`} aria-labelledby={embedded && tab === 'methods' ? undefined : `analysis-tab-${tab}`}
         aria-label={embedded && tab === 'methods' ? '方法库' : undefined} className="analysis-content">
         {/* The first read draws the shape of the tab; a refresh over what is already shown keeps the quiet line. */}
@@ -482,6 +493,11 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           </>}
           {analysis && financeWorkbench}
         </>}
+        {view && tab === 'dashboard' && <DashboardView state={board} runs={view.runs} analyses={view.analyses} datasets={view.datasets}
+          superseded={view.superseded_datasets} readOnly={readOnly} onOpenResult={(run) => {
+            setSelectedAnalysis(run.analysis_id);
+            chooseTab('results');
+          }} />}
         {view && tab === 'close' && <MonthCloseControlCenter taskId={task.id} refreshKey={`${view.datasets.length}:${view.runs.length}:${view.drafts.length}`} busy={busy}
           onOpen={(target: CloseTarget) => {
             chooseTab(target === 'results' ? 'results' : target === 'drafts' ? 'drafts' : 'datasets');
@@ -524,6 +540,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
             if (currentTask.current === taskId) { setSelectedAnalysis(next.id); chooseTab('results'); setNotice('已生成分析版本，可以调整范围后计算。'); }
           })} />}
       </section>
+      </DashboardPinContext.Provider>
     </>}
   </div>;
 }

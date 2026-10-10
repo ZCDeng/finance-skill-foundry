@@ -73,6 +73,7 @@ COLLECTIONS = {
     "control_settings",
     "control_findings",
     "report_reviews",
+    "dashboards",
 }
 
 
@@ -2664,6 +2665,63 @@ class FinanceStore:
         if isinstance(spec, dict) and spec.get("run_id"):
             rows = [row for row in rows if row.get("run_id") == spec["run_id"]]
         return {"charts": rows}
+
+    def _dashboard(self):
+        """The task's board as last saved, or None before the first card."""
+        versions = self._list("dashboards")
+        return versions[-1] if versions else None
+
+    def _dashboard_runs(self):
+        """A run reader for one call: each run read (and its outputs checked) once, however many cards show it."""
+        cache = {}
+
+        def run_of(run_id):
+            if run_id not in cache:
+                cache[run_id] = self._named_run(run_id)
+            return cache[run_id]
+
+        return run_of
+
+    def dashboard_read(self, spec):
+        if spec and not isinstance(spec, dict):
+            raise FoundryError("dashboard read spec must be an object")
+        current = self._dashboard()
+        if current is None:
+            return {"dashboard": None}
+        cards = current.get("cards", [])
+        if self.allowed is not None:
+            # A session sees the cards on runs it may read; the board itself names no files.
+            run_of = self._dashboard_runs()
+            readable = []
+            for card in cards:
+                try:
+                    run_of(card["run_id"])
+                except FoundryError:
+                    continue
+                readable.append(card)
+            cards = readable
+        return {"dashboard": {**current, "cards": cards}}
+
+    def dashboard_save(self, spec):
+        from foundry.dashboards import arrange
+
+        if not isinstance(spec, dict) or not isinstance(spec.get("cards"), list):
+            raise FoundryError("dashboard save requires cards")
+        self._manager_only("arrange the dashboard")
+        current = self._dashboard()
+        if (spec.get("parent_id") or None) != (current["id"] if current else None):
+            raise FoundryError("the dashboard changed since it was read; read it again")
+        cards = arrange(spec["cards"], current.get("cards", []) if current else [], run_of=self._dashboard_runs())
+        return self._write("dashboards", parent_id=current["id"] if current else None, bindings={}, cards=cards)
+
+    def dashboard_propose(self, spec):
+        from foundry.dashboards import propose
+
+        if not isinstance(spec, dict) or not isinstance(spec.get("card"), dict):
+            raise FoundryError("dashboard propose requires a card")
+        current = self._dashboard()
+        cards = propose(spec["card"], current.get("cards", []) if current else [], run_of=self._dashboard_runs())
+        return self._write("dashboards", parent_id=current["id"] if current else None, bindings={}, cards=cards)
 
     def analysis_circle_select(self, spec):
         from foundry.circle_select import authorize_workbook, match_draft_table, reject_forbidden_spec
