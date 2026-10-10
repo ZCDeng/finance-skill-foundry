@@ -211,7 +211,7 @@ function Progress({ rows, onOpenClose }: { rows: OverviewTask[]; onOpenClose(tas
 
 function Recent({ rows, onLibrary }: { rows: GalleryRow[]; onLibrary(): void }) {
   const id = useId();
-  return <Section id={`${id}-recent`} title="最近成果">
+  return <Section id={`${id}-recent`} className="fnd-overview__recent-section" title="最近成果">
     <ul className="fnd-overview__recent">
       {rows.map((row) => <li key={row.key}>
         <span className="fnd-overview__recent-what">{galleryLine(row)}</span>
