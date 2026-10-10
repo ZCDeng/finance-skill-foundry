@@ -432,6 +432,8 @@ export function registerIpc(
     'chart-deliverable-open',
     'dashboard-read',
     'dashboard-save',
+    'dashboard-recompute',
+    'dashboard-carry',
     'analysis-circle-select',
     'structure-proposal-list',
     'structure-proposal-confirm',

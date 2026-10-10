@@ -10,6 +10,7 @@ import {
 import { RankBars, type RankItem } from '../../components/charts/RankBars.js';
 import { Waterfall } from '../../components/charts/Waterfall.js';
 import { groupDigits } from '../../lib/figures.js';
+import { formatPeriod } from '../../lib/period.js';
 import { AskLink } from '../guide/GuideHub.js';
 import { FigureSource } from './FigureSource.js';
 import { figureSource, runIsStale, type FigureSourceContext } from './figureSource.js';
@@ -17,37 +18,82 @@ import { isCollectionHealthRun, LevelMark, type HealthRow } from './CollectionHe
 import { kpiFor } from './BusinessResultView.js';
 import { profitBridges } from './RunPanel.js';
 import { columnSemantics, displayColumns, formatBusinessCell, businessColumnLabel } from './businessResults.js';
-import { cardSignature, matchingRows, splitDisplay, type CardDraft, type Dashboard, type DashboardCard, type PinBoard } from './dashboard.js';
+import { cardSignature, matchingRows, splitDisplay, type CardDraft, type CarryOffer, type Dashboard, type DashboardCard, type PinBoard } from './dashboard.js';
 import { newerRun, TEMPLATES, type Template } from './dashboardTemplates.js';
 import { errorText, unwrap } from './shared.js';
 import './Dashboard.css';
 
 type Edit = (cards: DashboardCard[]) => (DashboardCard | CardDraft)[];
 
+/** What the last recompute or carry did, said once at the top of the board. */
+export type BoardNews = { cards: number; changed: number; failed: { title: string; reason: string }[]; carriedFrom?: string; error?: string };
+
+type Recompute = { dashboard: Dashboard | null; recomputed: string[]; failed: { card_id: string; title: string; reason: string }[] };
+type Carry = { dashboard: Dashboard | null; carried: string[]; failed: { card_id: string; title: string; reason: string }[] };
+
+const changedAmong = (board: Dashboard | null, ids: string[]) => (board?.cards ?? []).filter((card) => ids.includes(card.id) && card.recomputed?.changed).length;
+
 /**
  * The task's board as last saved, and the one way to change it: an edit of the cards as they stand. A save made over
  * a board someone else (the assistant) changed since it was read is read again and the edit made once more.
+ *
+ * When the files a card read have newer versions, the read says so and the board is recomputed on them at once
+ * (``canRecompute``: the manager's own task, not archived): same calculation, newest files, each card back to 待认可.
+ * ``onRecomputed`` then reads the task again, so the new runs are there to draw.
  */
-export function useDashboard(taskId: string | undefined) {
+export function useDashboard(taskId: string | undefined, { canRecompute = false, onRecomputed }: { canRecompute?: boolean; onRecomputed?(): void } = {}) {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [news, setNews] = useState<BoardNews | null>(null);
   const current = useRef<Dashboard | null>(null);
   const task = useRef(taskId);
   task.current = taskId;
+  const allowed = useRef(canRecompute);
+  allowed.current = canRecompute;
+  const after = useRef(onRecomputed);
+  after.current = onRecomputed;
+  const recomputing = useRef(false);
+  const show = useCallback((next: Dashboard | null) => {
+    current.current = next;
+    setDashboard(next);
+  }, []);
+  const recompute = useCallback(async (base: Dashboard) => {
+    const api = bridge();
+    if (!taskId || !api?.financeCall || recomputing.current) return;
+    recomputing.current = true;
+    try {
+      const answer = await api.financeCall(taskId, 'dashboard-recompute', { parent_id: base.id }) as Answer<Recompute>;
+      if (task.current !== taskId) return;
+      if (!answer.ok) {
+        // Another save came first: the next read tries again.
+        if (!/changed since it was read/.test(answer.message)) setNews({ cards: 0, changed: 0, failed: [], error: errorText(new Error(answer.message)) });
+        return;
+      }
+      const out = answer.value;
+      if (out.dashboard) show(out.dashboard);
+      if (out.recomputed.length || out.failed.length) {
+        setNews({ cards: out.recomputed.length, changed: changedAmong(out.dashboard, out.recomputed), failed: out.failed });
+      }
+      if (out.recomputed.length) after.current?.();
+    } finally {
+      recomputing.current = false;
+    }
+  }, [show, taskId]);
   const load = useCallback(async () => {
     const api = bridge();
     if (!taskId || !api?.financeCall) return null;
-    const read = unwrap(await api.financeCall(taskId, 'dashboard-read', {}) as Answer<{ dashboard: Dashboard | null }>);
+    const read = unwrap(await api.financeCall(taskId, 'dashboard-read', {}) as Answer<{ dashboard: Dashboard | null; recompute?: { ready: number } }>);
     if (task.current !== taskId) return null;
-    current.current = read.dashboard;
-    setDashboard(read.dashboard);
+    show(read.dashboard);
     setLoaded(true);
+    if (read.dashboard && (read.recompute?.ready ?? 0) > 0 && allowed.current) void recompute(read.dashboard).catch(() => undefined);
     return read.dashboard;
-  }, [taskId]);
+  }, [recompute, show, taskId]);
   useEffect(() => {
     current.current = null;
     setDashboard(null);
     setLoaded(false);
+    setNews(null);
     void load().catch(() => setLoaded(true));
   }, [load]);
   const change = useCallback(async (edit: Edit) => {
@@ -61,20 +107,34 @@ export function useDashboard(taskId: string | undefined) {
         continue;
       }
       const next = unwrap(answer);
-      if (task.current === taskId) {
-        current.current = next;
-        setDashboard(next);
-      }
+      if (task.current === taskId) show(next);
       return next;
     }
-  }, [load, taskId]);
+  }, [load, show, taskId]);
   const pin = useCallback<PinBoard['pin']>(async (draft) => {
     const shown = await load();
     if (shown?.cards.some((card) => cardSignature(card) === cardSignature(draft))) return '看板上已经有这张卡。';
     await change((cards) => [...cards, draft]);
     return '已钉到看板，等你在「看板」页认可。';
   }, [change, load]);
-  return useMemo(() => ({ dashboard, loaded, load, change, pin }), [dashboard, loaded, load, change, pin]);
+  /** Other tasks' boards that could come here, newest period first. */
+  const offers = useCallback(async () => {
+    const api = bridge();
+    if (!taskId || !api?.financeCall) return [];
+    return unwrap(await api.financeCall(taskId, 'dashboard-carry', {}) as Answer<{ offers: CarryOffer[] }>).offers;
+  }, [taskId]);
+  const carry = useCallback(async (offer: CarryOffer) => {
+    const api = bridge();
+    if (!taskId || !api?.financeCall) throw new Error('此版本暂不支持看板。');
+    const out = unwrap(await api.financeCall(taskId, 'dashboard-carry', { from_task_id: offer.task_id }) as Answer<Carry>);
+    if (task.current !== taskId) return;
+    if (out.dashboard) show(out.dashboard);
+    setNews({ cards: out.carried.length, changed: changedAmong(out.dashboard, out.carried), failed: out.failed, carriedFrom: offer.title });
+    if (out.carried.length) after.current?.();
+  }, [show, taskId]);
+  const dismiss = useCallback(() => setNews(null), []);
+  return useMemo(() => ({ dashboard, loaded, load, change, pin, news, dismiss, offers, carry }),
+    [dashboard, loaded, load, change, pin, news, dismiss, offers, carry]);
 }
 
 export type DashboardState = ReturnType<typeof useDashboard>;
@@ -163,7 +223,7 @@ export function DashboardView({ state, runs, analyses, datasets, superseded = []
   readOnly: boolean;
   onOpenResult?(run: AnalysisRun): void;
 }) {
-  const { dashboard, loaded, change } = state;
+  const { dashboard, loaded, change, news, dismiss } = state;
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState('');
   const [error, setError] = useState('');
@@ -205,7 +265,11 @@ export function DashboardView({ state, runs, analyses, datasets, superseded = []
     <p className="analysis-note">每张卡都读自这个任务已经算好的结果，点数字能看到它从哪来。看过没问题就点「认可」。</p>
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
     {said && <p role="status" className="analysis-message">{said}</p>}
-    {!board.length && !proposed.length ? <TemplateChooser runs={runs} cards={cards} readOnly={readOnly} busy={busy} onAdd={addTemplate} /> : <>
+    {news ? <NewsLine news={news} onDismiss={dismiss} /> : null}
+    {!board.length && !proposed.length ? <>
+      {!readOnly ? <CarryOffers state={state} busy={busy} setBusy={setBusy} setError={setError} /> : null}
+      <TemplateChooser runs={runs} cards={cards} readOnly={readOnly} busy={busy} onAdd={addTemplate} />
+    </> : <>
       <div className="dashboard__summary">
         <p className="dashboard__counts">{`共 ${board.length} 张 · 已认可 ${board.length - waiting.length} 张 · 待认可 ${waiting.length} 张`}
           {stale.length ? <span className="dashboard__stale">{`资料已更新，${stale.length} 张待重算`}</span> : null}</p>
@@ -246,6 +310,79 @@ export function DashboardView({ state, runs, analyses, datasets, superseded = []
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  </div>;
+}
+
+/** What the last recompute or carry did, said once; the cards themselves say what changed. */
+function NewsLine({ news, onDismiss }: { news: BoardNews; onDismiss(): void }) {
+  const verb = news.carriedFrom ? '带过来' : '重算';
+  const head = news.carriedFrom
+    ? `已从「${news.carriedFrom}」带过来 ${news.cards} 张卡，按这个任务的资料重算好了`
+    : `资料有更新，已按新资料重算 ${news.cards} 张卡`;
+  const tail = news.changed ? `，其中 ${news.changed} 张有明显变化` : '，没有明显变化';
+  return <div role={news.error ? 'alert' : 'status'} className={`analysis-message dashboard__news${news.error ? ' analysis-message--error' : ''}`}>
+    {news.error ? <p>{`没能按新资料重算：${news.error}`}</p> : null}
+    {news.cards ? <p>{`${head}${tail}，${news.carriedFrom ? '等你认可' : '等你重新认可'}。`}</p> : null}
+    {news.failed.length ? <>
+      <p>{`${news.failed.length} 张没能${verb}：`}</p>
+      <ul>{news.failed.map((item) => <li key={`${item.title}:${item.reason}`}>{`「${item.title}」：${item.reason}`}</li>)}</ul>
+    </> : null}
+    <Button type="button" size="sm" variant="ghost" onClick={onDismiss}>知道了</Button>
+  </div>;
+}
+
+/**
+ * 从别的任务带过来: last month's board onto this empty one. Each card's calculation runs on this task's files of the
+ * same names, so a board can come over once the month's pack is in and its tables confirmed.
+ */
+function CarryOffers({ state, busy, setBusy, setError }: {
+  state: DashboardState; busy: boolean; setBusy(value: boolean): void; setError(text: string): void;
+}) {
+  const [offers, setOffers] = useState<CarryOffer[] | null>(null);
+  const { offers: list, carry } = state;
+  useEffect(() => {
+    let live = true;
+    void list().then((rows) => { if (live) setOffers(rows); }, () => { if (live) setOffers([]); });
+    return () => { live = false; };
+  }, [list]);
+  if (!offers?.length) return null;
+  const bring = (offer: CarryOffer) => {
+    setBusy(true); setError('');
+    void carry(offer).catch((failure) => setError(errorText(failure))).finally(() => setBusy(false));
+  };
+  return <section className="dashboard__carry" aria-labelledby="dashboard-carry">
+    <h4 id="dashboard-carry" className="dashboard__group-title">从别的任务带过来</h4>
+    <p className="analysis-note">按原来的算法，用这个任务里同名的资料重算一遍，卡片都等你认可。</p>
+    <ul className="dashboard__templates">
+      {offers.map((offer) => <li key={offer.task_id}>
+        <div><strong>{offer.period ? `${offer.title} · ${formatPeriod(offer.period)}` : offer.title}</strong>
+          <p className="analysis-note">{offer.ready === offer.cards ? `${offer.cards} 张卡，读的资料这里都有。`
+            : `${offer.cards} 张卡，其中 ${offer.ready} 张读的资料这里都有。`}</p>
+          {offer.missing.length ? <p className="analysis-note">{`还缺：${offer.missing.join('、')}。先加入资料并确认表结构。`}</p> : null}</div>
+        <Button type="button" variant="outline" disabled={busy || !offer.ready} onClick={() => bring(offer)}>
+          {offer.ready ? `带过来并重算（${offer.ready} 张）` : '带过来'}<ArrowRight size={14} strokeWidth={1.5} aria-hidden /></Button>
+      </li>)}
+    </ul>
+  </section>;
+}
+
+/** What the last recompute said of a card waiting for the manager: where it came from, what it showed, what moved. */
+function RecomputedLine({ card }: { card: DashboardCard }) {
+  if (card.recompute_failed) {
+    return <p className="dashboard-card__recompute" data-failed="">{`没能按新资料重算：${card.recompute_failed.reason}`}</p>;
+  }
+  const said = card.recomputed;
+  if (!said || card.state === 'accepted') return null;
+  // Where it came from is said once at the top and on 总览; the card says what it was and how it moved.
+  const month = said.months ? `按 ${formatPeriod(said.months[1])}的资料重算` : '按新资料重算';
+  const before = card.kind === 'figure' ? said.before?.display
+    : card.kind === 'rank' ? (said.before?.labels ?? []).slice(0, 3).join('、') : '';
+  const what = card.kind === 'rank' && before ? `上次前三 ${before}` : before ? `上次 ${before}` : '';
+  return <div className="dashboard-card__recompute" data-changed={said.changed ? '' : undefined}>
+    <p>{month}{said.changed ? <span className="dashboard-card__changed">有变化</span> : null}</p>
+    <p>{[what, said.change].filter(Boolean).join(' · ')}</p>
+    {said.adjusted.length ? <p>{said.adjusted.join('；')}</p> : null}
+    {said.manual.length ? <p>{`沿用上次手填的数：${said.manual.join('、')}`}</p> : null}
   </div>;
 }
 
@@ -309,6 +446,7 @@ function BoardCard({ card, run, contextOf, actions, newer }: {
     </header>
     {card.note ? <p className="dashboard-card__note">{card.note}</p> : null}
     {body}
+    <RecomputedLine card={card} />
     <footer className="dashboard-card__foot">
       {run ? <p className="dashboard-card__basis"><span>{`${when(run.created_at)} 计算`}</span>
         {card.state === 'accepted' && card.accepted ? <span>{`${when(card.accepted.at)} 认可`}</span> : null}

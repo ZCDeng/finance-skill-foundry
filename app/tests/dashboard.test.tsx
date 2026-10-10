@@ -205,3 +205,93 @@ describe('the board', () => {
     expect(backend.board()?.cards.map((row) => row.kind)).toEqual(['figure', 'rank', 'bridge']);
   });
 });
+
+describe('the board on newer files and from last month', () => {
+  const newer = { ...health, id: 'n'.repeat(32), created_at: '2026-10-10T08:00:00Z' } as AnalysisRun;
+  const recomputed = (changed: boolean) => ({
+    at: '2026-10-10T09:00:00Z', from_run_id: health.id, was_accepted: true, months: ['2026-08', '2026-09'] as [string, string],
+    before: { value: '-3.22', display: '-3.22 个百分点', level: 'red', unit: '百分点' }, after: { value: '-2.94', display: '-2.94 个百分点', level: 'red', unit: '百分点' },
+    changed, change: changed ? '级别 黄 → 红' : '+0.28 个百分点', adjusted: ['已过月数 8 → 9'], manual: [], carried_from: null,
+  });
+  function Board({ canRecompute = true, onRecomputed }: { canRecompute?: boolean; onRecomputed?(): void }) {
+    const state = useDashboard('t', { canRecompute, onRecomputed });
+    return <DashboardView state={state} runs={[health, newer]} analyses={[]} datasets={[]} readOnly={false} />;
+  }
+
+  it('recomputes the cards whose files are newer as soon as the board is read, and says what moved', async () => {
+    let board: Dashboard = { id: 'v0', parent_id: null, created_at: '2026-10-10T00:00:00Z',
+      cards: [card({ state: 'accepted', accepted: { run_id: health.id, at: '2026-10-09T09:00:00Z' } })] };
+    const financeCall = mount((command, spec) => {
+      if (command === 'dashboard-read') return { dashboard: board, recompute: { ready: board.cards[0].run_id === health.id ? 1 : 0 } };
+      if (command === 'dashboard-recompute') {
+        expect(spec).toEqual({ parent_id: 'v0' });
+        board = { ...board, id: 'v1', parent_id: 'v0', cards: [card({ run_id: newer.id, recomputed: recomputed(true) })] };
+        return { dashboard: board, recomputed: ['c1'], failed: [] };
+      }
+      throw new Error(`unexpected ${command}`);
+    });
+    const onRecomputed = vi.fn();
+    render(<Board onRecomputed={onRecomputed} />);
+    expect(await screen.findByText('资料有更新，已按新资料重算 1 张卡，其中 1 张有明显变化，等你重新认可。')).toBeTruthy();
+    const gap = screen.getByRole('article', { name: '距生死线（本年账单收缴率）' });
+    expect(within(gap).getByText('按 2026 年 9 月的资料重算')).toBeTruthy();
+    expect(within(gap).getByText('有变化')).toBeTruthy();
+    expect(within(gap).getByText('上次 -3.22 个百分点 · 级别 黄 → 红')).toBeTruthy();
+    expect(within(gap).getByText('已过月数 8 → 9')).toBeTruthy();
+    expect(onRecomputed).toHaveBeenCalledTimes(1);
+    expect(financeCall.mock.calls.filter(([, command]) => command === 'dashboard-recompute')).toHaveLength(1);
+  });
+
+  it('leaves an archived task\'s board as it was read', async () => {
+    const financeCall = mount((command) => {
+      if (command === 'dashboard-read') return { dashboard: { id: 'v0', parent_id: null, created_at: '2026-10-10T00:00:00Z', cards: [card({})] }, recompute: { ready: 1 } };
+      throw new Error(`unexpected ${command}`);
+    });
+    render(<Board canRecompute={false} />);
+    expect(await screen.findByRole('article', { name: '距生死线（本年账单收缴率）' })).toBeTruthy();
+    expect(financeCall.mock.calls.map(([, command]) => command)).not.toContain('dashboard-recompute');
+  });
+
+  it('says why a card could not be recomputed', async () => {
+    mount((command) => {
+      if (command === 'dashboard-read') {
+        return { dashboard: { id: 'v0', parent_id: null, created_at: '2026-10-10T00:00:00Z',
+          cards: [card({ recompute_failed: { at: '2026-10-10T09:00:00Z', reason: '计算里写着 2026-08，换到 2026-09 会算错，要你重新计算' } })] }, recompute: { ready: 0 } };
+      }
+      throw new Error(`unexpected ${command}`);
+    });
+    render(<Board />);
+    expect(await screen.findByText('没能按新资料重算：计算里写着 2026-08，换到 2026-09 会算错，要你重新计算')).toBeTruthy();
+  });
+
+  it('carries last month\'s board onto an empty one and lists what is still missing elsewhere', async () => {
+    let board: Dashboard | null = null;
+    const financeCall = mount((command, spec) => {
+      if (command === 'dashboard-read') return { dashboard: board, recompute: { ready: 0 } };
+      if (command === 'dashboard-carry' && !spec.from_task_id) {
+        return { offers: [
+          { task_id: 'aug', title: '华宸 8 月月结', period: '2026-08', cards: 3, ready: 3, missing: [] },
+          { task_id: 'jul', title: '华宸 7 月月结', period: '2026-07', cards: 2, ready: 0, missing: ['01·核心指标看板'] },
+        ] };
+      }
+      if (command === 'dashboard-carry') {
+        expect(spec).toEqual({ from_task_id: 'aug' });
+        board = { id: 'v1', parent_id: null, created_at: '2026-10-10T00:00:00Z',
+          cards: [card({ run_id: newer.id, recomputed: { ...recomputed(false), carried_from: { task_id: 'aug', title: '华宸 8 月月结' } } })] };
+        return { dashboard: board, carried: ['c1'], failed: [{ card_id: 'c2', title: '利润桥', reason: '这个任务里还没有：预算' }] };
+      }
+      throw new Error(`unexpected ${command}`);
+    });
+    render(<Board />);
+    const offers = await screen.findByRole('region', { name: '从别的任务带过来' });
+    const july = within(offers).getByText('华宸 7 月月结 · 2026 年 7 月').closest('li')!;
+    expect(within(july).getByText('还缺：01·核心指标看板。先加入资料并确认表结构。')).toBeTruthy();
+    expect((within(july).getByRole('button', { name: /带过来/ }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(offers).getByRole('button', { name: /带过来并重算（3 张）/ }));
+    expect(await screen.findByText('已从「华宸 8 月月结」带过来 1 张卡，按这个任务的资料重算好了，没有明显变化，等你认可。')).toBeTruthy();
+    expect(screen.getByText('「利润桥」：这个任务里还没有：预算')).toBeTruthy();
+    const gap = screen.getByRole('article', { name: '距生死线（本年账单收缴率）' });
+    expect(within(gap).getByText('按 2026 年 9 月的资料重算')).toBeTruthy();
+    expect(financeCall.mock.calls.filter(([, command]) => command === 'dashboard-carry')).toHaveLength(2);
+  });
+});

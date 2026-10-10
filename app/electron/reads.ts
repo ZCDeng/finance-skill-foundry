@@ -166,6 +166,17 @@ export interface OverviewTodo {
   target?: string;
 }
 
+/** A board card 总览 counts in 「本月已为你自动重算 N 张卡」 (foundry/overview.py _dashboard_overview). */
+export interface OverviewRecomputed {
+  card_id: string;
+  title: string;
+  at: string;
+  changed: boolean;
+  change: string;
+  state: 'pinned' | 'accepted';
+  carried_from: string | null;
+}
+
 /** One active task on 总览, with its month-close line as `finance-close-status` gives it. */
 export interface OverviewTask {
   task: TaskRow;
@@ -173,6 +184,8 @@ export interface OverviewTask {
   blocks?: { key: string; label: string; state: 'done' | 'attention' | 'blocked' | 'not_started' }[];
   conclusion?: { level: string; text: string };
   todo: OverviewTodo[];
+  /** The board's cards last run again on newer files or carried from another task, with what changed. */
+  dashboard?: { recomputed: OverviewRecomputed[] };
   /** The example reference task is still being built. */
   building?: boolean;
   /** This task could not be read; the others still are. */

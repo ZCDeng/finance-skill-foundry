@@ -56,6 +56,37 @@ describe('总览', () => {
     expect(props.onOpenClose).toHaveBeenCalledWith(august);
   });
 
+  it('says in one line what the boards were recomputed on this month, and opens a task\'s board', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-20T10:00:00'));
+    try {
+      const card = (title: string, at: string, changed: boolean, change: string, carried_from: string | null = null) =>
+        ({ card_id: title, title, at, changed, change, state: 'pinned' as const, carried_from });
+      const withBoards: OverviewData = { ...data, tasks: [
+        { ...data.tasks[0], dashboard: { recomputed: [card('集团距生死线', '2026-10-10T09:00:00Z', false, '+0.28 个百分点', '华东 7 月月结'),
+          card('风险雷达', '2026-10-10T09:00:00Z', true, '前三名变了')] } },
+        { ...data.tasks[1], dashboard: { recomputed: [card('收入', '2026-09-28T09:00:00Z', true, '变动 +20.0%')] } },
+      ] };
+      render(<Overview {...props} data={withBoards} />);
+      // September's recompute is last month's news.
+      const line = screen.getByText('本月已为你自动重算 2 张卡、发现 1 处变化');
+      fireEvent.click(line);
+      const listed = line.closest('details')!;
+      const rows = within(listed).getAllByRole('listitem').map((row) => row.textContent);
+      expect(rows[0]).toContain('「风险雷达」：前三名变了');
+      expect(rows[1]).toContain('「集团距生死线」：+0.28 个百分点');
+      fireEvent.click(within(listed).getByRole('button', { name: /去看看：华东 8 月月结，风险雷达/ }));
+      expect(props.onOpen).toHaveBeenCalledWith(august, 'dashboard');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says nothing about boards when none was recomputed this month', () => {
+    render(<Overview {...props} />);
+    expect(screen.queryByText(/本月已为你自动重算/)).toBeNull();
+  });
+
   it('drafts this month from a chosen task, newest period offered first', () => {
     render(<Overview {...props} />);
     const picker = screen.getByRole('combobox', { name: /用上月套表起草本月/ }) as HTMLSelectElement;

@@ -54,6 +54,22 @@
 .dashboard-card__actions { display: flex; flex-wrap: wrap; gap: 4px 8px; }
 
 .dashboard__templates { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; text-align: left; }
+/* What the last recompute or carry did: one message, its failures listed under it. */
+.dashboard__news { display: grid; gap: 4px; justify-items: start; }
+.dashboard__news > p, .dashboard__news > ul { margin: 0; }
+.dashboard__news > ul { padding-left: 20px; }
+.dashboard__carry { display: grid; gap: 8px; }
+.dashboard__carry > .analysis-note { margin: 0; }
+.dashboard__carry .dashboard__templates { width: min(100%, 640px); }
+
+/* A card back on the board after a recompute: where it came from and what moved, quiet until it changed. */
+.dashboard-card__recompute { display: grid; gap: 2px; margin: 0; padding: 8px 12px; border-radius: var(--fnd-radius-control);
+  background: var(--fnd-surface-strong); font-size: var(--fnd-size-small); color: var(--fnd-muted); overflow-wrap: anywhere; }
+.dashboard-card__recompute > p { margin: 0; }
+.dashboard-card__recompute[data-changed], .dashboard-card__recompute[data-failed] { background: var(--fnd-level-watch-fill); color: var(--fnd-ink); }
+.dashboard-card__changed { margin-left: 8px; padding: 0 8px; border-radius: var(--fnd-radius-pill); border: 1px solid currentColor;
+  font-size: var(--fnd-size-label); }
+
 .dashboard__templates > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
   padding: 12px 16px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-surface); }
 .dashboard__templates > li > div { display: grid; gap: 4px; min-width: 0; flex: 1 1 240px; }

@@ -216,3 +216,169 @@ def test_the_app_arranges_the_board_as_the_manager_and_an_unstamped_call_cannot(
     saved = json.loads(capsys.readouterr().out)
     assert main(["--var", root, "--task", manager.task.id, "dashboard-read", "--spec", "{}"]) == 0
     assert json.loads(capsys.readouterr().out)["dashboard"]["id"] == saved["id"]
+
+
+# -- 3b: recomputed on newer files, carried from last month's task ---------------------------------------------------
+
+def _readd(manager, tmp_path, alias: str, rows: list[dict], name: str | None = None) -> dict:
+    path = tmp_path / f"{alias}-again.json"
+    path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    return AnalysisStore(manager.task).add_dataset(path, name=name or alias)
+
+
+def test_a_card_on_files_with_a_newer_version_is_run_again_and_waits_for_the_manager(tmp_path):
+    manager, run, _ = _board(tmp_path)
+    board = manager.dashboard_save({"parent_id": None, "cards": [_gap(run, state="accepted"), _rank(run)]})
+    assert manager.dashboard_read({})["recompute"] == {"ready": 0}
+    # The corrected KPI board comes in again under its name: collections fell to 80%.
+    kpi = [dict(row) for row in KPI]
+    kpi[3]["本年累计"] = "80.00%"
+    _readd(manager, tmp_path, "kpi", kpi)
+    assert manager.dashboard_read({})["recompute"] == {"ready": 2}
+
+    out = manager.dashboard_recompute({"parent_id": board["id"]})
+    assert out["failed"] == [] and len(out["recomputed"]) == 2
+    gap, rank = out["dashboard"]["cards"]
+    assert gap["run_id"] != run["id"] and gap["run_id"] == rank["run_id"]
+    assert (gap["state"], gap["accepted"]) == ("pinned", None)
+    said = gap["recomputed"]
+    assert said["from_run_id"] == run["id"] and said["was_accepted"] is True and said["months"] is None
+    assert said["before"]["unit"] == "百分点" and said["changed"] is True and "个百分点" in said["change"]
+    # The city sheet did not change, so the ranking did not either.
+    assert rank["recomputed"]["changed"] is False
+    assert manager.dashboard_read({})["recompute"] == {"ready": 0}
+    # Accepted again, the card keeps what the recompute said of it until it moves again.
+    accepted = manager.dashboard_save({"parent_id": out["dashboard"]["id"], "cards": [{**gap, "state": "accepted"}, rank]})
+    assert accepted["cards"][0]["recomputed"] == said and accepted["cards"][0]["accepted"]["run_id"] == gap["run_id"]
+
+
+def test_a_calculation_that_names_the_old_month_is_not_run_on_the_new_one_and_says_why_once(tmp_path):
+    manager, _, _ = _board(tmp_path)
+    august = _readd(manager, tmp_path, "ledger", [{**row, "期间": "2026-08"} for row in KPI])
+    analysis = AnalysisStore(manager.task)
+    saved = analysis.save_analysis({"question": "八月收入", "bindings": {"ledger": august["id"]}, "scope": {"period": "2026-08"},
+                                    "sql": "select 指标, 本年累计 from ledger where 期间 = '2026-08' and 指标 = '营业收入'"})
+    sql_run = analysis.run_analysis(saved["id"])
+    card = {"kind": "figure", "title": "收入", "run_id": sql_run["id"], "select": {"match": {"指标": "营业收入"}, "column": "本年累计"}}
+    board = manager.dashboard_save({"parent_id": None, "cards": [card]})
+    # September's ledger under the same name: the SQL picks August's rows by name.
+    _readd(manager, tmp_path, "ledger", [{**row, "期间": "2026-09"} for row in KPI])
+    out = manager.dashboard_recompute({"parent_id": board["id"]})
+    assert out["recomputed"] == [] and "计算里写着 2026-08" in out["failed"][0]["reason"]
+    stored = out["dashboard"]["cards"][0]
+    assert stored["run_id"] == sql_run["id"] and stored["recompute_failed"]["reason"] == out["failed"][0]["reason"]
+    # Not tried again on the same files.
+    assert manager.dashboard_read({})["recompute"] == {"ready": 0}
+    assert manager.dashboard_recompute({})["recomputed"] == []
+
+
+def test_a_query_without_the_month_in_it_moves_to_the_new_month(tmp_path):
+    manager, _, _ = _board(tmp_path)
+    august = _readd(manager, tmp_path, "ledger", [{**row, "期间": "2026-08"} for row in KPI])
+    analysis = AnalysisStore(manager.task)
+    saved = analysis.save_analysis({"question": "收入", "bindings": {"ledger": august["id"]}, "scope": {"period": "2026-08"},
+                                    "sql": "select 期间, 指标, 本年累计 from ledger where 指标 = '营业收入'"})
+    sql_run = analysis.run_analysis(saved["id"])
+    card = {"kind": "figure", "title": "收入", "run_id": sql_run["id"],
+            "select": {"match": {"指标": "营业收入", "期间": "2026-08"}, "column": "本年累计"}}
+    board = manager.dashboard_save({"parent_id": None, "cards": [card]})
+    _readd(manager, tmp_path, "ledger", [{**row, "期间": "2026-09", "本年累计": "1200"} if row["指标"] == "营业收入" else {**row, "期间": "2026-09"} for row in KPI])
+    out = manager.dashboard_recompute({"parent_id": board["id"]})
+    moved = out["dashboard"]["cards"][0]
+    # The card names its row by its month, so the month moves with it; the revision's scope moves too.
+    assert moved["select"]["match"] == {"指标": "营业收入", "期间": "2026-09"}
+    assert moved["recomputed"]["months"] == ["2026-08", "2026-09"]
+    assert moved["recomputed"]["change"] == "变动 +20.0%" and moved["recomputed"]["changed"] is True
+    revision = analysis.get_analysis(analysis.get_run(moved["run_id"])["analysis_id"])
+    assert revision["scope"] == {"period": "2026-09"} and revision["parent_id"] == saved["id"]
+
+
+def test_last_months_board_is_carried_onto_a_new_task_by_the_names_of_its_files(tmp_path):
+    manager, run, _ = _board(tmp_path)
+    manager.dashboard_save({"parent_id": None, "cards": [_gap(run, state="accepted"), _rank(run)]})
+    store = TaskStore(tmp_path / "var")
+    september = store.create(title="九月", period="2026-09")
+    target = FinanceStore(september, actor="manager")
+    assert target.dashboard_carry({}, tasks=store)["offers"][0]["missing"] == ["city", "kpi"]
+    for alias, rows in {"kpi": KPI, "city": CITY}.items():
+        path = tmp_path / f"{alias}-09.json"
+        path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+        AnalysisStore(september).add_dataset(path, name=alias)
+    offer = target.dashboard_carry({}, tasks=store)["offers"][0]
+    assert (offer["task_id"], offer["cards"], offer["ready"], offer["missing"]) == (manager.task.id, 2, 2, [])
+
+    out = target.dashboard_carry({"from_task_id": manager.task.id}, tasks=store)
+    assert out["failed"] == [] and len(out["carried"]) == 2
+    cards = out["dashboard"]["cards"]
+    assert all(card["state"] == "pinned" and card["recomputed"]["carried_from"]["task_id"] == manager.task.id for card in cards)
+    new_run = AnalysisStore(september).get_run(cards[0]["run_id"])
+    assert new_run["task_id"] == september.id
+    # The same files, so the same figures: nothing worth a look.
+    assert cards[0]["recomputed"]["before"] == cards[0]["recomputed"]["after"] and not cards[0]["recomputed"]["changed"]
+    with pytest.raises(FoundryError, match="already has cards"):
+        target.dashboard_carry({"from_task_id": manager.task.id}, tasks=store)
+    assistant = FinanceStore(september)
+    with pytest.raises(FoundryError, match="only the manager"):
+        assistant.dashboard_recompute({})
+
+
+def test_the_example_august_board_moves_to_september_with_its_month():
+    """跟着做: the August collection board carried onto the September task the guide makes next."""
+    import tempfile
+
+    from foundry.sample_reference import MONTH_CLOSE, Reference
+    from foundry.sample_task import create_next_month_sample, create_sample_task
+
+    with tempfile.TemporaryDirectory() as root:
+        var = Path(root) / "var"
+        august = Reference(TaskStore(var).get(create_sample_task(var)["id"]))
+        august.datasets = {MONTH_CLOSE: august.datasets[MONTH_CLOSE]}
+        august.confirm_structures()
+        run = august.collection_health()
+        gap = {"kind": "figure", "title": "集团距生死线", "state": "accepted", "run_id": run["id"],
+               "select": {"match": {"entity": "华宸物业", "metric_key": "collection_gap", "scenario": "本期"}, "column": "value"}}
+        august.manager.dashboard_save({"parent_id": None, "cards": [gap]})
+        september = TaskStore(var).get(create_next_month_sample(var)["id"])
+        target = FinanceStore(september, actor="manager")
+        out = target.dashboard_carry({"from_task_id": august.task.id}, tasks=TaskStore(var))
+        card = out["dashboard"]["cards"][0]
+        said = card["recomputed"]
+        assert said["months"] == ["2026-08", "2026-09"] and said["adjusted"] == ["已过月数 8 → 9"]
+        assert said["before"]["display"] != said["after"]["display"] and said["after"]["level"]
+        context = target._read("contexts", AnalysisStore(september).get_run(card["run_id"])["finance_context_id"])
+        assert {scope["period"] for scope in context["scopes"].values()} == {"2026-09"}
+        assert context["name"].endswith("（按 2026-09 重算）")
+
+
+def test_the_overview_lists_the_cards_run_again_with_what_changed(tmp_path):
+    from foundry.overview import overview
+
+    manager, run, _ = _board(tmp_path)
+    board = manager.dashboard_save({"parent_id": None, "cards": [_gap(run), _rank(run)]})
+    store = TaskStore(tmp_path / "var")
+    [row] = overview(store)["tasks"]
+    assert row["dashboard"] == {"recomputed": []}
+    kpi = [dict(row) for row in KPI]
+    kpi[3]["本年累计"] = "80.00%"
+    _readd(manager, tmp_path, "kpi", kpi)
+    manager.dashboard_recompute({"parent_id": board["id"]})
+    [row] = overview(store)["tasks"]
+    listed = row["dashboard"]["recomputed"]
+    assert [(item["title"], item["changed"], item["state"]) for item in listed] == [
+        ("集团距生死线", True, "pinned"), ("距生死线（从低到高）", False, "pinned")]
+    assert listed[0]["at"] and listed[0]["carried_from"] is None
+
+
+def test_a_ranking_changes_when_its_leaders_or_the_side_of_its_line_change_not_its_ties():
+    from foundry.dashboard_recompute import change, shown
+
+    card = {"kind": "rank", "select": {"match": {}, "label": "城市", "column": "分", "order": "desc", "limit": 10}}
+    run = lambda rows: {"result": {"rows": [{"城市": name, "分": value} for name, value in rows]}}  # noqa: E731
+    august = shown(card, run([("宝鸡", 6), ("赣州", 4), ("绵阳", 4), ("兰州", 2)]))
+    # The same scores in another row order: the leaders are the same three.
+    assert change(card, august, shown(card, run([("绵阳", 4), ("宝鸡", 6), ("兰州", 2), ("赣州", 4)]))) == (False, "前三名没有变化")
+    assert change(card, august, shown(card, run([("宝鸡", 6), ("赣州", 4), ("绵阳", 4), ("兰州", 4)]))) == (True, "兰州排进前三")
+    gap = {"kind": "rank", "select": {"match": {}, "label": "城市", "column": "分", "order": "asc", "limit": 10,
+                                      "reference": {"value": "0", "label": "生死线"}}}
+    before = shown(gap, run([("海口", -2), ("三亚", 1), ("儋州", 3)]))
+    assert change(gap, before, shown(gap, run([("海口", -2), ("三亚", -1), ("儋州", 3)]))) == (True, "低于生死线的：1 个 → 2 个")

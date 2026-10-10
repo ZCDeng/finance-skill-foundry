@@ -123,7 +123,8 @@ def _task_overview(task, row: dict) -> dict:
     from foundry.finance_service import FinanceStore
     from foundry.structure_records import MANAGER
 
-    status = FinanceStore(task, actor=MANAGER).finance_close_status({})
+    finance = FinanceStore(task, actor=MANAGER)
+    status = finance.finance_close_status({})
     todo = []
     for block in status["blocks"]:
         for item in block["items"]:
@@ -139,7 +140,23 @@ def _task_overview(task, row: dict) -> dict:
         "blocks": [{"key": block["key"], "label": block["label"], "state": block["state"]} for block in status["blocks"]],
         "conclusion": {key: status["conclusion"][key] for key in ("level", "text")},
         "todo": todo,
+        "dashboard": _dashboard_overview(finance),
     }
+
+
+def _dashboard_overview(finance) -> dict:
+    """The cards on the task's board that were last run again on newer files or carried from last month, with what
+    changed (dashboard_recompute). The page counts this month's for its one line; it decides nothing here."""
+    board = finance._dashboard() or {}
+    rows = []
+    for card in board.get("cards", []):
+        said = card.get("recomputed")
+        if card.get("state") == "explore" or not said:
+            continue
+        rows.append({"card_id": card["id"], "title": card["title"], "at": said["at"], "changed": bool(said.get("changed")),
+                     "change": said.get("change") or "", "state": card["state"],
+                     "carried_from": (said.get("carried_from") or {}).get("title")})
+    return {"recomputed": rows}
 
 
 def _collection_todo(task) -> list[dict]:

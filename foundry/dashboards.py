@@ -175,6 +175,10 @@ def normalize_card(card: Any, *, run_of, previous: dict | None, proposer: str, s
     if state == "accepted":
         kept = previous.get("accepted") if previous and previous.get("state") == "accepted" else None
         stored["accepted"] = kept if kept and kept.get("run_id") == run["id"] else {"run_id": run["id"], "at": now_iso()}
+    # What a recompute said of the card (dashboard_recompute) holds while the card stays on that run; no caller writes it.
+    same_run = previous is not None and previous.get("run_id") == run["id"]
+    stored["recomputed"] = previous.get("recomputed") if same_run else None
+    stored["recompute_failed"] = previous.get("recompute_failed") if same_run else None
     return stored
 
 

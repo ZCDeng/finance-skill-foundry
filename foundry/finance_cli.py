@@ -40,6 +40,7 @@ OPERATIONS = {
     "dashboard-read": "dashboard_read",
     "dashboard-save": "dashboard_save",
     "dashboard-propose": "dashboard_propose",
+    "dashboard-recompute": "dashboard_recompute",
     "analysis-circle-select": "analysis_circle_select",
     "structure-proposal-list": "structure_proposal_list",
     "structure-proposal-confirm": "structure_proposal_confirm",
@@ -86,7 +87,8 @@ LIST_COMMANDS = {
     "finance-close-status",
 }
 COMPLETION_COMMANDS = {"finance-completion-begin", "finance-completion-status", "finance-completion-stop"}
-COMMANDS = {*LIST_COMMANDS, *OPERATIONS, *FILE_OPERATIONS, *COMPLETION_COMMANDS, "finance-source-refresh", "source-locator-preview-file"}
+COMMANDS = {*LIST_COMMANDS, *OPERATIONS, *FILE_OPERATIONS, *COMPLETION_COMMANDS, "finance-source-refresh", "source-locator-preview-file",
+            "dashboard-carry"}
 # A whole report document can outgrow an argv; these also read --spec-file.
 SPEC_FILE_COMMANDS = {"save-explanation-draft", "report-review"}
 
@@ -214,6 +216,13 @@ def dispatch(args):
         from foundry.finance_locators import stage_source_locator_preview
         print(stage_source_locator_preview(service, _json(args.spec, "finance spec")))
         return True
+    elif args.cmd == "dashboard-carry":
+        # Reads another task's board, so it takes the store of tasks, not a session's files.
+        if context.session_id:
+            raise FoundryError("only the manager carries a dashboard over")
+        from foundry.task import TaskStore
+
+        result = service.dashboard_carry(_json(args.spec, "finance spec"), tasks=TaskStore(Path(args.var)))
     elif args.cmd in FILE_OPERATIONS:
         files = FinanceFiles(context.task, snapshot_ids=context.snapshot_ids if context.session_id else None,
                              session_id=context.session_id, actor=getattr(args, "actor", "") or None)
