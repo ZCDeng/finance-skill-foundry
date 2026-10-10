@@ -132,6 +132,18 @@ def _task_overview(task, row: dict) -> dict:
 
     finance = FinanceStore(task, actor=MANAGER)
     status = finance.finance_close_status({})
+    return {
+        "headline": status["headline"],
+        "blocks": [{"key": block["key"], "label": block["label"], "state": block["state"]} for block in status["blocks"]],
+        "conclusion": {key: status["conclusion"][key] for key in ("level", "text")},
+        "todo": close_todo(task, status),
+        "dashboard": _dashboard_overview(finance),
+    }
+
+
+def close_todo(task, status: dict) -> list[dict]:
+    """One task's 等你处理: what blocks its close, the 收费明细 waiting on the manager, and the sign-off once the rest is
+    clear. 本月三句话 (foundry/month_brief.py) reads the same list."""
     todo = []
     for block in status["blocks"]:
         for item in block["items"]:
@@ -142,13 +154,7 @@ def _task_overview(task, row: dict) -> dict:
     if status["headline"]["state"] == "ready_for_review":
         # Everything the system checks is clear: what is left is the manager's own sign-off.
         todo.append({"kind": "signoff", "text": "系统检查已通过，等你复核文稿", "target": "drafts"})
-    return {
-        "headline": status["headline"],
-        "blocks": [{"key": block["key"], "label": block["label"], "state": block["state"]} for block in status["blocks"]],
-        "conclusion": {key: status["conclusion"][key] for key in ("level", "text")},
-        "todo": todo,
-        "dashboard": _dashboard_overview(finance),
-    }
+    return todo
 
 
 def _dashboard_overview(finance) -> dict:

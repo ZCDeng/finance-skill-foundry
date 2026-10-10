@@ -531,6 +531,14 @@
 .analysis-billing-drill__table td.fnd-num { text-align: right; }
 .analysis-billing-drill__table th[scope="row"] { overflow-wrap: anywhere; }
 .analysis-billing-drill__source { display: flex; flex-direction: column; gap: 2px; color: var(--fnd-muted); font-size: var(--fnd-size-label); }
+/* 本月三句话 at the top of a task: a line each, its label in a column of its own. */
+.analysis-brief { padding: 12px 16px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-surface); }
+.analysis-brief__lines { display: grid; gap: 8px; margin: 8px 0 0; padding: 0; list-style: none; }
+.analysis-brief__lines > li { display: grid; grid-template-columns: 5em minmax(0, 1fr); gap: 12px; align-items: baseline; }
+.analysis-brief__lines p { margin: 0; font-size: var(--fnd-size-body); line-height: 1.7; overflow-wrap: anywhere; }
+.analysis-brief__lines > li[data-failed] p { color: var(--fnd-muted); }
+.analysis-brief__label { color: var(--fnd-muted); font-size: var(--fnd-size-small); }
+.analysis-brief__foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 8px 0 0; }
 /* A variance result's profit bridges, each with 钉到看板 under it. */
 .analysis-profit-bridges { display: grid; gap: 16px; }
 .analysis-profit-bridge { display: grid; gap: 8px; justify-items: start; }

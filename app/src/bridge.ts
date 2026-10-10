@@ -308,6 +308,38 @@ export interface Overview {
   todo_count: number;
 }
 
+/**
+ * Where a figure in 本月三句话 came from (foundry/month_brief.py), or the place its words open: a board card as it
+ * shows now, before its recompute or the change between; a row of a run; a run's result page; a place in the task.
+ */
+export type BriefRef =
+  | { kind: 'card' | 'card_before' | 'card_change'; card_id: string }
+  | { kind: 'row'; run_id: string; match: Record<string, string>; column: string; metric: string }
+  | { kind: 'result'; run_id: string }
+  | { kind: 'open'; target: string };
+
+/** A run of words in a line; one with a `ref` is a figure or a link, and a rewording keeps it as written. */
+export interface BriefPart { text: string; ref?: BriefRef }
+
+export interface BriefLine {
+  key: 'change' | 'risk' | 'waiting';
+  label: string;
+  parts: BriefPart[];
+  text: string;
+  /** No 风险雷达 yet: the line offers the question that makes one. */
+  ask?: 'collection-health';
+  /** The line could not be read; the others still are. */
+  failed?: boolean;
+}
+
+/** What `month-brief` answers: the rule's three lines, and the assistant's wording of them while their figures stand. */
+export interface MonthBrief {
+  schema_version: 1;
+  lines: BriefLine[];
+  signature: string;
+  worded: { lines: Partial<Record<BriefLine['key'], string>>; by: 'manager' | 'assistant'; created_at: string } | null;
+}
+
 /** What `library-detail` answers for one draft: its text, its checks, what it rests on and the task's versions. */
 export interface LibraryDetail {
   schema_version: 1;
@@ -855,6 +887,7 @@ export type FinanceCommand =
   | 'finance-controls-run'
   | 'finance-controls-list'
   | 'finance-close-status'
+  | 'month-brief'
   | 'finance-control-settings-save'
   | 'finance-control-disposition-save'
   | 'finance-control-disposition-review'

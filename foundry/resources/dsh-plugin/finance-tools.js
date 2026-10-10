@@ -314,6 +314,18 @@ export const FINANCE_TOOLS = {
     } } },
     follow_ups: { type: "array", maxItems: 3, items: boundedText(40, "经理接下来可能问的一个问题", 1) },
   }),
+  month_brief: {
+    description: "读任务页顶部的「本月三句话」：变化、风险、等你拍板各一句。规则从看板按新资料重算的卡、最近一次回款健康的风险雷达和月结待办里挑数，parts 里带 ref 的是数或能点开的字，经理在任务页上点开能看来源；worded 是改过的措辞，数没变时才有。经理问「这个月怎么样」「给我三句话」「本月要点」时先读它，回答以这三句的数为准，不另挑数、不另算。只读。",
+    parameters: { type: "object", required: [], properties: {}, additionalProperties: false }, kind: "read", argv: () => ["month-brief"],
+  },
+  month_brief_word: specTool("month-brief-word", "改写「本月三句话」的措辞，经理在任务页顶部看到，原句随时能切回去看。先用 month_brief 读原句和 signature，lines 只写要改的几句（change、risk、waiting），没写的几句保留之前改过的措辞；每句一行、120 字以内。只改措辞：原句里带 ref 的部分（数、能点开的字）一字不改地保留，不加原句里没有的数字，不加原句没有的判断或建议。数一变，改写自动作废，要重新读再改；被拒时照原因改了再调。", {
+    signature: text("month_brief 返回的 signature"),
+    lines: { type: "object", additionalProperties: false, properties: {
+      change: boundedText(120, "「变化」这一句的新措辞", 1),
+      risk: boundedText(120, "「风险」这一句的新措辞", 1),
+      waiting: boundedText(120, "「等你拍板」这一句的新措辞", 1),
+    } },
+  }, ["signature", "lines"]),
   finance_context_save: specTool("finance-context-save", "建立不可变财务口径：bindings 为别名到现有快照 ID；scopes 按别名声明 ledger/organization/period/currency/unit/scenario，值来自资料或经理明确口径，不能猜测。policy.field_map 可映射中文列名。管理科目用 revenue/cost/expense；余额也可分析，缺少凭证时不虚构分录链接。修改科目映射或口径生成新版本。", {
     name: text("财务口径名称"), bindings: { type: "object", additionalProperties: { type: "string" } },
     scopes: { type: "object", additionalProperties: { type: "object" } }, policies: { type: "object", additionalProperties: { type: "object" } },

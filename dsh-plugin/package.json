@@ -101,6 +101,8 @@
             "dashboard_read",
             "dashboard_propose",
             "answer_cards",
+            "month_brief",
+            "month_brief_word",
             "finance_context_save",
             "finance_map_save",
             "run_metric",

@@ -42,6 +42,7 @@ OPERATIONS = {
     "dashboard-propose": "dashboard_propose",
     "dashboard-recompute": "dashboard_recompute",
     "answer-cards": "answer_cards",
+    "month-brief-word": "month_brief_word",
     "analysis-circle-select": "analysis_circle_select",
     "structure-proposal-list": "structure_proposal_list",
     "structure-proposal-confirm": "structure_proposal_confirm",
@@ -86,6 +87,7 @@ LIST_COMMANDS = {
     "finance-completion-recoveries",
     "finance-readiness",
     "finance-close-status",
+    "month-brief",
 }
 COMPLETION_COMMANDS = {"finance-completion-begin", "finance-completion-status", "finance-completion-stop"}
 COMMANDS = {*LIST_COMMANDS, *OPERATIONS, *FILE_OPERATIONS, *COMPLETION_COMMANDS, "finance-source-refresh", "source-locator-preview-file",
@@ -202,6 +204,8 @@ def dispatch(args):
         result = service.finance_readiness({})
     elif args.cmd == "finance-close-status":
         result = service.finance_close_status({})
+    elif args.cmd == "month-brief":
+        result = service.month_brief({})
     elif args.cmd == "finance-source-list":
         # A session reads each batch with the prior it reads it with (SourceRefreshService.batches_in_view).
         batches = SourceRefreshService(context.task, allowed=set(context.snapshot_ids) if context.session_id else None
