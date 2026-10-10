@@ -430,6 +430,8 @@ export function registerIpc(
     'chart-deliverable-save',
     'chart-deliverable-list',
     'chart-deliverable-open',
+    'dashboard-read',
+    'dashboard-save',
     'analysis-circle-select',
     'structure-proposal-list',
     'structure-proposal-confirm',

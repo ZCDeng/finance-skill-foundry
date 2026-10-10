@@ -11,6 +11,7 @@ import { RevisionDiff } from './RevisionDiff.js';
 import { runFiles, type FigureSourceContext } from './figureSource.js';
 import { Waterfall, bridgeCloses, type BridgeStep } from '../../components/charts/Waterfall.js';
 import { TechnicalInfo, type TechnicalRow } from './TechnicalInfo.js';
+import { PinButton } from './PinButton.js';
 import { businessColumnLabel, runPresentationRole, selectBusinessResult } from './businessResults.js';
 import { errorText } from './shared.js';
 import { RUN_ROLE_LABELS, scenarioLabel } from './glossary.js';
@@ -219,7 +220,7 @@ function ContractWarnings({ warnings }: { warnings: ResultContractWarning[] }) {
 }
 
 /** Whether the result is drawn by BusinessResultView, which then also holds the run's diagnostics. */
-function rendersBusinessView(run: AnalysisRun): boolean {
+export function rendersBusinessView(run: AnalysisRun): boolean {
   return Boolean(run.result?.columns.length) && !isCollectionHealthRun(run) && !isFinanceVarianceRun(run) && !isStructuredAggregateRun(run) && !isScriptSummaryRun(run)
     && runPresentationRole(run) === 'business' && Boolean(run.result?.rows.length);
 }
@@ -398,7 +399,7 @@ function financeVarianceResult(run: AnalysisRun): FinanceVarianceResult | undefi
   return run.result as FinanceVarianceResult | undefined;
 }
 
-function isFinanceVarianceRun(run: AnalysisRun): boolean {
+export function isFinanceVarianceRun(run: AnalysisRun): boolean {
   const result = financeVarianceResult(run);
   const names = new Set(result?.columns.map((column) => column.name) ?? []);
   return run.engine === 'finance' && result?.method === 'revenue_minus_cost_minus_expense'
@@ -582,12 +583,14 @@ function bridgeNumber(value: unknown): number | null {
   return /^[-+]?\d*\.?\d+$/.test(text) ? Number(text) : null;
 }
 
+/** One group's profit bridge: the rows' shared dimension values (the group a card names), its steps and unit. */
+export type ProfitBridge = { label: string; match: Record<string, string>; steps: BridgeStep[]; unit: string };
+
 /**
- * The profit bridge of each group (at most three): 对照利润, then what 收入, 成本 and 费用 each contributed, then
- * 实际利润. A group with a 缺项, a missing line, two units, or contributions that do not close draws nothing; the
- * table below still shows every row.
+ * The profit bridge of each group: 对照利润, then what 收入, 成本 and 费用 each contributed, then 实际利润. A group with a
+ * 缺项, a missing line, two units, or contributions that do not close has none; the table still shows every row.
  */
-function ProfitBridges({ run }: { run: AnalysisRun }) {
+export function profitBridges(run: AnalysisRun): ProfitBridge[] {
   const dimensions = financeVarianceDimensionColumns(run).map((column) => column.name);
   const copy = financeVarianceCopy(run);
   const groups = new Map<string, Record<string, unknown>[]>();
@@ -595,7 +598,7 @@ function ProfitBridges({ run }: { run: AnalysisRun }) {
     const key = JSON.stringify(dimensions.map((name) => row[name] ?? null));
     groups.set(key, [...(groups.get(key) ?? []), row]);
   }
-  const bridges = [...groups.values()].flatMap((rows) => {
+  return [...groups.values()].flatMap((rows) => {
     if (rows.some(isPartial)) return [];
     const line = (metric: string) => rows.filter((row) => row.metric === metric);
     const [profit] = line('profit');
@@ -614,12 +617,23 @@ function ProfitBridges({ run }: { run: AnalysisRun }) {
     const steps = [total(`${copy.baselineLabel}利润`, profit.baseline), ...deltas, total(`${copy.actualLabel}利润`, profit.actual)];
     if (steps.some((step) => step == null) || !bridgeCloses(steps as BridgeStep[])) return [];
     const label = dimensions.map((name) => name === 'period' ? periodText(rows[0][name]) : textValue(rows[0][name])).join(' · ');
-    return [{ label, steps: steps as BridgeStep[], unit }];
-  }).slice(0, 3);
+    const match = Object.fromEntries(dimensions.map((name) => [name, rows[0][name] == null ? '' : String(rows[0][name])]));
+    return [{ label, match, steps: steps as BridgeStep[], unit }];
+  });
+}
+
+/** The first three bridges of a variance result, each with 钉到看板 when the page can pin. */
+function ProfitBridges({ run }: { run: AnalysisRun }) {
+  const bridges = profitBridges(run).slice(0, 3);
   if (!bridges.length) return null;
   return <section className="analysis-profit-bridges" aria-label="利润桥">
-    {bridges.map((bridge, index) => <Waterfall key={`${bridge.label}:${index}`} title={bridge.label ? `利润桥 · ${bridge.label}` : '利润桥'}
-      steps={bridge.steps} unit={bridge.unit || undefined} />)}
+    {bridges.map((bridge, index) => {
+      const title = bridge.label ? `利润桥 · ${bridge.label}` : '利润桥';
+      return <div key={`${bridge.label}:${index}`} className="analysis-profit-bridge">
+        <Waterfall title={title} steps={bridge.steps} unit={bridge.unit || undefined} />
+        <PinButton draft={{ kind: 'bridge', title, state: 'pinned', run_id: run.id, select: { match: bridge.match } }} />
+      </div>;
+    })}
   </section>;
 }
 

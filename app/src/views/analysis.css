@@ -520,4 +520,8 @@
 .analysis-billing-groups td { text-align: right; }
 .analysis-billing-issues h5 { margin: 0 0 4px; font-size: var(--fnd-size-body); }
 .analysis-billing-issues ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+/* A variance result's profit bridges, each with 钉到看板 under it. */
+.analysis-profit-bridges { display: grid; gap: 16px; }
+.analysis-profit-bridge { display: grid; gap: 8px; justify-items: start; }
+.analysis-profit-bridge > .fnd-chart-figure { justify-self: stretch; }
 }

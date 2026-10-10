@@ -12,6 +12,7 @@ import { formatPeriod } from '../../lib/period.js';
 import { hasParenthesizedNegative } from '../../lib/figures.js';
 import { FigureSource } from './FigureSource.js';
 import { figureSource, type FigureSourceContext, type FigureSourceInfo } from './figureSource.js';
+import { figureDraft } from './dashboard.js';
 
 /** How many sentences stand above the cards before the rest fold away. */
 const shownConclusions = 3;
@@ -24,7 +25,7 @@ const referenceSourceFields = ['source', '来源'];
 // Vite sets DEV; narrowed here so the app's tsconfig need not carry Vite's client types.
 const devBuild = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;
 
-type Kpi = { row: Record<string, unknown>; title: string; period: string; periodLabel: string; unit: string; basis: string; estimated: boolean; estimatedBudget: string; actualLabel: string; budgetLabel: string; actual: string; budget: string; difference: string; rate: string; rateLabel: string; notes: string[] };
+export type Kpi = { row: Record<string, unknown>; title: string; period: string; periodLabel: string; unit: string; basis: string; estimated: boolean; estimatedBudget: string; actualLabel: string; budgetLabel: string; actual: string; budget: string; difference: string; rate: string; rateLabel: string; notes: string[] };
 
 /** Attainment fields in the order a card reads them; the first with a value fills the card's last line. */
 const rateFields = ['attainment_rate', 'attainment_pct', 'achievement_pct', 'completion_pct', 'attainment', 'attainment_ratio', 'budget_attainment', 'budget_attainment_rate', 'budget_completion', 'budget_completion_rate', 'completion_rate', 'completion', 'achievement_rate', 'achievement', 'actual_budget_rate', 'actual_budget_ratio', 'actual_to_budget', 'ratio'];
@@ -88,7 +89,7 @@ function kpiPriority(row: Record<string, unknown>): number {
  * Up to four cards, one per metric before any metric repeats: the first row of
  * each metric (usually the group total) says more than four regions of revenue.
  */
-function kpiRows(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+export function kpiRows(rows: Record<string, unknown>[]): Record<string, unknown>[] {
   const ranked = rows
     .filter((row) => row.actual != null && row.actual !== '')
     .map((row, index) => ({ row, index, priority: kpiPriority(row) }))
@@ -99,7 +100,7 @@ function kpiRows(rows: Record<string, unknown>[]): Record<string, unknown>[] {
   return [...first, ...rest].slice(0, 4).map((item) => item.row);
 }
 
-function kpiFor(row: Record<string, unknown>, columns: DisplayColumn[]): Kpi {
+export function kpiFor(row: Record<string, unknown>, columns: DisplayColumn[]): Kpi {
   return {
     row,
     title: metricTitle(row),
@@ -120,6 +121,13 @@ function kpiFor(row: Record<string, unknown>, columns: DisplayColumn[]): Kpi {
     rateLabel: rateLabel(rateField(row)),
     notes: cardNotes(row),
   };
+}
+
+/** The rows the result page makes its KPI cards of, for the period it opens on. */
+export function headlineRows(run: AnalysisRun): Record<string, unknown>[] {
+  const period = periodOptions(run)[0] ?? '';
+  const rows = businessRows(run);
+  return kpiRows(period ? rows.filter((row) => String(rowPeriod(row) ?? '') === period) : rows);
 }
 
 /** The sentences the backend concluded for this period's pairs; a pair without a period belongs to every tab. */
@@ -217,6 +225,8 @@ export function BusinessResultView({ run, onSources, actions, technicalRows, dia
       ['依据', rowBasisLabel(row)],
     ];
   };
+  // 钉到看板 on a KPI card pins the card: its 实际 with the 预算, 差异 and rate beside it.
+  const pins = useMemo(() => kpis.map((kpi) => (source ? figureDraft(run, kpi.row, 'actual', kpi.title) : null)), [kpis, run, source]);
   const kpiSource = (kpi: Kpi, part: string, value: string): FigureSourceInfo | undefined => source
     ? figureSource(source, kpi.row, { metric: kpi.title, part, value, facts: [['期间', kpi.periodLabel], ['单位', kpi.unit], ['依据', kpi.basis]] })
     : undefined;
@@ -251,7 +261,7 @@ export function BusinessResultView({ run, onSources, actions, technicalRows, dia
     {kpis.length ? <div className="analysis-kpi-grid" aria-label="关键指标">
       {kpis.map((kpi, index) => <article key={`${kpi.title}:${kpi.period}:${index}`} className="analysis-kpi-card">
         <span className="analysis-kpi-title" title={kpi.title}>{kpi.title}</span>
-        <strong aria-label={`${kpi.title}实际`}><FigureSource text={kpi.actual} info={kpiSource(kpi, '实际', kpi.actual)} /></strong>
+        <strong aria-label={`${kpi.title}实际`}><FigureSource text={kpi.actual} info={kpiSource(kpi, '实际', kpi.actual)} pin={pins[index]} /></strong>
         {kpi.actualLabel ? <small className="analysis-kpi-source">{kpi.actualLabel}</small> : null}
         {/* Each part stays whole; the line breaks only at a separator. */}
         <small className="analysis-kpi-meta">{[kpi.periodLabel, kpi.unit, `依据：${kpi.basis}`].map((part, partIndex) => <Fragment key={partIndex}>{partIndex ? ' · ' : ''}<span>{part}</span></Fragment>)}
@@ -261,10 +271,10 @@ export function BusinessResultView({ run, onSources, actions, technicalRows, dia
             // One right-aligned column: beside a parenthesized negative, bare figures hang one place in.
             const hang = hasParenthesizedNegative([kpi.budget, kpi.estimatedBudget ?? '', kpi.difference, kpi.rate]);
             return <>
-              <div><dt>{kpi.estimated ? '预算（估算）' : '预算'}</dt><dd><FigureSource text={kpi.budget} info={kpiSource(kpi, kpi.estimated ? '预算（估算）' : '预算', kpi.budget)} hang={hang} /></dd></div>
-              {kpi.estimatedBudget ? <div><dt>预算（估算）</dt><dd><FigureSource text={kpi.estimatedBudget} info={kpiSource(kpi, '预算（估算）', kpi.estimatedBudget)} hang={hang} /></dd></div> : null}
-              <div><dt>差异</dt><dd><FigureSource text={kpi.difference} info={kpiSource(kpi, '差异', kpi.difference)} hang={hang} /></dd></div>
-              <div><dt>{kpi.rateLabel}</dt><dd><FigureSource text={kpi.rate} info={kpiSource(kpi, kpi.rateLabel, kpi.rate)} hang={hang} /></dd></div>
+              <div><dt>{kpi.estimated ? '预算（估算）' : '预算'}</dt><dd><FigureSource text={kpi.budget} info={kpiSource(kpi, kpi.estimated ? '预算（估算）' : '预算', kpi.budget)} hang={hang} pin={pins[index]} /></dd></div>
+              {kpi.estimatedBudget ? <div><dt>预算（估算）</dt><dd><FigureSource text={kpi.estimatedBudget} info={kpiSource(kpi, '预算（估算）', kpi.estimatedBudget)} hang={hang} pin={pins[index]} /></dd></div> : null}
+              <div><dt>差异</dt><dd><FigureSource text={kpi.difference} info={kpiSource(kpi, '差异', kpi.difference)} hang={hang} pin={pins[index]} /></dd></div>
+              <div><dt>{kpi.rateLabel}</dt><dd><FigureSource text={kpi.rate} info={kpiSource(kpi, kpi.rateLabel, kpi.rate)} hang={hang} pin={pins[index]} /></dd></div>
             </>;
           })()}
         </dl>
