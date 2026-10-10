@@ -15,6 +15,7 @@ import {
   LINE_HOVER,
   LINE_HOVER_LIGHT,
   LINE_LIGHT,
+  QUESTION_CLASS_PREFIX,
   SEND_PRIMARY_CLASS,
   SEND_TRAILING_CLASS,
   SETTINGS_CLOSE_CLASS,
@@ -26,6 +27,7 @@ const TOKENS = read('../src/styles/tokens.css');
 const LAYOUT = read('../extra/dsh/.foundry-client-stock/layout.js');
 const CONVERSATION = read('../extra/dsh/.foundry-client-stock/conversation.js');
 const SETTINGS = read('../extra/dsh/.foundry-client-stock/settings-general.js');
+const QUESTIONS = read('../extra/dsh/node_modules/@deepseek-ai/dsh-client-ui-user-questions/lib/client.js');
 const COMPACT = read('../harness-client/compact.css');
 const ADAPTER = read('../scripts/adapt-harness-client.mjs');
 const BUNDLE = JSON.parse(read('../../dsh-plugin/package.json')) as {
@@ -231,6 +233,22 @@ describe('how the skin holds on', () => {
     expect(HARNESS_SKIN).toContain('outline-offset: -1px');
     expect(HARNESS_SKIN).toContain('box-shadow: none !important');
     expect(HARNESS_SKIN).not.toContain('[data-foundry-frame] button:focus-visible');
+  });
+
+  it('draws the point-and-pick question card in this window\'s shape and gold', () => {
+    for (const name of ['card', 'option', 'optionSelected', 'customRow', 'customBlock', 'badge', 'eyebrow', 'feedback']) {
+      expect(QUESTIONS).toContain(`"${name}": "${QUESTION_CLASS_PREFIX}${name}"`);
+    }
+    // The model marks its recommendation with this suffix (agent.cordis.yml); the card turns it into the 推荐 badge.
+    expect(QUESTIONS).toContain('（(?:recommended|推荐)）');
+    expect(HARNESS_SKIN).toMatch(
+      new RegExp(`\\.${QUESTION_CLASS_PREFIX}card \\{\\s*border-radius: 12px !important;\\s*box-shadow: none !important;`),
+    );
+    expect(HARNESS_SKIN).toMatch(
+      new RegExp(`\\.${QUESTION_CLASS_PREFIX}optionSelected \\{\\s*border-color: var\\(--foundry-native-selected\\) !important;`),
+    );
+    expect(HARNESS_SKIN).toContain(`.${QUESTION_CLASS_PREFIX}option:focus-visible {\n  outline: 1px solid var(--foundry-native-focus) !important;`);
+    expect(HARNESS_SKIN).toMatch(new RegExp(`\\.${QUESTION_CLASS_PREFIX}badge \\{[^}]*font-size: 12px !important;`));
   });
 });
 

@@ -57,6 +57,13 @@ export const SEND_PRIMARY_CLASS = 'uV2eYG_primary';
 export const SEND_TRAILING_CLASS = 'uV2eYG_trailing';
 export const SETTINGS_CLOSE_CLASS = 'VOzbGW_close';
 
+/**
+ * The card the assistant's point-and-pick question (`ask_user_question`) is drawn in, by the pinned
+ * `dsh-client-ui-user-questions` bundle. Its module classes carry this prefix; the skin test holds it to the bundle.
+ */
+export const QUESTION_CLASS_PREFIX = 'Mbwy4a_';
+const question = (name: string) => `.${QUESTION_CLASS_PREFIX}${name}`;
+
 /** The dark-theme focus gold, matching the host's `--fnd-focus`. */
 export const EDGE = DARK_THEME.focus;
 
@@ -209,6 +216,45 @@ body, button, input, select {
   outline: 1px solid var(--foundry-native-focus) !important;
   outline-offset: -1px;
   box-shadow: none !important;
+}
+
+/*
+ * The assistant's point-and-pick question: this window's card rather than the runtime's bubble. The runtime already
+ * draws it from the palette above; what is left is the shape (the window's 12/8 px radii, no floating shadow, like
+ * the composer it replaces), the gold of a picked option and of 推荐, and the 12 px floor of this window's type.
+ */
+${question('card')} {
+  border-radius: 12px !important;
+  box-shadow: none !important;
+}
+
+${question('option')}, ${question('customRow')}, ${question('customBlock')} {
+  border-radius: 8px !important;
+}
+
+${question('optionSelected')} {
+  border-color: var(--foundry-native-selected) !important;
+  background: var(--foundry-native-selection-surface) !important;
+}
+
+${question('option')}:focus-visible {
+  outline: 1px solid var(--foundry-native-focus) !important;
+  outline-offset: -1px;
+}
+
+${question('badge')} {
+  background: color-mix(in srgb, var(--foundry-native-selected) 14%, transparent) !important;
+  color: var(--foundry-native-selected) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+}
+
+${question('eyebrow')}, ${question('feedback')} {
+  font-size: 12px !important;
+}
+
+${question('customBlock')}:focus-within {
+  border-color: var(--foundry-native-focus) !important;
 }
 
 [class*="_headlineText"] {
