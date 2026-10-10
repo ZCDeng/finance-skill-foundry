@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BusinessResultView } from '../src/views/analysis/BusinessResultView.js';
-import { askAboutFigure, figureSource, runIsStale, sourceText, type FigureSourceContext } from '../src/views/analysis/figureSource.js';
+import { askAboutFigure, figureSource, runIsStale, sourceText, type FigureSourceContext } from '../src/views/analysis/figureSourceInfo.js';
 import { ASK_EVENT } from '../src/views/guide/ask.js';
 import type { AnalysisRevision, AnalysisRun, DatasetSnapshot } from '../src/bridge.js';
 

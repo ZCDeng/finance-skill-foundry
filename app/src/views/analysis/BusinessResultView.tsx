@@ -11,8 +11,8 @@ import { TechnicalInfo, type TechnicalRow } from './TechnicalInfo.js';
 import { formatPeriod } from '../../lib/period.js';
 import { hasParenthesizedNegative } from '../../lib/figures.js';
 import { FigureSource } from './FigureSource.js';
-import { figureSource, type FigureSourceContext, type FigureSourceInfo } from './figureSource.js';
-import { figureDraft } from './dashboard.js';
+import { figureSource, type FigureSourceContext, type FigureSourceInfo } from './figureSourceInfo.js';
+import { figureDraft } from './dashboardModel.js';
 
 /** How many sentences stand above the cards before the rest fold away. */
 const shownConclusions = 3;

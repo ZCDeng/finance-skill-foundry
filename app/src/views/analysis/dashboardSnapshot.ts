@@ -12,9 +12,9 @@ import {
   type SnapshotRank, type SnapshotText,
 } from '../../../electron/reports/dashboard-snapshot.js';
 import { profitBridges } from './RunPanel.js';
-import { matchingRows, type Dashboard, type DashboardCard } from './dashboard.js';
+import { matchingRows, type Dashboard, type DashboardCard } from './dashboardModel.js';
 import { figureView, rankItems, sameMatch } from './dashboardViews.js';
-import { figureSource, runFiles, type FigureSourceContext } from './figureSource.js';
+import { figureSource, runFiles, type FigureSourceContext } from './figureSourceInfo.js';
 
 /** A card the manager accepted on the run it reads now: the only kind a snapshot shows (dashboard_snapshot.accepted). */
 export function acceptedCard(card: DashboardCard): boolean {

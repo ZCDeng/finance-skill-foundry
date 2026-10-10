@@ -3,11 +3,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AnalysisRun, Bridge } from '../src/bridge.js';
 import { DashboardView, useDashboard } from '../src/views/analysis/Dashboard.js';
-import type { Dashboard, DashboardCard } from '../src/views/analysis/dashboard.js';
+import type { Dashboard, DashboardCard } from '../src/views/analysis/dashboardModel.js';
 import { buildSnapshot } from '../src/views/analysis/dashboardSnapshot.js';
 import { rankItems } from '../src/views/analysis/dashboardViews.js';
 import { profitBridges } from '../src/views/analysis/RunPanel.js';
-import type { FigureSourceContext } from '../src/views/analysis/figureSource.js';
+import type { FigureSourceContext } from '../src/views/analysis/figureSourceInfo.js';
 import { errorText } from '../src/views/analysis/shared.js';
 import { normalizeSnapshot, snapshotFileName, snapshotHtml } from '../electron/reports/dashboard-snapshot.js';
 import fixture from './fixtures/collection-health-run.json';

@@ -7,7 +7,7 @@ import { isCollectionHealthRun, type HealthRow } from './CollectionHealthView.js
 import { isFinanceVarianceRun, profitBridges, rendersBusinessView } from './RunPanel.js';
 import { headlineRows, kpiFor } from './BusinessResultView.js';
 import { displayColumns, isSuccessfulRun } from './businessResults.js';
-import { figureDraft, type CardDraft, type DashboardCard, type TemplateId } from './dashboard.js';
+import { figureDraft, type CardDraft, type DashboardCard, type TemplateId } from './dashboardModel.js';
 import { scenarioBase } from './dashboardScenario.js';
 
 export type Template = {

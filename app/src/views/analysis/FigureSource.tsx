@@ -5,9 +5,9 @@ import { Button } from '../../components/ui/button.js';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
 import { askWith } from '../guide/ask.js';
-import { askAboutFigure, sourceText, type FigureSourceInfo } from './figureSource.js';
+import { askAboutFigure, sourceText, type FigureSourceInfo } from './figureSourceInfo.js';
 import { PinButton } from './PinButton.js';
-import type { CardDraft } from './dashboard.js';
+import type { CardDraft } from './dashboardModel.js';
 import './FigureSource.css';
 
 /**

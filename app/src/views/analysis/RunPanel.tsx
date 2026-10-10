@@ -8,7 +8,7 @@ import { Input } from '../../components/ui/input.js';
 import { BusinessResultView } from './BusinessResultView.js';
 import { CollectionHealthView, isCollectionHealthRun } from './CollectionHealthView.js';
 import { RevisionDiff } from './RevisionDiff.js';
-import { runFiles, type FigureSourceContext } from './figureSource.js';
+import { runFiles, type FigureSourceContext } from './figureSourceInfo.js';
 import { Waterfall, bridgeCloses, type BridgeStep } from '../../components/charts/Waterfall.js';
 import { TechnicalInfo, type TechnicalRow } from './TechnicalInfo.js';
 import { PinButton } from './PinButton.js';
