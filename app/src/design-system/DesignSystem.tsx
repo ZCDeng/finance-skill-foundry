@@ -34,26 +34,34 @@ import { Textarea } from '@/components/ui/textarea.js';
 
 type Theme = 'light' | 'dark';
 
-/** WCAG contrast of two CSS colours, compositing a translucent foreground over its ground. */
-function contrast(fg: string, bg: string): number {
-  const rgba = (value: string) => {
-    const probe = document.createElement('span');
-    probe.style.color = value;
-    document.body.append(probe);
-    const parts = getComputedStyle(probe).color.match(/[\d.]+/g)?.map(Number) ?? [0, 0, 0];
-    probe.remove();
-    return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 };
-  };
-  const back = rgba(bg);
-  const front = rgba(fg);
-  const mix = (f: number, b: number) => f * front.a + b * (1 - front.a);
-  const lum = (r: number, g: number, b: number) => {
+/**
+ * Any CSS colour (hex, rgb, oklch, color-mix, display-p3) as sRGB, by painting one pixel over a
+ * backdrop, so translucent colours composite as the browser draws them (the shadcn skill's color-pair).
+ */
+function toRgb(color: string, backdrop: string): number[] | null {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 1;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!context) return null;
+  context.fillStyle = backdrop;
+  context.fillRect(0, 0, 1, 1);
+  context.fillStyle = color;
+  context.fillRect(0, 0, 1, 1);
+  const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
+  return [r, g, b];
+}
+
+/** WCAG contrast of a text colour on a ground, the ground itself laid over the canvas. */
+function contrast(fg: string, bg: string): number | null {
+  const ground = toRgb(bg, token('--fnd-bg') || '#fff');
+  const text = ground && toRgb(fg, `rgb(${ground.join(' ')})`);
+  if (!ground || !text) return null;
+  const lum = ([r, g, b]: number[]) => {
     const c = (v: number) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
     return 0.2126 * c(r) + 0.7152 * c(g) + 0.0722 * c(b);
   };
-  const a = lum(mix(front.r, back.r), mix(front.g, back.g), mix(front.b, back.b));
-  const b = lum(back.r, back.g, back.b);
-  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  const [light, dark] = [lum(text), lum(ground)].sort((x, y) => y - x);
+  return (light + 0.05) / (dark + 0.05);
 }
 
 const token = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -93,7 +101,7 @@ function Pairs({ theme }: { theme: Theme }) {
       const ratio = contrast(token(name), token(ground));
       return <div key={`${name}${ground}`} className="ds__pair" style={{ background: `var(${ground})`, color: `var(${name})` }}>
         <span>{label}</span>
-        <span className="ds__ratio" data-low={ratio < 4.5 ? '' : undefined}>{ratio.toFixed(2)}:1</span>
+        <span className="ds__ratio" data-low={ratio !== null && ratio < 4.5 ? '' : undefined}>{ratio === null ? '—' : `${ratio.toFixed(2)}:1`}</span>
         <small>{name} / {ground}</small>
       </div>;
     }))}
