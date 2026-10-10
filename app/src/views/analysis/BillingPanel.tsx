@@ -3,7 +3,7 @@ import { Calculator, FilePlus2, Sparkles } from 'lucide-react';
 import {
   bridge, timeWait, when,
   type BillingCommand, type BillingDetail, type BillingKind, type CollectionCaliber, type CollectionCaliberParams,
-  type CollectionIssue, type CollectionRun, type CollectionRunSummary,
+  type CollectionIssue, type CollectionRun, type CollectionRunSummary, type DrillFigure,
 } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { Badge } from '../../components/ui/badge.js';
@@ -15,6 +15,7 @@ import { Figure } from '../../components/Figure.js';
 import { WaitLoop } from '../../components/WaitLoop.js';
 import { decimalToFixed, formatAmount } from '../../lib/figures.js';
 import { HelpLink } from '../guide/GuideHub.js';
+import { BillingDrill } from './BillingDrill.js';
 import { errorText, unwrap } from './shared.js';
 
 /**
@@ -210,7 +211,7 @@ export function BillingPanel({ taskId, period, practice, readOnly, refreshKey, s
       }))} />}
     {message && <p role="status" className="analysis-message">{message}</p>}
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
-    {run && <RunView run={run} runs={runs} onPick={(id) => void act('read', async () => {
+    {run && <RunView key={run.id} taskId={taskId} run={run} runs={runs} onPick={(id) => void act('read', async () => {
       shown.current = id;
       setRun(await call<CollectionRun>('collection-run-read', { run: id }));
     })} />}
@@ -368,8 +369,12 @@ function RunForm({ details, confirmed, caliber, last, period, disabled, running,
 
 const CALIBER_STATUS: Record<CollectionRun['caliber']['status'], string> = { confirmed: '已确认口径', default: '默认口径（未确认）', trial: '试算' };
 
-function RunView({ run, runs, onPick }: { run: CollectionRun; runs: CollectionRunSummary[]; onPick(id: string): void }) {
+function RunView({ taskId, run, runs, onPick }: { taskId: string; run: CollectionRun; runs: CollectionRunSummary[]; onPick(id: string): void }) {
   const { figures } = run.result;
+  const [drill, setDrill] = useState<DrillFigure | null>(null);
+  // 综合收缴率 counted over every receipt holds prepayments that name no bill: it does not come apart by bill.
+  const apart = (figure: DrillFigure, rate: string | null) => rate != null
+    && (figure !== 'collection_rate_total' || run.params.total_method === 'bounded') ? () => setDrill(figure) : undefined;
   const caliberText = run.caliber.status === 'confirmed' && run.caliber.version ? `已确认口径 · 第 ${run.caliber.version} 版` : CALIBER_STATUS[run.caliber.status];
   const groupLabel = GROUPS.find(([id]) => id === run.params.group_by[0])?.[1];
   const history = useMemo(() => [...runs].reverse(), [runs]);
@@ -385,11 +390,16 @@ function RunView({ run, runs, onPick }: { run: CollectionRun; runs: CollectionRu
     {run.caliber.status === 'trial' ? <p className="analysis-note">这次和已确认口径不同的地方：{run.caliber.differs.map((key) => CALIBER_KEYS[key] ?? key).join('、')}。经理确认口径前，这些数只作参考。</p> : null}
     <p className="analysis-note">本年 {run.result.window.year_start} 起到 {run.result.window.as_of}；资料：{Object.values(run.inputs).map((input) => input?.name).filter(Boolean).join('、')}。</p>
     <div className="analysis-kpi-grid" aria-label="收缴率">
-      <Kpi title="当期收缴率" rate={figures.collection_rate_current} rows={[['本年应收', figures.receivable], ['当期已收', figures.collected]]} />
-      <Kpi title="清欠率" rate={figures.arrears_recovery_rate} rows={[['年初往年欠费', figures.arrears_opening], ['本年收回', figures.arrears_collected]]} />
-      <Kpi title="综合收缴率" rate={figures.collection_rate_total} rows={[['未收合计', figures.outstanding], ['预收余额', figures.advance_balance]]} />
-      <Kpi title="本月收缴率" rate={figures.collection_rate_month} rows={[['本月应收', figures.month_receivable], ['本月已收', figures.month_collected]]} />
+      <Kpi title="当期收缴率" rate={figures.collection_rate_current} rows={[['本年应收', figures.receivable], ['当期已收', figures.collected]]}
+        onDrill={apart('collection_rate_current', figures.collection_rate_current)} />
+      <Kpi title="清欠率" rate={figures.arrears_recovery_rate} rows={[['年初往年欠费', figures.arrears_opening], ['本年收回', figures.arrears_collected]]}
+        onDrill={apart('arrears_recovery_rate', figures.arrears_recovery_rate)} />
+      <Kpi title="综合收缴率" rate={figures.collection_rate_total} rows={[['未收合计', figures.outstanding], ['预收余额', figures.advance_balance]]}
+        onDrill={apart('collection_rate_total', figures.collection_rate_total)} />
+      <Kpi title="本月收缴率" rate={figures.collection_rate_month} rows={[['本月应收', figures.month_receivable], ['本月已收', figures.month_collected]]}
+        onDrill={apart('collection_rate_month', figures.collection_rate_month)} />
     </div>
+    {drill ? <BillingDrill key={drill} taskId={taskId} runId={run.id} figure={drill} onClose={() => setDrill(null)} /> : null}
     <dl className="analysis-billing-facts">
       <div><dt>减免率</dt><dd><Figure text={percent(figures.waiver_rate)} /></dd></div>
       <div><dt>减免额</dt><dd><Figure text={formatAmount(figures.waiver)} /></dd></div>
@@ -419,11 +429,13 @@ function RunView({ run, runs, onPick }: { run: CollectionRun; runs: CollectionRu
   </article>;
 }
 
-function Kpi({ title, rate, rows }: { title: string; rate: string | null; rows: [string, string][] }) {
+function Kpi({ title, rate, rows, onDrill }: { title: string; rate: string | null; rows: [string, string][]; onDrill?(): void }) {
   return <article className="analysis-kpi-card">
     <span className="analysis-kpi-title">{title}</span>
     <strong aria-label={title}><Figure text={percent(rate)} /></strong>
     <dl className="analysis-kpi-list">{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd><Figure text={formatAmount(value)} /></dd></div>)}</dl>
+    {onDrill ? <Button variant="link" type="button" className="analysis-billing-drill__open" aria-label={`往下拆${title}`} onClick={onDrill}>
+      往下拆</Button> : null}
   </article>;
 }
 

@@ -96,6 +96,8 @@ export const CHANNELS = {
   billingAdd: 'billing:add',
   /** 收费明细: the reads, the manager's confirmations and the collection run, by a fixed list of commands. */
   billingCall: 'billing:call',
+  /** 收费明细 往下拆: one level as Excel, where the save dialog says. */
+  billingDrillExport: 'billing:drill-export',
   harnessStatus: 'harness:status',
   harnessOpen: 'harness:open',
   harnessLayout: 'harness:layout',

@@ -520,6 +520,17 @@
 .analysis-billing-groups td { text-align: right; }
 .analysis-billing-issues h5 { margin: 0 0 4px; font-size: var(--fnd-size-body); }
 .analysis-billing-issues ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.analysis-billing-drill { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px 0 0; border-top: 1px solid var(--fnd-line); }
+.analysis-billing-drill h5 { margin: 0; font-size: var(--fnd-size-body); }
+.analysis-billing-drill__open { align-self: flex-start; }
+.analysis-billing-drill__trail { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.analysis-billing-drill__trail li { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.analysis-billing-drill__trail [aria-current] { font-weight: var(--fnd-weight-strong); }
+.analysis-billing-drill__check { margin: 0; }
+.analysis-billing-drill__miss { color: var(--fnd-warning); }
+.analysis-billing-drill__table td.fnd-num { text-align: right; }
+.analysis-billing-drill__table th[scope="row"] { overflow-wrap: anywhere; }
+.analysis-billing-drill__source { display: flex; flex-direction: column; gap: 2px; color: var(--fnd-muted); font-size: var(--fnd-size-label); }
 /* A variance result's profit bridges, each with 钉到看板 under it. */
 .analysis-profit-bridges { display: grid; gap: 16px; }
 .analysis-profit-bridge { display: grid; gap: 8px; justify-items: start; }

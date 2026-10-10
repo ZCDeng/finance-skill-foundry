@@ -67,6 +67,7 @@ const api = {
   taskSampleBilling: (task: string) => ipcRenderer.invoke('foundry:task-sample-billing', task),
   billingAdd: (task: string, kind: string) => ipcRenderer.invoke('billing:add', task, kind),
   billingCall: (task: string, command: string, spec?: unknown) => ipcRenderer.invoke('billing:call', task, command, spec),
+  billingDrillExport: (task: string, spec: unknown) => ipcRenderer.invoke('billing:drill-export', task, spec),
   taskNew: (title: string, period: string) =>
     ipcRenderer.invoke('foundry:task-new', title, period),
   harnessStatus: () => ipcRenderer.invoke('harness:status'),

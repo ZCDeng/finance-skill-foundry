@@ -53,6 +53,8 @@ it('prints the figures the engine computes for the example', () => {
   expect(seen('follow-7')).toContain(`作废 ${billing.void_bills} 行、冲红 ${billing.red_letter_lines} 行`);
   expect(seen('follow-7')).toContain(`${billing.bills_without_property} 行应收`);
   expect(seen('follow-7')).toContain(`云海苑减免率 ${billing.waiver_rate_yunhai}%`);
+  expect(seen('follow-7')).toContain(`${billing.drill_worst_project}未收最多，${yuan(billing.drill_worst_project_outstanding)} 元，当期收缴率 ${billing.drill_worst_project_current}%`);
+  expect(seen('follow-7')).toContain(`未收 ${yuan(billing.drill_empty_city_outstanding)} 元`);
   expect(seen('follow-8')).toContain(`综合收缴率 ${billing.variant_total}%；默认口径是 ${billing.total}%`);
   // The 口径 lines the step quotes are the ones the panel writes for that variant.
   for (const line of caliberLines({ year_start_month: 1, total_method: 'all_receipts', related_owners: ['地产'], exclude_related: false, excluded_fee_items: ['商业租金代收'] })

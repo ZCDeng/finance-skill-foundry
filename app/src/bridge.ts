@@ -33,7 +33,7 @@ export type SampleKind = 'practice' | 'reference' | 'next_month' | 'legacy';
 /** 收费明细 (foundry/billing_detail.py): a 应收明细, 实收明细 or 房产主数据 table, in DuckDB. */
 export type BillingKind = 'receivable' | 'receipt' | 'property';
 export type BillingCommand = 'detail-list' | 'detail-confirm' | 'collection-caliber' | 'collection-caliber-confirm'
-  | 'collection-run' | 'collection-run-read' | 'collection-run-list' | 'collection-state';
+  | 'collection-run' | 'collection-run-read' | 'collection-run-list' | 'collection-state' | 'collection-drill';
 export interface BillingMapping { mapping: Record<string, string>; by: string; at: string }
 export interface BillingDetail {
   id: string; kind: BillingKind; name: string; created_at: string; added_by?: string;
@@ -82,6 +82,30 @@ export interface CollectionRun {
     quality: CollectionIssue[];
     labels?: CollectionIssue[];
   };
+}
+/** 往下拆 (foundry/billing_drill.py): the rates a drill takes apart, and one level of it. */
+export type DrillFigure = 'collection_rate_current' | 'collection_rate_month' | 'arrears_recovery_rate' | 'collection_rate_total';
+export interface DrillSums { base: string; done: string; outstanding: string; rate: string | null }
+export interface DrillRow extends DrillSums {
+  /** The name the next level is opened by; null is the bills with that column empty. */
+  value: string | null; label: string;
+  /** Households with something owed toward the rate, on a level above the bills. */
+  properties?: number;
+  /** A bill: what it is, where its 账期 falls and the export lines it was read from. */
+  fee_item?: string | null; period?: string; place?: 'current' | 'arrears'; lines?: string[]; line_count?: number; receipts?: string[]; receipt_count?: number;
+}
+export interface DrillLevel {
+  run_id: string; figure: DrillFigure; label: string; base_label: string; done_label: string; as_of: string; caliber: CollectionRunCaliber;
+  levels: { key: string; label: string }[];
+  path: (DrillSums & { level: string; value: string | null; label: string })[];
+  level: { key: string; label: string };
+  /** The whole, against the figure the run filed. */
+  run_check: { base: string; done: string; ties: boolean };
+  whole: DrillSums & { label: string };
+  total: DrillSums;
+  /** Whether this level's rows add up to the row it was opened from, and by how much they miss it. */
+  ties: boolean; gap: { base: string; done: string };
+  row_count: number; rows: DrillRow[];
 }
 export interface CollectionRunSummary {
   id: string; created_at: string; run_by?: string; as_of: string; group_by: string[]; caliber: CollectionRunCaliber;
@@ -411,6 +435,8 @@ export interface Bridge {
   /** 收费明细: CSV files the manager picks (several only when they are one table split up), as one detail table. */
   billingAdd?(task: string, kind: BillingKind): Promise<Answer<BillingDetail | { cancelled: true }>>;
   billingCall?(task: string, command: BillingCommand, spec?: Record<string, unknown>): Promise<Answer<unknown>>;
+  /** 往下拆: one level, every row, as Excel where the manager picks. */
+  billingDrillExport?(task: string, spec: { run: string; figure: DrillFigure; path: (string | null)[]; name: string }): Promise<Answer<{ cancelled: true } | { exported: true; rows: number }>>;
   /** Absent when this build has no harness install to embed. */
   harnessStatus?(): Promise<Answer<HarnessStatus>>;
   harnessOpen?(

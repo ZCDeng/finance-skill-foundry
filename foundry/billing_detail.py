@@ -752,13 +752,20 @@ def _issue(connection, metas, kind: str, code: str, where: str, amount: str, vie
             "lines": _lines(connection, metas, kind, f"SELECT file, line FROM {view} WHERE {where}")}
 
 
-def _compute(connection, metas: dict, params: dict) -> dict:
+def _window(connection, params: dict) -> int:
+    """The statistics date, its month and where the year began, as the variables the SQL reads; the start year."""
     as_of = params["as_of"]
     year, month = int(as_of[:4]), int(as_of[5:7])
     start_year = year if month >= params["year_start_month"] else year - 1
     connection.execute(f"SET VARIABLE as_of = DATE '{as_of}'")
     connection.execute(f"SET VARIABLE as_of_month = DATE '{as_of[:7]}-01'")
     connection.execute(f"SET VARIABLE year_start = DATE '{start_year}-{params['year_start_month']:02d}-01'")
+    return start_year
+
+
+def _compute(connection, metas: dict, params: dict) -> dict:
+    as_of = params["as_of"]
+    start_year = _window(connection, params)
     _prepare(connection, metas, params)
     has_property = "property" in metas
     main = "NOT related" if params["exclude_related"] else "true"
@@ -808,7 +815,8 @@ def _compute(connection, metas: dict, params: dict) -> dict:
 # --- the CLI ----------------------------------------------------------------------------------
 
 COMMANDS = {"detail-add", "detail-list", "detail-read", "detail-propose", "detail-confirm", "collection-run", "collection-run-read",
-            "collection-run-list", "collection-state", "collection-caliber", "collection-caliber-propose", "collection-caliber-confirm"}
+            "collection-run-list", "collection-state", "collection-caliber", "collection-caliber-propose", "collection-caliber-confirm",
+            "collection-drill", "collection-drill-export"}
 
 
 def add_parsers(sub) -> None:
@@ -835,6 +843,10 @@ def add_parsers(sub) -> None:
     p = sub.add_parser("collection-caliber-confirm", help="the manager confirms a proposed 口径, or her own values")
     p.add_argument("--version", type=int)
     p.add_argument("--params", help="JSON: the 口径 to confirm instead of a proposal")
+    p = sub.add_parser("collection-drill", help="往下拆: one level of a collection run's rate, 城市公司 → 项目 → 房产 → 账单")
+    p.add_argument("--spec", required=True, help='JSON: {"run": id, "figure": "collection_rate_current", "path": ["海口城市公司"]}')
+    p = sub.add_parser("collection-drill-export", help="one level of 往下拆, every row, as an Excel workbook")
+    p.add_argument("--spec", required=True, help='JSON: the collection-drill spec and "destination", an absolute .xlsx path')
 
 
 def dispatch(args) -> bool:
@@ -871,6 +883,13 @@ def dispatch(args) -> bool:
         result = store.caliber_propose(spec.get("params"), spec.get("note", ""))
     elif args.cmd == "collection-caliber-confirm":
         result = store.caliber_confirm(args.version, None if args.params is None else _object(args.params, "caliber"))
+    elif args.cmd in ("collection-drill", "collection-drill-export"):
+        from foundry.billing_drill import Drill, export
+
+        spec = _object(args.spec, "drill spec")
+        drill = Drill(store, spec.get("run"))
+        result = (drill.level(spec.get("figure"), spec.get("path")) if args.cmd == "collection-drill"
+                  else export(drill, spec.get("figure"), spec.get("path"), spec.get("destination")))
     else:
         result = store.read_run(args.run)
     print(json.dumps(result, ensure_ascii=False))
