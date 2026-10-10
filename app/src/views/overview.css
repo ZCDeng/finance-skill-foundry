@@ -26,6 +26,9 @@
 
 .fnd-overview__group { font-size: var(--fnd-size-body); }
 .fnd-overview__group > .fnd-overview__note { margin: 4px 0 8px; }
+/* One quiet line of what the app recomputed this month; the cards open under it. */
+.fnd-overview__recomputed { font-size: var(--fnd-size-body); }
+.fnd-overview__recomputed > .fnd-overview__note { margin: 4px 0 8px; }
 .fnd-overview__todos { margin: 0; padding: 0; list-style: none; display: grid; }
 .fnd-overview__todos li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--fnd-line); }
 .fnd-overview__todos li:first-child { border-top: 0; }

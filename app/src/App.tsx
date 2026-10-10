@@ -965,7 +965,7 @@ export function App() {
    * before giving up; once found it is scrolled to and outlined for a moment (`fnd-arrival`).
    */
   const openFromOverview = (task: TaskRow, target: OverviewTarget | 'close') => {
-    const section = target === 'controls' || target === 'close' ? 'close' : target === 'results' || target === 'drafts' ? target : 'materials';
+    const section = target === 'controls' || target === 'close' ? 'close' : target === 'results' || target === 'drafts' || target === 'dashboard' ? target : 'materials';
     const view = task.lifecycle_status ?? 'active';
     setTaskLifecycleView(view);
     if (view !== 'active') {
@@ -978,7 +978,7 @@ export function App() {
     const find = (): Element | null => target === 'controls' ? document.getElementById('month-close-controls')
       : target === 'rollforward' ? document.querySelector('.analysis-rollforward')
         : target === 'scope' || target === 'structure' || target === 'datasets' || target === 'billing' ? materialsAnchor(target) : null;
-    if (target === 'results' || target === 'drafts' || target === 'close') return;
+    if (target === 'results' || target === 'drafts' || target === 'dashboard' || target === 'close') return;
     let tries = 0;
     const look = () => {
       const node = find();

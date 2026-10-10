@@ -152,6 +152,10 @@ const RULES: Rule[] = [
   // 看板 (foundry/dashboards.py).
   [/the dashboard changed since it was read|dashboard card is not on this board/i, '看板刚在别处更新过，已重新读取，请再操作一次。'],
   [/only the manager can arrange the dashboard/i, '看板只能由你整理和认可。'],
+  [/only the manager (can recompute the dashboard|can carry a dashboard over|carries a dashboard over)/i, '看板只能由你重算或带过来。'],
+  [/this task's dashboard already has cards/i, '这个任务的看板上已经有卡了，只能带到空看板上。'],
+  [/that task has no dashboard to carry over/i, '那个任务的看板上没有可以带过来的卡。'],
+  [/carry a dashboard from another task/i, '只能从别的任务带看板过来。'],
   [/the board already has this card|two dashboard cards show the same thing/i, '看板上已经有这张卡。'],
   [/a dashboard holds at most (\d+) cards/i, (match) => `看板最多放 ${match[1]} 张卡，先移除几张再加。`],
   [/a figure card must name exactly one row/i, '这个数在结果里对不上唯一的一行，没有钉上。'],

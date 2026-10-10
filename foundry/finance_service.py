@@ -2688,7 +2688,11 @@ class FinanceStore:
         current = self._dashboard()
         if current is None:
             return {"dashboard": None}
-        return {"dashboard": self._dashboard_in_view(current) if self.allowed is not None else current}
+        if self.allowed is not None:
+            return {"dashboard": self._dashboard_in_view(current)}
+        # The manager's read says how many cards have newer files to be recomputed on (dashboard_recompute).
+        plans = self._dashboard_plans(current.get("cards", []), self._dashboard_runs())
+        return {"dashboard": current, "recompute": {"ready": sum(len(ids) for _, ids in plans.values())}}
 
     def _dashboard_in_view(self, board):
         """The board as a session sees it: the cards on runs it may read; the board itself names no files."""
@@ -2708,6 +2712,182 @@ class FinanceStore:
         from foundry.locking import exclusive
 
         return exclusive(self.analysis._inside(self.analysis.root / "dashboards.lock"), timeout=10)
+
+    def _dashboard_plans(self, cards, run_of):
+        """The cards whose files have newer versions, by the run they read: {run id: (new bindings, card ids)}. A card
+        whose last recompute on those same files failed is left until its files change again."""
+        from foundry.dashboard_recompute import newest_versions
+
+        newest = newest_versions(self)
+        plans = {}
+        for card in cards:
+            try:
+                run = run_of(card["run_id"])
+            except FoundryError:
+                continue
+            bindings = {alias: newest(value) or value for alias, value in (run.get("bindings") or {}).items()}
+            if bindings == run.get("bindings") or (card.get("recompute_failed") or {}).get("bindings") == dict(sorted(bindings.items())):
+                continue
+            plans.setdefault(run["id"], (bindings, set()))[1].add(card["id"])
+        return plans
+
+    def dashboard_recompute(self, spec):
+        """Every card whose files have newer versions, on the same calculation run again on them (dashboard_recompute)."""
+        from foundry import dashboard_recompute as rc
+
+        if spec and not isinstance(spec, dict):
+            raise FoundryError("dashboard recompute spec must be an object")
+        self._manager_only("recompute the dashboard")
+        current = self._dashboard()
+        if current is None:
+            return {"dashboard": None, "recomputed": [], "failed": []}
+        if "parent_id" in (spec or {}) and (spec.get("parent_id") or None) != current["id"]:
+            raise FoundryError("the dashboard changed since it was read; read it again")
+        run_of = self._dashboard_runs()
+        plans = self._dashboard_plans(current["cards"], run_of)
+        if not plans:
+            return {"dashboard": current, "recomputed": [], "failed": []}
+        outcomes = {}
+        for run_id, (bindings, _cards) in plans.items():
+            run = run_of(run_id)
+            try:
+                recipe = rc.recipe_of(self, run, elsewhere=False)
+                new = rc.new_month(self, [value for alias, value in bindings.items() if value != run["bindings"][alias]])
+                # Only some files are next month's yet: run once the rest are too, not on two months at once.
+                behind = rc.other_months(self, [value for alias, value in bindings.items() if value == run["bindings"][alias]], new) if new else []
+                if behind:
+                    raise rc.NotRerun(f"还有资料不是 {new} 的：{'、'.join(behind)}，换成同一个月的再重算")
+                move = rc.month_move(recipe, new)
+                again, said = rc.run_again(self, recipe, bindings, move, elsewhere=False)
+                if again.get("execution_status") not in {"succeeded", "success"}:
+                    raise rc.NotRerun(f"重算没有算完：{again.get('error') or '计算失败'}")
+                outcomes[run_id] = (again, said, rc.manual_inputs((recipe.get("scenario") or {}).get("inputs")), move)
+            except rc.NotRerun as exc:
+                outcomes[run_id] = str(exc)
+            except FoundryError as exc:
+                outcomes[run_id] = f"重算没有算完：{exc}"
+        cards, recomputed, failed = [], [], []
+        for card in current["cards"]:
+            plan = plans.get(card["run_id"])
+            if not plan or card["id"] not in plan[1]:
+                cards.append(card)
+                continue
+            outcome = outcomes[card["run_id"]]
+            try:
+                if isinstance(outcome, str):
+                    raise rc.NotRerun(outcome)
+                again, said, manual, move = outcome
+                cards.append(rc.moved_card(card, run_of(card["run_id"]), again, move, before=None, said=said,
+                                           manual=manual, carried=None))
+                recomputed.append(card["id"])
+            except rc.NotRerun as exc:
+                cards.append(rc.failed(card, str(exc), plan[0]))
+                failed.append({"card_id": card["id"], "title": card["title"], "reason": str(exc)})
+        with self._dashboard_lock():
+            if (self._dashboard() or {}).get("id") != current["id"]:
+                raise FoundryError("the dashboard changed since it was read; read it again")
+            board = self._write("dashboards", parent_id=current["id"], bindings={}, cards=cards)
+        return {"dashboard": board, "recomputed": recomputed, "failed": failed}
+
+    def dashboard_carry(self, spec, *, tasks):
+        """Last month's board on this task: each card's calculation run on this task's files of the same names.
+
+        Without ``from_task_id``, the boards that could come here: each other task's board, how many of its cards
+        have every file they read here under the same name, and the names still missing. With it, those cards are
+        carried onto this task's empty board, waiting for the manager; the rest are said and left behind.
+        """
+        from foundry import dashboard_recompute as rc
+        from foundry.finance_readiness import _task_period
+
+        if spec and not isinstance(spec, dict):
+            raise FoundryError("dashboard carry spec must be an object")
+        spec = spec or {}
+        self._manager_only("carry a dashboard over")
+        if self.allowed is not None:
+            raise FoundryError("only the manager carries a dashboard over")
+        current = self._dashboard()
+        if current and current.get("cards"):
+            raise FoundryError("this task's dashboard already has cards; carry a board onto an empty one")
+        find = rc.same_names(self)
+
+        def runs_of(source, board):
+            run_of = source._dashboard_runs()
+            plans = {}
+            for card in board["cards"]:
+                try:
+                    run = run_of(card["run_id"])
+                except FoundryError:
+                    continue
+                if run["id"] not in plans:
+                    plans[run["id"]] = (run, *rc.rebind(run["bindings"], source.analysis.read_dataset, self.analysis.read_dataset, find))
+            return plans
+
+        if not spec.get("from_task_id"):
+            offers = []
+            for task in tasks.list("all"):
+                if task.id == self.task.id or task.lifecycle_status() == "trashed":
+                    continue
+                source = FinanceStore(task, actor="manager")
+                board = source._dashboard()
+                cards = [card for card in (board or {}).get("cards", []) if card.get("state") != "explore"]
+                if not cards:
+                    continue
+                plans = runs_of(source, {"cards": cards})
+                ready = [card for card in cards if card["run_id"] in plans and not plans[card["run_id"]][2]]
+                missing = sorted({name for run, _bindings, names in plans.values() for name in names})
+                meta = task.meta()
+                offers.append({"task_id": task.id, "title": meta.get("title"), "period": meta.get("period"),
+                               "created_at": meta.get("created_at"), "cards": len(cards), "ready": len(ready), "missing": missing})
+            offers.sort(key=lambda row: (str(row.get("period") or ""), str(row.get("created_at") or "")), reverse=True)
+            return {"offers": offers[:5]}
+        source_task = tasks.get(str(spec["from_task_id"]))
+        if source_task.id == self.task.id or source_task.lifecycle_status() == "trashed":
+            raise FoundryError("carry a dashboard from another task")
+        source = FinanceStore(source_task, actor="manager")
+        board = source._dashboard()
+        cards = [card for card in (board or {}).get("cards", []) if card.get("state") != "explore"]
+        if not cards:
+            raise FoundryError("that task has no dashboard to carry over")
+        plans = runs_of(source, {"cards": cards})
+        fallback = self.task.meta().get("period") or _task_period(self.analysis)
+        carried_from = {"task_id": source_task.id, "title": source_task.meta().get("title")}
+        outcomes = {}
+        for run_id, (run, bindings, missing) in plans.items():
+            try:
+                if missing:
+                    raise rc.NotRerun("这个任务里还没有：" + "、".join(missing))
+                recipe = rc.recipe_of(source, run, elsewhere=True)
+                new = rc.new_month(self, list(bindings.values()), fallback)
+                if rc.recipe_month(recipe) and not new:
+                    raise rc.NotRerun("看不出这个任务的资料是哪个月的，先在「分析范围」填上期间")
+                move = rc.month_move(recipe, new)
+                again, said = rc.run_again(self, recipe, bindings, move, elsewhere=True)
+                if again.get("execution_status") not in {"succeeded", "success"}:
+                    raise rc.NotRerun(f"重算没有算完：{again.get('error') or '计算失败'}")
+                outcomes[run_id] = (again, said, rc.manual_inputs((recipe.get("scenario") or {}).get("inputs")), move)
+            except rc.NotRerun as exc:
+                outcomes[run_id] = str(exc)
+            except FoundryError as exc:
+                outcomes[run_id] = f"重算没有算完：{exc}"
+        stored, failed = [], []
+        for card in cards:
+            outcome = outcomes.get(card["run_id"], "原来的结果读不到了")
+            try:
+                if isinstance(outcome, str):
+                    raise rc.NotRerun(outcome)
+                again, said, manual, move = outcome
+                before = rc.shown(card, plans[card["run_id"]][0])
+                stored.append(rc.moved_card(card, None, again, move, before=before, said=said, manual=manual,
+                                            carried=carried_from))
+            except rc.NotRerun as exc:
+                failed.append({"card_id": card["id"], "title": card["title"], "reason": str(exc)})
+        if not stored:
+            return {"dashboard": current, "carried": [], "failed": failed}
+        with self._dashboard_lock():
+            if (self._dashboard() or {}).get("id") != (current or {}).get("id"):
+                raise FoundryError("the dashboard changed since it was read; read it again")
+            written = self._write("dashboards", parent_id=current["id"] if current else None, bindings={}, cards=stored)
+        return {"dashboard": written, "carried": [card["id"] for card in stored], "failed": failed}
 
     def dashboard_save(self, spec):
         from foundry.dashboards import arrange

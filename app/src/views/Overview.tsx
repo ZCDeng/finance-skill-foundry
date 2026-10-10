@@ -10,7 +10,7 @@ import { formatPeriod } from '../lib/period.js';
 import './overview.css';
 
 /** Where a to-do is handled, as the workspace names its places. */
-export type OverviewTarget = 'scope' | 'datasets' | 'structure' | 'billing' | 'controls' | 'results' | 'drafts' | 'rollforward';
+export type OverviewTarget = 'scope' | 'datasets' | 'structure' | 'billing' | 'controls' | 'results' | 'drafts' | 'rollforward' | 'dashboard';
 
 /**
  * The groups 等你处理 shows, in the order a manager clears them: what only the manager can sign
@@ -94,6 +94,7 @@ export function Overview({ data, loading, error, fresh, recent, onRefresh, onOpe
         </Button>
       </div>
       {error ? <p role="alert" className="analysis-message analysis-message--error">{error}</p> : null}
+      <Recomputed rows={rows} onOpen={onOpen} />
       <Start empty={empty} idle={idle} tasks={rows.map((row) => row.task)} onOpen={onOpen} onNewQuestion={onNewQuestion} onSample={onSample} onChecklist={onChecklist} onGuide={onGuide} />
       {data === null && loading ? <Loading label="正在读取各任务的月结状态…"><SkeletonRows rows={4} /></Loading> : null}
       {rows.length ? <div className="fnd-overview__grid">
@@ -103,6 +104,40 @@ export function Overview({ data, loading, error, fresh, recent, onRefresh, onOpe
       {recent.length ? <Recent rows={recent} onLibrary={onLibrary} /> : null}
     </div>
   );
+}
+
+/** This month's, by the computer's calendar: the line counts what the app did for the manager, not a close period. */
+function thisMonth(at: string, now: Date): boolean {
+  const day = new Date(at);
+  return !Number.isNaN(day.getTime()) && day.getFullYear() === now.getFullYear() && day.getMonth() === now.getMonth();
+}
+
+/**
+ * 「本月已为你自动重算 N 张卡、发现 M 处变化」: board cards run again this month on newer files or carried from last
+ * month's task, and how many moved enough to look at. Opens to the cards; nothing shows until there is one.
+ */
+function Recomputed({ rows, onOpen, now = new Date() }: { rows: OverviewTask[]; onOpen(task: TaskRow, target: OverviewTarget): void; now?: Date }) {
+  const cards = rows.flatMap((row) => (row.dashboard?.recomputed ?? []).filter((item) => thisMonth(item.at, now)).map((item) => ({ task: row.task, item })))
+    .sort((a, b) => Number(b.item.changed) - Number(a.item.changed) || b.item.at.localeCompare(a.item.at));
+  if (!cards.length) return null;
+  const changed = cards.filter(({ item }) => item.changed).length;
+  return <details className="analysis-details fnd-overview__recomputed">
+    <DisclosureSummary>{changed ? `本月已为你自动重算 ${cards.length} 张卡、发现 ${changed} 处变化`
+      : `本月已为你自动重算 ${cards.length} 张卡，没有发现明显变化`}</DisclosureSummary>
+    <p className="fnd-muted fnd-overview__note">资料有更新或从上月任务带过来时，看板上的卡按原来的算法重算，都等你认可。</p>
+    <ul className="fnd-overview__todos">
+      {cards.map(({ task, item }) => <li key={`${task.id}:${item.card_id}`}>
+        <div className="fnd-overview__todo-text">
+          <span className="fnd-overview__todo-task"><TaskName task={task} /></span>
+          <span>{`「${item.title}」：${item.change || '已重算'}`}</span>
+        </div>
+        <Button type="button" size="sm" variant="outline" onClick={() => onOpen(task, 'dashboard')}>
+          {item.changed ? '去看看' : '去认可'}<ArrowRight size={13} strokeWidth={1.5} aria-hidden />
+          <span className="sr-only">：{task.title}，{item.title}</span>
+        </Button>
+      </li>)}
+    </ul>
+  </details>;
 }
 
 function Section({ title, note, id, children, className }: { title: string; note?: ReactNode; id: string; children: ReactNode; className?: string }) {

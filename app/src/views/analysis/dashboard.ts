@@ -35,7 +35,40 @@ export type DashboardCard = {
   proposed_by: 'manager' | 'assistant';
   /** Set by the backend when the manager accepts, on the run the card showed then. */
   accepted: { run_id: string; at: string } | null;
+  /** Set by the backend when the card was last run again on newer files, or carried from another task's board. */
+  recomputed?: Recomputed | null;
+  /** The last recompute on the card's newer files did not run, and why; tried again when the files change again. */
+  recompute_failed?: { at: string; reason: string } | null;
 };
+
+/** What a card showed, for saying what changed: a figure's value, a ranking's order, a bridge's steps. */
+export type Shown = {
+  value?: string | null; display?: string | null; level?: string | null; unit?: string | null;
+  labels?: string[]; leaders?: string[]; beyond?: string[] | null;
+  profit?: (string | null)[]; steps?: Record<string, string | null>;
+};
+
+/** foundry/dashboard_recompute.py moved_card. */
+export type Recomputed = {
+  at: string;
+  from_run_id: string;
+  was_accepted: boolean;
+  /** [from, to] when the new files were another month's. */
+  months: [string, string] | null;
+  before: Shown | null;
+  after: Shown;
+  /** A move worth a look: a level, a sign, a tenth or a point, the leaders of a ranking. */
+  changed: boolean;
+  change: string;
+  /** What moved with the month, e.g. 已过月数 8 → 9. */
+  adjusted: string[];
+  /** Figures given by hand, carried as they were. */
+  manual: string[];
+  carried_from: { task_id: string; title: string } | null;
+};
+
+/** One board another task holds that could come to this one (dashboard-carry without a task). */
+export type CarryOffer = { task_id: string; title: string; period: string | null; cards: number; ready: number; missing: string[] };
 
 /** A card before it is saved: the backend gives it an id and records who pinned it. */
 export type CardDraft = Pick<DashboardCard, 'kind' | 'title' | 'state' | 'run_id' | 'select'> & { template?: TemplateId | null };

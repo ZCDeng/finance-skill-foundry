@@ -87,8 +87,12 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   const [financeRunning, setFinanceRunning] = useState<Record<string, string>>({});
   // How the last one ended, kept here and per task for the same reasons.
   const [financeOutcome, setFinanceOutcome] = useState<Record<string, FinanceOutcome>>({});
-  // The task's board, read here so 钉到看板 on the result page and the 看板 tab change the same one.
-  const board = useDashboard(task?.id);
+  // The task's board, read here so 钉到看板 on the result page and the 看板 tab change the same one. Opening the
+  // task recomputes the cards whose files have newer versions; the task is read again to draw the new runs.
+  const board = useDashboard(task?.id, {
+    canRecompute: Boolean(bridge()?.financeCall) && !(task?.lifecycle_status && task.lifecycle_status !== 'active'),
+    onRecomputed: () => { if (task) void refresh(task.id); },
+  });
   const currentTask = useRef(task?.id);
   currentTask.current = task?.id;
   const active = useRef(true);
@@ -263,6 +267,10 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     finally { operation.current = false; if (active.current) setBusy(false); }
   }
   const view = state?.task_id === task?.id ? state : null;
+  // A newer file came in (added again, refreshed, next month's tables confirmed): the board may have cards to recompute.
+  const replacedKey = (view?.superseded_datasets ?? []).join(',');
+  const boardLoad = board.load;
+  useEffect(() => { if (replacedKey) void boardLoad().catch(() => undefined); }, [replacedKey, boardLoad]);
   const referencedRuns = view?.drafts.at(-1)?.run_ids ?? [];
   const lastSuccessful = view && (referencedRuns.map((id) => view.runs.find((run) => run.id === id && runPresentationRole(run) === 'business')).find(Boolean)
     ?? [...view.runs].reverse().find((row) => runPresentationRole(row) === 'business')
