@@ -1,7 +1,7 @@
 ---
 name: FA Foundry
 description: 以任务、持续对话与真实成果组织的财务经理工作台。
-colors: {fnd-bg: '#ffffff', fnd-surface: '#ffffff', fnd-surface-strong: '#f7f7f7', fnd-ink: '#000000e0', fnd-muted: '#00000099', fnd-line: '#1f1f1f24', fnd-accent: '#1f1f1f', fnd-on-accent: '#f9fafb', fnd-selection-surface: '#efefed', fnd-line-hover: '#1f1f1f66', fnd-focus: '#8a6729', fnd-selected: '#8a6729', fnd-on-selected: '#f9fafb', fnd-warning: '#a3372b', fnd-warning-line: '#c96a5c', fnd-warning-fill: '#c96a5c1f', fnd-negative: '#94463d', fnd-level-ok: '#4f7553', fnd-level-watch: '#a35f1f', fnd-level-watch-fill: '#a35f1f1f', fnd-bg-dark: '#111111', fnd-surface-dark: '#1f1f1f', fnd-surface-strong-dark: '#161616', fnd-ink-dark: '#f9fafb', fnd-muted-dark: '#a6a6a6', fnd-line-dark: '#ffffff24', fnd-accent-dark: '#f9fafb', fnd-on-accent-dark: '#1f1f1f', fnd-selection-surface-dark: '#292929', fnd-line-hover-dark: '#ffffff59', fnd-focus-dark: '#bfa36c', fnd-selected-dark: '#e2c180', fnd-on-selected-dark: '#1f1f1f', fnd-warning-dark: '#eb9a8c', fnd-warning-line-dark: '#eb9a8c', fnd-warning-fill-dark: '#eb9a8c1f', fnd-negative-dark: '#d9a097', fnd-level-ok-dark: '#9cc0a0', fnd-level-watch-dark: '#e0a46a', fnd-level-watch-fill-dark: '#e0a46a1f'}
+colors: {fnd-bg: '#f5f6f8', fnd-surface: '#ffffff', fnd-surface-strong: '#edeff3', fnd-ink: '#1c2232', fnd-muted: '#5b6176', fnd-line: '#20294c1f', fnd-accent: '#1c2232', fnd-on-accent: '#f9fafb', fnd-selection-surface: '#eef0f4', fnd-line-hover: '#20294c59', fnd-focus: '#8a6729', fnd-selected: '#8a6729', fnd-on-selected: '#f9fafb', fnd-warning: '#a3372b', fnd-warning-line: '#c96a5c', fnd-warning-fill: '#c96a5c1f', fnd-negative: '#94463d', fnd-level-ok: '#4f7553', fnd-level-watch: '#a35f1f', fnd-level-watch-fill: '#a35f1f1f', fnd-bg-dark: '#0f1117', fnd-surface-dark: '#1a1d26', fnd-surface-strong-dark: '#14171f', fnd-ink-dark: '#f3f4f7', fnd-muted-dark: '#a4a9b8', fnd-line-dark: '#ffffff1f', fnd-accent-dark: '#f3f4f7', fnd-on-accent-dark: '#1a1d26', fnd-selection-surface-dark: '#262a35', fnd-line-hover-dark: '#ffffff52', fnd-focus-dark: '#bfa36c', fnd-selected-dark: '#e2c180', fnd-on-selected-dark: '#1a1d26', fnd-warning-dark: '#eb9a8c', fnd-warning-line-dark: '#eb9a8c', fnd-warning-fill-dark: '#eb9a8c1f', fnd-negative-dark: '#d9a097', fnd-level-ok-dark: '#9cc0a0', fnd-level-watch-dark: '#e0a46a', fnd-level-watch-fill-dark: '#e0a46a1f'}
 typography:
   headline: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 24px, fontWeight: 600, lineHeight: 32px}
   task-title: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 20px, fontWeight: 600, lineHeight: 28px}
@@ -49,6 +49,8 @@ components:
 
 ## Colors
 
+**冷画布与卡片（2026-10-10）。** 中性色带一点午夜蓝：正文 `fnd-ink` #1c2232、次要文字 `fnd-muted` #5b6176、细线 `fnd-line` 是午夜蓝 12% 透明；金色、砖红、负数暗红和筛查灯不变。浅色模式补上和深色一样的两级：画布 `fnd-bg` #f5f6f8 是总览、成果库、指南的页底和对话栏的底，卡片、面板、输入框、弹层和顶栏用白色 `fnd-surface`；工作区的成果区也落在画布上，里面的 KPI 卡、月结步骤卡、输入框和收费明细卡是白卡。`fnd-surface-strong` #edeff3 比画布深一档，给任务栏、悬停和加载占位；`fnd-selection-surface` #eef0f4 上的金色字是 4.54:1，压在下限上，改这两个 token 前先跑 tokens.test.ts。深色由浅色推出：画布 #0f1117、卡片 #1a1d26、选择底 #262a35，同样带一点蓝。对话栏（`electron/harness/skin.ts`）的配色跟着这些 token 走，测试逐项核对。参考是 Fold 风格的 DESIGN.md，只借了冷灰、画布和卡片的一级明暗差和带色调的阴影；它的电光蓝链接（白底 2.90:1）、亮黄高亮、胶囊按钮和海报大标题都不用。
+
 主操作使用 `fnd-accent/on-accent` 的中性反差。标题栏品牌字「FA Foundry」用 `fnd-selected` 金色。标题栏是左中右三栏网格，两侧等宽，「工作区 / 成果库」始终在窗口正中；缩放后空间不够时先把品牌字收成只给读屏，再把「使用指南」收成图标。标题栏页签不用胶囊底，字重 600，和标题栏等高，平时用次要文字色，悬停时文字变金、2px 金色下划线从中间展开，移开收回；当前页签用金色文字加贴着标题栏底边的 2px 金色下划线，当前位置因此不只靠颜色区分；按下不变底色；键盘聚焦保留所在状态，另加 1px `fnd-focus` 焦点框，不改文字颜色。这几条只写在 `.fnd-head` 里，其他页面复用 `.fnd-head__tab` 的返回按钮和 Formulator 按钮保持中性。`fnd-selected` 作文字时，浅色在标题栏白底上 5.18:1、在选择底色 #efefed 上 4.50:1，正好压在下限，改这两个 token 前先跑 tokens.test.ts；深色分别为 9.55:1 和 8.43:1。品牌字和页签都保持静态，2026-09-27 试做的两个动效按门槛撤回。metal-fx 的 MetalText 材质固定为 chromatic，浅色下品牌字读成灰色，对比度最低 4.33:1；liquid-gooey 的滑动指示器每次切换后约 40 秒持续重绘，空闲时渲染进程和 GPU 占用都上升。页面里的页签（任务工作区、文稿复核结果、结果期间、文稿模式）都用 `components/ui/tabs.tsx` 的下划线样式：文字一排，当前页签正文色、字重 600，下面一条 2px 金色线。这条线是每组一个元素，相当于 Base UI 的 `Tabs.Indicator`，用 CSS 锚点定位贴在当前页签下，切换时用 `fnd-duration/easing` 滑过去并随宽窄变化，停下后不再重绘；不支持锚点定位时由当前页签自己画线。`fnd-line-hover` 用于中性悬停边界，`fnd-focus` 仅用于焦点框，`fnd-selection-surface` 用于任务及布局选择底色，也是折叠摘要等文字行的中性悬停底。界面控件和折叠摘要只用中性色、金色（位置、选择、焦点）和砖红（警示）；蓝色只留给 external 历史标记，图表系列色另行规定。背景、容器、次要层、正文、次要文字和分隔线分别对应 `bg/surface/surface-strong/ink/muted/line`。
 
 警告、错误、不可逆删除和输入错误使用砖红警示色 `fnd-warning`，文字用主色，边用 `fnd-warning-line`，浅底用 `fnd-warning-fill`。浅色主色 #a3372b 在白底上 6.69:1，深色主色 #eb9a8c 在 #1f1f1f 上 7.48:1。三件一起换，警示文字旁边不留金色边或金色浅底。
@@ -77,7 +79,9 @@ Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳
 
 ## Elevation & Depth
 
-工作区使用底色、细边框和留白；结果、计算定义以平面行与下边线分隔。现有帮助面板保留柔和阴影与径向底色，不推广到数据卡片。任务抽屉、壳弹层、成果专注、新任务及分隔条拖动期间实际隐藏原生层；结束后恢复会话，零尺寸不能替代可见性控制。原生工具详情在对话内占满整栏。
+**阴影阶梯（2026-10-10）。** 只有三档，都带午夜蓝色调而不是灰：`fnd-shadow-sm` 把卡片放到画布上（总览的三张卡、成果库的表格和右侧面板，工作区的 KPI 卡、月结步骤卡、对话输入框和收费明细的口径、计算、结果卡），`fnd-shadow-md` 给下拉、弹层和工具菜单（`fnd-shadow-menu` 指向它），`fnd-shadow-lg` 给确认对话框、导入预览和打印预览的纸面。深色下阴影几乎看不见，所以卡片始终保留 1px 细线。页面里不再写 `rgba(0,0,0,…)` 这样的字面量，背景不用渐变（帮助面板原来的径向底色已去掉）。shadcn 的 `shadow-xs` 设为无，输入框和描边按钮只靠细线。
+
+工作区使用底色、细边框和留白；结果、计算定义以平面行与下边线分隔。帮助面板用 `fnd-shadow-guide` 柔和阴影，底色是画布，不推广到数据卡片。任务抽屉、壳弹层、成果专注、新任务及分隔条拖动期间实际隐藏原生层；结束后恢复会话，零尺寸不能替代可见性控制。原生工具详情在对话内占满整栏。
 
 通用壳控件过渡为 `180ms ease`，时长与缓动独立为 `fnd-duration/easing`，`prefers-reduced-motion` 将时长归零；不据此承诺第三方原生客户端全部动画均已覆盖。
 
@@ -128,6 +132,8 @@ Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳
 ### shadcn 原语（2026-10-04）
 
 底座保持 Radix（`radix-ui` 统一包），不迁到 Base UI；组件从 shadcn 结构出发，视觉只读 `--fnd-*` token，不跑 `shadcn apply` 覆盖。
+
+`shadcn-bridge.css` 按 shadcn skill 的映射表把 shadcn 变量全部指向 `--fnd-*`：任务栏对应 `--sidebar-*`；圆角逐级钉死（`rounded-sm` 小、`rounded-md` 控件、`rounded-lg`/`rounded-xl` 容器、`rounded-4xl` 胶囊），不再出现 xl 比 lg 小的倒置；`shadow-sm/md/lg` 对应三档阴影；`font-mono` 是数字字体，`font-heading` 是中文界面字体。
 
 - **字段结构。** `FieldShell` 使用 Field 结构（`field`、`field-label`、`field-description`、`field-error` 四个 data-slot），错误时字段带 `data-invalid`、控件带 `aria-invalid`，类名仍为 `fnd-control*`。
 - **选择框。** 一律用 NativeSelect：仍是原生 `select`，菜单由系统绘制，能盖在原生视图之上；外层只加 16px 下拉箭头，字段状态与输入框相同（高 36px、`fnd-field`）。任务栏的选择框沿用 `fnd-picker` 尺寸。页面样式不再单独给 `select` 写边框和内边距。

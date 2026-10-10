@@ -3,9 +3,9 @@
   display: grid;
   gap: 8px;
   padding: 10px 12px;
-  border: 1px solid var(--fnd-line, #e5e2dc);
+  border: 1px solid var(--fnd-line);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--fnd-surface, #fff) 92%, var(--fnd-accent-soft, #f3efe6));
+  background: var(--fnd-surface-strong);
 }
 
 .analysis-workbook-overview-jump {
@@ -28,7 +28,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px 12px;
-  color: var(--fnd-ink-muted, #6b6257);
+  color: var(--fnd-muted);
   font-size: var(--fnd-size-label);
 }
 
@@ -49,17 +49,17 @@
 
 .analysis-workbook-browser-form input {
   min-width: 9rem;
-  color: var(--fnd-ink, #1f1b16);
-  background: var(--fnd-surface, #fff);
-  border-color: var(--fnd-line, #e5e2dc);
+  color: var(--fnd-ink);
+  background: var(--fnd-surface);
+  border-color: var(--fnd-line);
 }
 
 .analysis-workbook-grid-wrap {
   overflow: auto;
   max-height: 280px;
-  border: 1px solid var(--fnd-line, #e5e2dc);
+  border: 1px solid var(--fnd-line);
   border-radius: 6px;
-  background: var(--fnd-surface, #fff);
+  background: var(--fnd-surface);
 }
 
 .analysis-workbook-grid {
@@ -70,14 +70,14 @@
 
 .analysis-workbook-grid th,
 .analysis-workbook-grid td {
-  border: 1px solid var(--fnd-line, #e5e2dc);
+  border: 1px solid var(--fnd-line);
   padding: 3px 6px;
   min-width: 4.5rem;
   white-space: nowrap;
 }
 
 .analysis-workbook-grid th {
-  color: var(--fnd-ink, #1f1b16);
+  color: var(--fnd-ink);
   position: sticky;
   background: var(--fnd-surface-strong);
   z-index: 1;
@@ -100,6 +100,6 @@
 }
 
 .analysis-workbook-formula {
-  color: var(--fnd-muted, #6f6a60);
+  color: var(--fnd-muted);
 }
 }

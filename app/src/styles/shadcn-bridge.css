@@ -26,6 +26,15 @@
   --input: var(--fnd-line);
   --ring: var(--fnd-focus);
   --radius: var(--fnd-radius-control);
+  /* The task rail is shadcn's sidebar: the strong surface, the selection fill for the current task. */
+  --sidebar: var(--fnd-surface-strong);
+  --sidebar-foreground: var(--fnd-ink);
+  --sidebar-primary: var(--fnd-accent);
+  --sidebar-primary-foreground: var(--fnd-on-accent);
+  --sidebar-accent: var(--fnd-selection-surface);
+  --sidebar-accent-foreground: var(--fnd-ink);
+  --sidebar-border: var(--fnd-line);
+  --sidebar-ring: var(--fnd-focus);
 }
 
 @theme inline {
@@ -48,9 +57,26 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --radius-sm: calc(var(--radius) * 0.75);
-  --radius-md: var(--radius);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  /* Each step pinned to the FA scale, and never smaller than the step below it. */
+  --radius-sm: var(--fnd-radius-mark);
+  --radius-md: var(--fnd-radius-control);
   --radius-lg: var(--fnd-radius-container);
-  --radius-xl: var(--fnd-radius-menu);
+  --radius-xl: var(--fnd-radius-container);
+  --radius-4xl: var(--fnd-radius-pill);
+  /* Hairlines carry the edges of fields and outline buttons; the ladder lifts cards, menus and dialogs. */
+  --shadow-xs: 0 0 #0000;
+  --shadow-sm: var(--fnd-shadow-sm);
+  --shadow-md: var(--fnd-shadow-md);
+  --shadow-lg: var(--fnd-shadow-lg);
   --font-sans: var(--fnd-font-sans);
+  --font-heading: var(--fnd-font-sans);
+  --font-mono: var(--fnd-font-figure);
 }

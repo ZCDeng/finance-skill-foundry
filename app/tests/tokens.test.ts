@@ -90,6 +90,11 @@ function hueDistance(a: string, b: string): number {
   return Math.min(d, 360 - d);
 }
 
+/** The four grounds text and marks are drawn on: the canvas, a card, the strong fill and the selection fill. */
+function grounds(table: Record<string, string>): string[] {
+  return ['--fnd-bg', '--fnd-surface', '--fnd-surface-strong', '--fnd-selection-surface'].map((name) => table[name]);
+}
+
 /** Every plain declaration a selector receives in a flat stylesheet, later rules winning. */
 function declarations(css: string, selector: string): Record<string, string> {
   const flat = css.replace(/\/\*[\s\S]*?\*\//g, '');
@@ -171,8 +176,8 @@ describe('the five words are legible in both themes', () => {
 
   it('clears 4.5:1 for every mark that is text', () => {
     const cases: [string, Record<string, string>, string[]][] = [
-      ['light', light, ['#ffffff', '#f7f7f7']],
-      ['dark', dark, ['#1f1f1f', '#161616']],
+      ['light', light, grounds(light)],
+      ['dark', dark, grounds(dark)],
     ];
     for (const [theme, table, grounds] of cases) {
       for (const token of ['--fnd-ink', '--fnd-muted', '--fnd-mark-outside', '--fnd-mark-absent', '--fnd-negative']) {
@@ -207,7 +212,7 @@ describe('the five words are legible in both themes', () => {
     // The border gold measures 3.70:1, under the text floor and over the
     // non-text one. That is exactly why the outside chip's text and its border
     // are two tokens rather than one.
-    for (const ground of ['#ffffff', '#f7f7f7']) {
+    for (const ground of [light['--fnd-surface'], light['--fnd-surface-strong']]) {
       expect(contrast(light['--fnd-mark-outside-line'], ground)).toBeGreaterThanOrEqual(3);
     }
     expect(contrast(light['--fnd-mark-outside-line'], '#ffffff')).toBeLessThan(4.5);
@@ -275,8 +280,8 @@ describe('the warning colour', () => {
 
   it('clears 4.5:1 as text on every light and dark surface, and on its own fill', () => {
     const cases: [string, Record<string, string>, string[]][] = [
-      ['light', light, ['#ffffff', '#f7f7f7', light['--fnd-selection-surface']]],
-      ['dark', dark, ['#1f1f1f', '#161616', dark['--fnd-bg']]],
+      ['light', light, grounds(light)],
+      ['dark', dark, grounds(dark)],
     ];
     for (const [theme, table, grounds] of cases) {
       for (const ground of grounds) {
@@ -291,11 +296,8 @@ describe('the warning colour', () => {
   });
 
   it('clears 3:1 for the warning edge', () => {
-    for (const [table, grounds] of [
-      [light, ['#ffffff', '#f7f7f7']],
-      [dark, ['#1f1f1f', '#161616']],
-    ] as const) {
-      for (const ground of grounds) {
+    for (const table of [light, dark]) {
+      for (const ground of grounds(table)) {
         expect(contrast(table['--fnd-warning-line'], ground)).toBeGreaterThanOrEqual(3);
       }
     }

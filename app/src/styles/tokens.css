@@ -1,16 +1,16 @@
-/* FA Foundry: restrained, dense finance workspace. Fonts ship with the app. */
+/* FA Foundry: restrained, dense finance workspace on a cool canvas. Fonts ship with the app. */
 :root {
-  --fnd-bg: #ffffff;
+  --fnd-bg: #f5f6f8;
   --fnd-surface: #ffffff;
-  --fnd-surface-strong: #f7f7f7;
-  --fnd-ink: #000000e0;
-  --fnd-muted: #00000099;
-  --fnd-line: #1f1f1f24;
-  --fnd-accent: #1f1f1f;
-  --fnd-accent-text: #1f1f1f;
+  --fnd-surface-strong: #edeff3;
+  --fnd-ink: #1c2232;
+  --fnd-muted: #5b6176;
+  --fnd-line: #20294c1f;
+  --fnd-accent: #1c2232;
+  --fnd-accent-text: #1c2232;
   --fnd-on-accent: #f9fafb;
   --fnd-outline: #54d460;
-  --fnd-selection-surface: #efefed;
+  --fnd-selection-surface: #eef0f4;
   --fnd-radius-control: 8px;
   --fnd-radius-container: 12px;
   --fnd-radius-chip: 30px;
@@ -58,13 +58,17 @@
   --fnd-space-related: 12px;
   --fnd-space-content: 20px;
   --fnd-space-gutter: 24px;
-  --fnd-line-hover: #1f1f1f66;
+  --fnd-line-hover: #20294c59;
   --fnd-focus: #8a6729;
   --fnd-selected: #8a6729;
   --fnd-on-selected: #f9fafb;
-  --fnd-overlay: #00000040;
-  --fnd-shadow-menu: 0 16px 34px rgb(0 0 0 / 12%);
-  --fnd-shadow-guide: 0 24px 60px -30px rgb(0 0 0 / 45%);
+  --fnd-overlay: #10142640;
+  /* Elevation: one ladder, tinted with the ink's navy rather than grey. sm sits a card on the canvas, md floats a menu or popover, lg lifts a dialog. */
+  --fnd-shadow-sm: 0 1px 3px rgb(32 41 76 / 8%);
+  --fnd-shadow-md: 0 6px 16px rgb(32 41 76 / 10%), 0 1px 4px rgb(32 41 76 / 6%);
+  --fnd-shadow-lg: 0 16px 40px rgb(32 41 76 / 16%), 0 2px 6px rgb(32 41 76 / 8%);
+  --fnd-shadow-menu: var(--fnd-shadow-md);
+  --fnd-shadow-guide: 0 24px 60px -30px rgb(32 41 76 / 45%);
   --fnd-mark-outside: #8a6729;
   --fnd-mark-outside-line: #a67e3c;
   --fnd-mark-outside-fill: #a67e3c1f;
@@ -86,22 +90,25 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --fnd-bg: #111111;
-    --fnd-surface: #1f1f1f;
-    --fnd-surface-strong: #161616;
-    --fnd-ink: #f9fafb;
-    --fnd-muted: #a6a6a6;
-    --fnd-line: #ffffff24;
-    --fnd-selection-surface: #292929;
-    --fnd-line-hover: #ffffff59;
+    --fnd-bg: #0f1117;
+    --fnd-surface: #1a1d26;
+    --fnd-surface-strong: #14171f;
+    --fnd-ink: #f3f4f7;
+    --fnd-muted: #a4a9b8;
+    --fnd-line: #ffffff1f;
+    --fnd-selection-surface: #262a35;
+    --fnd-line-hover: #ffffff52;
     --fnd-focus: #bfa36c;
     --fnd-selected: #e2c180;
-    --fnd-on-selected: #1f1f1f;
-    --fnd-accent: #f9fafb;
-    --fnd-accent-text: #f9fafb;
-    --fnd-on-accent: #1f1f1f;
-    --fnd-overlay: #00000073;
-    --fnd-shadow-menu: 0 16px 34px rgb(0 0 0 / 40%);
+    --fnd-on-selected: #1a1d26;
+    --fnd-accent: #f3f4f7;
+    --fnd-accent-text: #f3f4f7;
+    --fnd-on-accent: #1a1d26;
+    --fnd-overlay: #05070c80;
+    --fnd-shadow-sm: 0 1px 3px rgb(0 0 0 / 40%);
+    --fnd-shadow-md: 0 6px 16px rgb(0 0 0 / 40%), 0 1px 4px rgb(0 0 0 / 30%);
+    --fnd-shadow-lg: 0 16px 40px rgb(0 0 0 / 55%), 0 2px 6px rgb(0 0 0 / 30%);
+    --fnd-shadow-menu: var(--fnd-shadow-md);
     --fnd-shadow-guide: 0 24px 60px -30px rgb(0 0 0 / 70%);
     --fnd-mark-outside: #e2c180;
     --fnd-mark-outside-line: #e2c180;
@@ -118,22 +125,25 @@
   }
 }
 :root[data-theme='dark'] {
-  --fnd-bg: #111111;
-  --fnd-surface: #1f1f1f;
-  --fnd-surface-strong: #161616;
-  --fnd-ink: #f9fafb;
-  --fnd-muted: #a6a6a6;
-  --fnd-line: #ffffff24;
-  --fnd-selection-surface: #292929;
-  --fnd-line-hover: #ffffff59;
+  --fnd-bg: #0f1117;
+  --fnd-surface: #1a1d26;
+  --fnd-surface-strong: #14171f;
+  --fnd-ink: #f3f4f7;
+  --fnd-muted: #a4a9b8;
+  --fnd-line: #ffffff1f;
+  --fnd-selection-surface: #262a35;
+  --fnd-line-hover: #ffffff52;
   --fnd-focus: #bfa36c;
   --fnd-selected: #e2c180;
-  --fnd-on-selected: #1f1f1f;
-  --fnd-accent: #f9fafb;
-  --fnd-accent-text: #f9fafb;
-  --fnd-on-accent: #1f1f1f;
-  --fnd-overlay: #00000073;
-  --fnd-shadow-menu: 0 16px 34px rgb(0 0 0 / 40%);
+  --fnd-on-selected: #1a1d26;
+  --fnd-accent: #f3f4f7;
+  --fnd-accent-text: #f3f4f7;
+  --fnd-on-accent: #1a1d26;
+  --fnd-overlay: #05070c80;
+  --fnd-shadow-sm: 0 1px 3px rgb(0 0 0 / 40%);
+  --fnd-shadow-md: 0 6px 16px rgb(0 0 0 / 40%), 0 1px 4px rgb(0 0 0 / 30%);
+  --fnd-shadow-lg: 0 16px 40px rgb(0 0 0 / 55%), 0 2px 6px rgb(0 0 0 / 30%);
+  --fnd-shadow-menu: var(--fnd-shadow-md);
   --fnd-shadow-guide: 0 24px 60px -30px rgb(0 0 0 / 70%);
   --fnd-mark-outside: #e2c180;
   --fnd-mark-outside-line: #e2c180;

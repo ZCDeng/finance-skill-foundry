@@ -276,7 +276,7 @@
 
 /* Table structure confirmation: the card a workbook waits behind. */
 .analysis-structure-card { display: grid; gap: 10px; }
-.analysis-structure-sheet { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--fnd-line, #e5e2dc); border-radius: 8px; }
+.analysis-structure-sheet { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--fnd-line); border-radius: 8px; }
 .analysis-structure-sheet-name { display: flex; align-items: center; gap: 8px; }
 .analysis-structure-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .analysis-structure-field > label { min-width: 12rem; font-size: var(--fnd-size-body); }
@@ -287,7 +287,7 @@
 .analysis-structure-preview th,
 .analysis-structure-preview td,
 .analysis-structure-columns th,
-.analysis-structure-columns td { border: 1px solid var(--fnd-line, #e5e2dc); padding: 3px 6px; text-align: left; }
+.analysis-structure-columns td { border: 1px solid var(--fnd-line); padding: 3px 6px; text-align: left; }
 .analysis-structure-preview tr.is-header td,
 .analysis-structure-preview tr.is-header th { background: var(--fnd-selection-surface); color: var(--fnd-ink); font-weight: 600; }
 .analysis-structure-preview caption { text-align: left; padding-bottom: 4px; }
@@ -304,12 +304,12 @@
 .analysis-readiness-capabilities { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
 .analysis-readiness-capabilities li { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: var(--fnd-size-body); }
 .analysis-readiness-capabilities li svg { align-self: center; flex: none; }
-.analysis-readiness-ready { color: var(--fnd-ink, #1d1b16); }
-.analysis-readiness-blocked { color: var(--fnd-muted, #6b675e); }
+.analysis-readiness-ready { color: var(--fnd-ink); }
+.analysis-readiness-blocked { color: var(--fnd-muted); }
 .analysis-readiness-table { width: 100%; border-collapse: collapse; font-size: var(--fnd-size-small); }
 .analysis-readiness-table caption { text-align: left; padding-bottom: 6px; }
 .analysis-readiness-table th,
-.analysis-readiness-table td { border: 1px solid var(--fnd-line, #e5e2dc); padding: 4px 8px; text-align: left; vertical-align: top; }
+.analysis-readiness-table td { border: 1px solid var(--fnd-line); padding: 4px 8px; text-align: left; vertical-align: top; }
 .analysis-readiness-table thead th { background: var(--fnd-selection-surface); color: var(--fnd-ink); font-weight: 600; }
 .analysis-readiness-table tbody th { font-weight: 600; overflow-wrap: anywhere; }
 
@@ -318,7 +318,7 @@
 .analysis-account-map-table { width: 100%; border-collapse: collapse; font-size: var(--fnd-size-small); }
 .analysis-account-map-table caption { text-align: left; padding-bottom: 6px; }
 .analysis-account-map-table th,
-.analysis-account-map-table td { border: 1px solid var(--fnd-line, #e5e2dc); padding: 4px 6px; text-align: left; }
+.analysis-account-map-table td { border: 1px solid var(--fnd-line); padding: 4px 6px; text-align: left; }
 .analysis-account-map-table thead th { background: var(--fnd-selection-surface); color: var(--fnd-ink); font-weight: 600; }
 .analysis-account-map-table td:last-child { width: 1%; white-space: nowrap; }
 .analysis-controls-card { display: grid; gap: 12px; padding-top: 16px; border-top: 1px solid var(--fnd-line); }
@@ -327,7 +327,7 @@
 .analysis-controls-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fnd-size-body); }
 .analysis-controls-status, .analysis-controls-state { font-size: var(--fnd-size-small); padding: 0 6px; border: 1px solid var(--fnd-line, currentColor); border-radius: 4px; }
 .analysis-controls-status--break, .analysis-controls-status--error, .analysis-controls-state--blocking { color: var(--fnd-warning); border-color: var(--fnd-warning-line); }
-.analysis-controls-issue { display: grid; gap: 6px; padding: 10px 0; border-top: 1px solid var(--fnd-line, rgba(0,0,0,.08)); }
+.analysis-controls-issue { display: grid; gap: 6px; padding: 10px 0; border-top: 1px solid var(--fnd-line); }
 .analysis-controls-issue-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
 .analysis-controls-decide { display: grid; gap: 8px; }
 /* Flat inside 勾稽控制 (DESIGN.md 分区与标题层级): no second box, a rule above it instead. */
@@ -350,8 +350,10 @@
 .analysis-close-headline-text { display: grid; gap: 4px; min-width: 0; }
 .analysis-close-detail { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--fnd-warning); font-size: var(--fnd-size-reading); line-height: 24px; font-weight: var(--fnd-weight-strong); }
 .analysis-close-detail svg { flex: none; }
+/* Summary cards sit on the canvas: white, a hairline and the smallest lift (DESIGN.md 阴影阶梯). */
+.analysis-close-block, .analysis-kpi-card, .analysis-composer, .analysis-billing-caliber, .analysis-billing-run, .analysis-billing-result { box-shadow: var(--fnd-shadow-sm); }
 .analysis-close-blocks { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
-.analysis-close-block { display: flex; flex-direction: column; gap: 8px; padding: 16px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); }
+.analysis-close-block { display: flex; flex-direction: column; gap: 8px; padding: 16px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-surface); }
 .analysis-close-block-head { display: flex; align-items: center; gap: 8px; }
 .analysis-close-block-head h4 { margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; flex: 1; }
 .analysis-close-block-state { font-size: var(--fnd-size-small); color: var(--fnd-muted); }

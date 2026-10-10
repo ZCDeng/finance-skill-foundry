@@ -143,10 +143,10 @@
 .report-reading :is(td, th)[data-first-column] { word-break: keep-all; }
 .report-reading p[data-located='true'] { background: var(--fnd-selection-surface); border-radius: var(--fnd-radius-mark); box-shadow: 0 0 0 6px var(--fnd-selection-surface); }
 .report-reading .report-page-break { display: none; }
-.report-print-frame { display: flex; justify-content: center; padding: 24px; border: 1px solid var(--fnd-line); border-radius: 8px; background: color-mix(in srgb, var(--fnd-surface) 90%, #fff 10%); overflow: auto; }
-.report-print-frame iframe { width: 210mm; min-height: 297mm; border: 0; background: #fff; box-shadow: 0 8px 28px rgba(0,0,0,.22); }
-.report-import-preview { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 28px; background: rgba(0,0,0,.52); }
-.report-import-preview__panel { width: min(1120px, 100%); max-height: min(840px, calc(100dvh - 56px)); overflow: auto; display: flex; flex-direction: column; gap: 18px; padding: 24px; border: 1px solid var(--fnd-line); border-radius: 10px; background: var(--fnd-bg); box-shadow: 0 20px 60px rgba(0,0,0,.32); }
+.report-print-frame { display: flex; justify-content: center; padding: 24px; border: 1px solid var(--fnd-line); border-radius: 8px; background: var(--fnd-surface-strong); overflow: auto; }
+.report-print-frame iframe { width: 210mm; min-height: 297mm; border: 0; background: #fff; box-shadow: var(--fnd-shadow-lg); }
+.report-import-preview { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 28px; background: var(--fnd-overlay); }
+.report-import-preview__panel { width: min(1120px, 100%); max-height: min(840px, calc(100dvh - 56px)); overflow: auto; display: flex; flex-direction: column; gap: 18px; padding: 24px; border: 1px solid var(--fnd-line); border-radius: 10px; background: var(--fnd-surface); box-shadow: var(--fnd-shadow-lg); }
 .report-import-sheet { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr) auto; gap: 12px; align-items: end; }
 .report-import-sheet label { display: flex; flex-direction: column; gap: 8px; color: var(--fnd-muted); font-size: var(--fnd-size-small); }
 .report-pdf-compare { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--fnd-line); border-radius: 8px; background: var(--fnd-surface); }
