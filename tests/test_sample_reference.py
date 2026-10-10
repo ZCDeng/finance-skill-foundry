@@ -244,3 +244,14 @@ def test_the_billing_figures_the_guide_quotes_are_the_ones_the_reference_compute
     sheet = openpyxl.load_workbook(pack_dir() / AUGUST, data_only=True)["11·城市公司明细表"]
     row = next(row for row in sheet.iter_rows(values_only=True) if row[1] == expected["city"])
     assert str(row[12]) == billing_sample.REPORTED_CURRENT
+
+
+def test_the_reference_task_opens_on_its_three_lines(built):
+    """本月三句话 on the example: nothing to compare yet, 宝鸡 first on the radar, the two differences waiting outside."""
+    _, task, _ = built
+    lines = {line["key"]: line["text"] for line in FinanceStore(task, actor="manager").month_brief({})["lines"]}
+    assert lines == {
+        "change": "看板上还没有按新资料重算过的卡，暂时没有可比的变化。",
+        "risk": "宝鸡城市公司风险雷达 6 分（红），触发营业利润为负、减值占毛利高、收缴率低于生死线。另有 4 个主体是橙色。",
+        "waiting": "2 件事等你处理，先看：合同台账本年实收 = 月结区域实收：待外部确认，差额 -2793.2794。",
+    }

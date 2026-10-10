@@ -74,6 +74,7 @@ COLLECTIONS = {
     "control_findings",
     "report_reviews",
     "dashboards",
+    "month_briefs",
 }
 
 
@@ -2921,6 +2922,17 @@ class FinanceStore:
         from foundry.answer_cards import answer_cards
 
         return answer_cards(self, spec)
+
+    def month_brief(self, spec=None):
+        """本月三句话: the rule's three lines from the task's results, and the assistant's wording of them while it holds."""
+        from foundry.month_brief import brief
+
+        return brief(self)
+
+    def month_brief_word(self, spec):
+        from foundry.month_brief import word
+
+        return word(self, spec)
 
     def analysis_circle_select(self, spec):
         from foundry.circle_select import authorize_workbook, match_draft_table, reject_forbidden_spec

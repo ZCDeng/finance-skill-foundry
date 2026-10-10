@@ -1108,6 +1108,7 @@ export function App() {
           {boundReadOnly ? <Empty><EmptyHeader><EmptyTitle asChild><h2>任务已停用编辑</h2></EmptyTitle><EmptyDescription>这个任务在{boundLifecycle === 'archived' ? '归档' : '回收站'}中。可以查看已生成成果，恢复任务后打开文稿、继续提问或打开数据定位。</EmptyDescription></EmptyHeader><EmptyContent><Button variant="outline" onClick={() => bound ? void changeTaskLifecycle(bound.id, 'restore') : undefined}>恢复任务</Button></EmptyContent></Empty> :
             <Analysis active={inWorkspace} embedded section={analysisSection} onSectionChange={setAnalysisSection}
               task={bound} tasks={tasks} draftRequest={draftRequest} onPick={pickAnalysisTask} onNew={newAnalysisTask} onChat={chatAnalysis}
+              onOpenTarget={bound ? (target) => openFromOverview(bound, target as OverviewTarget | 'close') : undefined}
               onLocatorPreview={api.sourceLocatorOpen ? (spec) => {
                 // The locator answer carries no origin. Where the viewer is
                 // comes from `previewStatus`, as it does for every other preview.

@@ -401,6 +401,8 @@ const inputs = {
  'dashboard_read': {},
  'dashboard_propose': {spec: {card: {kind: 'scenario', title: '回款情景', run_id: 'run-1', select: {match: {entity: '集团', scenario: '本期'}}}}},
  'answer_cards': {spec: {cards: [{kind: 'figure', title: '当期收缴率', collection_run_id: 'run-1', figure: 'collection_rate_current'}], follow_ups: ['按业态拆开']}},
+ 'month_brief': {},
+ 'month_brief_word': {spec: {signature: 'a'.repeat(64), lines: {risk: '先看宝鸡：风险雷达 6 分（红）。'}}},
  'finance_context_save': {spec: {bindings: {actual: 'snapshot-1'}, scopes: {actual: {ledger: 'L1', currency: 'CNY', unit: '元'}}}},
  'finance_map_save': {spec: {rows: [{account_code: '001', management_account: 'revenue'}]}},
  'run_metric': {spec: {context_id: 'context-1', metric: {kind: 'management_pnl'}}},
@@ -656,6 +658,8 @@ def test_analysis_preset_installs_with_harness_and_wheel_resource():
     assert "kind=goal 或 sensitivity" in persona and "倒推和敏感性都是情景，不是实际数" in persona
     # 点选题: the runtime's question card, the recommendation first; picking an option is not confirming a 口径.
     assert "ask_user_question" in persona and "（推荐）" in persona and "点选不等于确认" in persona
+    # 本月三句话: read as the rule wrote it, reworded with every figure kept.
+    assert "month_brief" in persona and "带 ref 的数和能点开的字一字不改" in persona
     mirror = ROOT / "foundry" / "resources" / "dsh-plugin"
     for relative in ("analysis.js", "analysis-runtime.js", "finance-tools.js", "index.js", "package.json", "presets/analysis/agent.cordis.yml",
                      "presets/analysis/preset.yml"):

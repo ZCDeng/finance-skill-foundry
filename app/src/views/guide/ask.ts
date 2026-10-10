@@ -24,6 +24,7 @@ export const ASK_PROMPTS = {
   'collection-scenario': '在看板上加一张回款情景卡：拖收缴率看距生死线、现金经营利润和一年回款怎么变。',
   'collection-goal': '倒推一下：收缴率回到生死线一年要多收多少，全年收入预算还差多少、剩下几个月每月要做到多少。各提议一张倒推卡，先放在「助手提议」里。',
   'collection-sensitivity': '在看板上提议一张敏感性表：毛利率和收缴率一起变时，距生死线怎么变。先放在「助手提议」里。',
+  'month-brief': '把任务页顶部的本月三句话改得更像讲给老板听的话：先读原句，只改措辞，数和能点开的部分原样保留，不加别的数。',
 } as const;
 
 export type AskId = keyof typeof ASK_PROMPTS;

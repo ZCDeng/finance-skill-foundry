@@ -433,6 +433,7 @@ export function registerIpc(
     'chart-deliverable-save',
     'chart-deliverable-list',
     'chart-deliverable-open',
+    'month-brief',
     'dashboard-read',
     'dashboard-save',
     'dashboard-recompute',
@@ -456,7 +457,7 @@ export function registerIpc(
     'workbook-rollforward-templates',
     'workbook-rollforward-template-save',
   ]);
-  const financeListCommands = new Set(['list-finance-context', 'finance-source-list', 'finance-readiness', 'finance-close-status', 'finance-completion-recoveries']);
+  const financeListCommands = new Set(['list-finance-context', 'finance-source-list', 'finance-readiness', 'finance-close-status', 'finance-completion-recoveries', 'month-brief']);
   ipcMain.handle(CHANNELS.financeCall, (_e, task: unknown, command: unknown, spec: unknown = undefined) =>
     answer(() => {
       const name = String(command ?? '');
