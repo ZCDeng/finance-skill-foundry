@@ -235,6 +235,37 @@ it('takes a rate apart level by level, says each level adds up, and exports one 
   expect(screen.queryByRole('region', { name: /往下拆/ })).toBeNull();
 });
 
+it('opens the row clicked on the level shown, even while the next level is still on its way', async () => {
+  const runs = [run('8', 'confirmed')];
+  mount({ details: [table('receivable', '1', true), table('receipt', '2', true)],
+    caliber: { defaults, confirmed: null, proposed: null, effective: defaults, versions: [] }, runs });
+  const foundry = (globalThis as unknown as { foundry: Partial<Bridge> }).foundry;
+  const plain = foundry.billingCall!;
+  const waiting: (() => void)[] = [];
+  const drill = vi.fn(async (task: string, command: BillingCommand, spec?: Record<string, unknown>) => {
+    if (command !== 'collection-drill') return plain(task, command, spec);
+    const path = spec!.path as (string | null)[];
+    // The city level comes back at once; a city's projects wait until let through.
+    if (path.length) await new Promise<void>((resolve) => waiting.push(resolve));
+    return { ok: true as const, value: drillLevel(path) };
+  });
+  const save = vi.fn(async () => ({ ok: true as const, value: { exported: true as const, rows: 2 } }));
+  foundry.billingCall = drill as unknown as Bridge['billingCall'];
+  foundry.billingDrillExport = save as unknown as Bridge['billingDrillExport'];
+  render(<BillingPanel taskId="t" period="2026-08" />);
+  fireEvent.click(await screen.findByRole('button', { name: '往下拆当期收缴率' }));
+  const section = await screen.findByRole('region', { name: '往下拆：当期收缴率' });
+  await within(section).findByText(/等于这次计算结果的数/);
+  fireEvent.click(within(section).getByRole('button', { name: '拆开「海口城市公司」，看项目' }));
+  // Still on the city level: another city is opened from the top, not as a project of the first, and the export is the cities'.
+  fireEvent.click(within(section).getByRole('button', { name: '拆开「（空）」，看项目' }));
+  expect(drill).toHaveBeenLastCalledWith('t', 'collection-drill', { run: '8'.repeat(32), figure: 'collection_rate_current', path: [null] });
+  fireEvent.click(within(section).getByRole('button', { name: /导出 Excel/ }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith('t', { run: '8'.repeat(32), figure: 'collection_rate_current', path: [],
+    name: '当期收缴率-城市公司' }));
+  waiting.forEach((resolve) => resolve());
+});
+
 it('marks a level that does not add up to the row above it', async () => {
   const runs = [run('8', 'confirmed')];
   mount({ details: [table('receivable', '1', true), table('receipt', '2', true)],

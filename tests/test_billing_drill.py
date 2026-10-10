@@ -178,3 +178,37 @@ def test_the_cli_takes_a_run_apart(drilled, capsys):
     assert main(["--var", str(var), "--task", store.task.id, "collection-drill", "--spec", spec]) == 0
     level = json.loads(capsys.readouterr().out)
     assert [row["label"] for row in level["rows"]] == ["海棠湾"] and level["ties"]
+
+
+def test_a_level_reads_out_only_the_rows_it_shows_and_a_bill_counts_every_line_it_came_from(tmp_path):
+    # No property master and no project column: the first level is every property. B1 was exported over seven lines.
+    task = TaskStore(tmp_path / "var").create(title="往下拆")
+    files = tmp_path / "files"
+    files.mkdir()
+    receivables = ["应收单号,房产编号,收费项目,账期,应收净额,单据状态", *["B1,P1,物业服务费,2026-01,10,正常"] * 7,
+                   "B2,P2,物业服务费,2026-02,50,正常", "B3,P3,物业服务费,2026-03,40,正常",
+                   "B4,P4,物业服务费,2026-04,30,正常", "B5,P5,物业服务费,2026-05,20,正常"]
+    receipts = ["收款单号,收款日期,应收单号,收款金额", "R1,2026-03-01,B2,50"]
+    store = BillingDetailStore(task, actor="manager")
+    ids = {}
+    for kind, name, lines in (("receivable", "应收.csv", receivables), ("receipt", "实收.csv", receipts)):
+        path = files / name
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        ids[kind] = store.add(kind, [path], name=name[:-4])["id"]
+        store.confirm(ids[kind])
+    run = store.collection_run({**ids, "as_of": "2026-08-31"})
+    drill = Drill(store, run["id"])
+    every = drill.level("collection_rate_current", [], limit=None)
+    shown = drill.level("collection_rate_current", [], limit=2)
+    assert [row["label"] for row in every["rows"]] == ["P1", "P3", "P4", "P5", "P2"]
+    # The two with most still owed, while the count and the totals are still the whole level's.
+    assert shown["rows"] == every["rows"][:2]
+    assert (shown["row_count"], shown["total"], shown["ties"]) == (5, every["total"], True)
+    assert shown["total"]["base"] == "210.00" and shown["total"]["done"] == "50.00"
+    [bill] = drill.level("collection_rate_current", ["P1"])["rows"]
+    assert (bill["outstanding"], bill["line_count"], len(bill["lines"])) == ("70.00", 7, 5)
+    # The workbook names every line.
+    target = tmp_path / "P1.xlsx"
+    export(drill, "collection_rate_current", ["P1"], str(target))
+    [found] = [row for row in load_workbook(target).active.iter_rows(values_only=True) if row and row[0] == "B1"]
+    assert found[7] == "；".join(f"应收.csv 第 {line} 行" for line in range(2, 9))

@@ -92,7 +92,7 @@ export interface DrillRow extends DrillSums {
   /** Households with something owed toward the rate, on a level above the bills. */
   properties?: number;
   /** A bill: what it is, where its 账期 falls and the export lines it was read from. */
-  fee_item?: string | null; period?: string; place?: 'current' | 'arrears'; lines?: string[]; receipts?: string[]; receipt_count?: number;
+  fee_item?: string | null; period?: string; place?: 'current' | 'arrears'; lines?: string[]; line_count?: number; receipts?: string[]; receipt_count?: number;
 }
 export interface DrillLevel {
   run_id: string; figure: DrillFigure; label: string; base_label: string; done_label: string; as_of: string; caliber: CollectionRunCaliber;

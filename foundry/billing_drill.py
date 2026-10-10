@@ -28,7 +28,7 @@ from foundry.errors import FoundryError
 CACHE_VERSION = 1
 # The rows a level shows, those with the most still owed first; the export holds them all.
 MAX_ROWS = 200
-# The lines of the export a bill names: its own and the receipts against it.
+# The lines of the export a bill names on screen, its own and the receipts against it; an export names them all.
 MAX_LINES = 5
 MAX_VALUE = 200
 
@@ -156,14 +156,15 @@ class Drill:
             terms = [f"{self.levels[index]['key']} IS NOT DISTINCT FROM ?" for index in range(depth)]
             return " AND ".join(["true", *terms]), path[:depth]
 
-        def groups(depth: int) -> list[dict]:
+        def grouped(depth: int) -> tuple[str, list]:
             key = self.levels[depth]["key"]
             condition, values = where(depth)
-            found = connection.execute(
-                f"SELECT {key}, coalesce(sum(base), 0), coalesce(sum(done), 0), count(DISTINCT property_id) FILTER (WHERE base <> 0) "
-                f"FROM {rows_of} WHERE {condition} GROUP BY {key}", values).fetchall()
-            return [{"value": value, "label": EMPTY if value is None else value, **_sums(base, done), "properties": households}
-                    for value, base, done, households in found]
+            return (f"(SELECT {key} AS value, coalesce(sum(base), 0) AS base, coalesce(sum(done), 0) AS done, "
+                    f"count(DISTINCT property_id) FILTER (WHERE base <> 0) AS households "
+                    f"FROM {rows_of} WHERE {condition} GROUP BY {key})"), values
+
+        def group(value, base, done, households) -> dict:
+            return {"value": value, "label": EMPTY if value is None else value, **_sums(base, done), "properties": households}
 
         condition, values = where(0)
         base, done = connection.execute(f"SELECT coalesce(sum(base), 0), coalesce(sum(done), 0) FROM {rows_of} WHERE {condition}",
@@ -175,19 +176,31 @@ class Drill:
                      "ties": (Decimal(whole["base"]), Decimal(whole["done"])) == tuple(filed)}
         trail = [whole]
         for depth, value in enumerate(path):
-            row = next((row for row in groups(depth) if row["value"] == value), None)
+            groups, values = grouped(depth)
+            found = connection.execute(f"SELECT * FROM {groups} WHERE value IS NOT DISTINCT FROM ?", [*values, value]).fetchone()
+            row = group(*found) if found else None
             if row is None:
                 raise FoundryError(f"{trail[-1]['label']} has no {self.levels[depth]['label']} {EMPTY if value is None else value}")
             trail.append({"level": self.levels[depth]["key"], "value": value, "label": row["label"],
                           **{name: row[name] for name in ("base", "done", "outstanding", "rate")}})
+        # Only the rows shown are read out: a level of every property can run to hundreds of thousands. Its count and
+        # totals are summed where they are.
+        page = "" if limit is None else f" LIMIT {int(limit)}"
         if len(path) < len(self.levels):
             level = self.levels[len(path)]
-            rows = groups(len(path))
-            rows.sort(key=lambda row: (-Decimal(row["outstanding"]), row["value"] is None, str(row["value"])))
+            groups, values = grouped(len(path))
+            rows = [group(*found) for found in connection.execute(
+                f"SELECT * FROM {groups} ORDER BY base - done DESC, value IS NULL, CAST(value AS VARCHAR){page}", values).fetchall()]
+            count, base, done = connection.execute(f"SELECT count(*), coalesce(sum(base), 0), coalesce(sum(done), 0) FROM {groups}",
+                                                   values).fetchone()
         else:
             level = BILL_LEVEL
-            rows = self._bills(connection, rows_of, where(len(path)))
-        total = {name: _money(sum(Decimal(row[name]) for row in rows)) for name in ("base", "done")}
+            condition, values = where(len(path))
+            rows = self._bills(connection, rows_of, (condition, values), page, every_line=limit is None)
+            count, base, done = connection.execute(
+                f"SELECT count(*), coalesce(sum(base), 0), coalesce(sum(done), 0) FROM {rows_of} WHERE {condition} AND (base <> 0 OR done <> 0)",
+                values).fetchone()
+        total = {"base": _money(base), "done": _money(done)}
         parent = trail[-1]
         return {
             "run_id": self.run["id"], "figure": figure, "label": spec["label"], "base_label": spec["base_label"],
@@ -198,13 +211,14 @@ class Drill:
                       "rate": _rate(total["done"], total["base"])},
             "ties": (total["base"], total["done"]) == (parent["base"], parent["done"]),
             "gap": {name: _money(Decimal(total[name]) - Decimal(parent[name])) for name in ("base", "done")},
-            "row_count": len(rows), "rows": rows if limit is None else rows[:limit],
+            "row_count": count, "rows": rows,
         }
 
-    def _bills(self, connection, rows_of: str, condition: tuple[str, list]) -> list[dict]:
+    def _bills(self, connection, rows_of: str, condition: tuple[str, list], page: str, *, every_line: bool) -> list[dict]:
+        """The bills shown, each with the export lines it was read from: the first few on screen, every one in an export."""
         found = connection.execute(
             f"SELECT bill_id, fee_item, strftime(period, '%Y-%m'), place, base, done FROM {rows_of} "
-            f"WHERE {condition[0]} AND (base <> 0 OR done <> 0) ORDER BY base - done DESC, period, bill_id", condition[1]).fetchall()
+            f"WHERE {condition[0]} AND (base <> 0 OR done <> 0) ORDER BY base - done DESC, period, bill_id{page}", condition[1]).fetchall()
         bills = [row[0] for row in found]
         files = {kind: [entry["name"] for entry in self.store.get(used["id"])["files"]] for kind, used in self.run["inputs"].items()}
         lines: dict[tuple[str, str], list[str]] = {}
@@ -214,9 +228,11 @@ class Drill:
             for bill_id, file, line in connection.execute(
                     f"SELECT bill_id, file, line FROM {table} WHERE bill_id IN (SELECT unnest(?)) ORDER BY bill_id, file, line", [bills]).fetchall():
                 lines.setdefault((kind, bill_id), []).append(f"{files[kind][file]} 第 {line} 行")
+        shown = slice(None) if every_line else slice(MAX_LINES)
         return [{"value": bill_id, "label": bill_id, "fee_item": fee_item, "period": period, "place": place, **_sums(base, done),
-                 "lines": lines.get(("receivable", bill_id), [])[:MAX_LINES],
-                 "receipts": lines.get(("receipt", bill_id), [])[:MAX_LINES],
+                 "lines": lines.get(("receivable", bill_id), [])[shown],
+                 "line_count": len(lines.get(("receivable", bill_id), [])),
+                 "receipts": lines.get(("receipt", bill_id), [])[shown],
                  "receipt_count": len(lines.get(("receipt", bill_id), []))}
                 for bill_id, fee_item, period, place, base, done in found]
 

@@ -17,7 +17,9 @@ export function BillingDrill({ taskId, runId, figure, onClose }: {
   taskId: string; runId: string; figure: DrillFigure; onClose(): void;
 }) {
   const [path, setPath] = useState<(string | null)[]>([]);
-  const [level, setLevel] = useState<DrillLevel | null>(null);
+  // The level on screen and the path it was read for: while the next one loads, every row, link and export still
+  // acts from the level shown, never from the path asked for since.
+  const [shown, setShown] = useState<{ path: (string | null)[]; level: DrillLevel } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -29,10 +31,13 @@ export function BillingDrill({ taskId, runId, figure, onClose }: {
     void (async () => {
       const api = bridge(); if (!api?.billingCall) throw new Error('此版本暂不支持往下拆。');
       return unwrap(await api.billingCall(taskId, 'collection-drill', { run: runId, figure, path: JSON.parse(key) })) as DrillLevel;
-    })().then((found) => { if (live) setLevel(found); }, (failure: unknown) => { if (live) setError(errorText(failure)); })
+    })().then((found) => { if (live) setShown({ path: JSON.parse(key) as (string | null)[], level: found }); },
+      (failure: unknown) => { if (live) setError(errorText(failure)); })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
   }, [taskId, runId, figure, key]);
+  const level = shown?.level ?? null;
+  const at = shown?.path ?? [];
   const go = (next: (string | null)[]) => { setMessage(''); setPath(next); };
   const save = async () => {
     if (!level || exporting) return;
@@ -40,7 +45,7 @@ export function BillingDrill({ taskId, runId, figure, onClose }: {
     try {
       const api = bridge(); if (!api?.billingDrillExport) throw new Error('此版本暂不支持导出往下拆。');
       const name = [level.label, ...level.path.map((step) => step.label), level.level.label].join('-');
-      const done = unwrap(await api.billingDrillExport(taskId, { run: runId, figure, path, name }));
+      const done = unwrap(await api.billingDrillExport(taskId, { run: runId, figure, path: at, name }));
       if ('exported' in done) setMessage(`已导出 ${done.rows.toLocaleString('en-US')} 行。`);
     } catch (failure) {
       setError(errorText(failure));
@@ -61,7 +66,7 @@ export function BillingDrill({ taskId, runId, figure, onClose }: {
       {[level.whole, ...level.path].map((step, index, all) => <li key={index}>
         {index > 0 ? <ChevronRight size={12} aria-hidden /> : null}
         {index === all.length - 1 ? <span aria-current="location">{step.label}</span>
-          : <Button variant="link" type="button" onClick={() => go(path.slice(0, index))}>{step.label}</Button>}
+          : <Button variant="link" type="button" onClick={() => go(at.slice(0, index))}>{step.label}</Button>}
       </li>)}
     </ol></nav> : null}
     {loading && !level ? <p role="status" className="analysis-note"><WaitLoop />正在拆分。第一次要把这次计算的账单整理一遍，几十万行要几秒…</p> : null}
@@ -87,7 +92,7 @@ export function BillingDrill({ taskId, runId, figure, onClose }: {
         {bills ? <th scope="col">来源</th> : null}
       </tr></thead>
       <tbody>{level.rows.map((row) => <DrillLine key={`${row.value}`} row={row} bills={bills} next={next?.label}
-        onOpen={() => go([...path, row.value])} />)}</tbody>
+        onOpen={() => go([...at, row.value])} />)}</tbody>
     </table></div> : null}
     {level ? <div className="analysis-actions">
       <span className="analysis-note">{level.row_count > level.rows.length
@@ -111,7 +116,7 @@ function DrillLine({ row, bills, next, onOpen }: { row: DrillRow; bills: boolean
     <td className="fnd-num"><Figure text={formatAmount(row.outstanding)} /></td>
     <td className="fnd-num"><Figure text={percent(row.rate)} /></td>
     {bills ? <td className="analysis-billing-drill__source">
-      <span>应收：{row.lines?.join('；') || '—'}</span>
+      <span>应收：{row.lines?.length ? `${row.lines.join('；')}${(row.line_count ?? 0) > row.lines.length ? ` 等 ${row.line_count} 行` : ''}` : '—'}</span>
       <span>收款：{row.receipts?.length ? `${row.receipts.join('；')}${(row.receipt_count ?? 0) > row.receipts.length ? ` 等 ${row.receipt_count} 笔` : ''}` : '没有'}</span>
     </td> : null}
   </tr>;
