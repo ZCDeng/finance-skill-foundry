@@ -1,7 +1,7 @@
 import { useContext, useState } from 'react';
 import { Pin } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
-import { DashboardPinContext, type CardDraft } from './dashboard.js';
+import { DashboardPinContext, type CardDraft } from './dashboardModel.js';
 import { errorText } from './shared.js';
 import './FigureSource.css';
 

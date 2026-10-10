@@ -9,7 +9,7 @@ import { isCollectionHealthRun, type HealthRow } from './CollectionHealthView.js
 import { kpiFor } from './BusinessResultView.js';
 import { profitBridges } from './RunPanel.js';
 import { columnSemantics, displayColumns, formatBusinessCell, businessColumnLabel } from './businessResults.js';
-import { matchingRows, splitDisplay, type DashboardCard } from './dashboard.js';
+import { matchingRows, splitDisplay, type DashboardCard } from './dashboardModel.js';
 import { scenarioBase } from './dashboardScenario.js';
 
 /** What a figure card shows of its row. */

@@ -3,12 +3,12 @@ import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AnalysisRun, Bridge } from '../src/bridge.js';
 import { DashboardView, useDashboard } from '../src/views/analysis/Dashboard.js';
-import { cardSignature, DashboardPinContext, figureDraft, matchingRows, splitDisplay, type CardDraft, type Dashboard, type DashboardCard } from '../src/views/analysis/dashboard.js';
+import { cardSignature, DashboardPinContext, figureDraft, matchingRows, splitDisplay, type CardDraft, type Dashboard, type DashboardCard } from '../src/views/analysis/dashboardModel.js';
 import { newerRun, TEMPLATES } from '../src/views/analysis/dashboardTemplates.js';
 import { scenarioAt, scenarioBase } from '../src/views/analysis/dashboardScenario.js';
 import { ASK_EVENT, ASK_PROMPTS } from '../src/views/guide/ask.js';
 import { BusinessResultView } from '../src/views/analysis/BusinessResultView.js';
-import type { FigureSourceContext } from '../src/views/analysis/figureSource.js';
+import type { FigureSourceContext } from '../src/views/analysis/figureSourceInfo.js';
 import fixture from './fixtures/collection-health-run.json';
 
 // A collection_health run on a property group's dashboard and ten city companies of its 11·城市公司明细表.

@@ -7,7 +7,7 @@ import { Figure } from '../../components/Figure.js';
 import { decimalToFixed } from '../../lib/figures.js';
 import { LevelMark, type HealthRow } from './CollectionHealthView.js';
 import { FigureSource } from './FigureSource.js';
-import { figureSource, type FigureSourceContext } from './figureSource.js';
+import { figureSource, type FigureSourceContext } from './figureSourceInfo.js';
 import { scenarioAt, type ScenarioBase } from './dashboardScenario.js';
 
 const LEVEL_WORDS = { red: '低于生死线', yellow: '贴近生死线', green: '高于生死线' } as const;

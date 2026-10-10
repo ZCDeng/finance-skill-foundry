@@ -20,7 +20,7 @@ import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs.js';
 import { DatasetPreview } from './analysis/DatasetPreview.js';
 import { DashboardView, useDashboard } from './analysis/Dashboard.js';
 import { formatPeriod } from '../lib/period.js';
-import { DashboardPinContext } from './analysis/dashboard.js';
+import { DashboardPinContext } from './analysis/dashboardModel.js';
 import { MaterialsFileList, materialsAnchor } from './analysis/MaterialsFileList.js';
 import { SourceRefreshPanel } from './analysis/SourceRefreshPanel.js';
 import { BillingPanel } from './analysis/BillingPanel.js';

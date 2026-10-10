@@ -5,7 +5,7 @@
  */
 import type { AnalysisRun } from '../../bridge.js';
 import { isCollectionHealthRun, type HealthRow } from './CollectionHealthView.js';
-import { matchingRows } from './dashboard.js';
+import { matchingRows } from './dashboardModel.js';
 
 export type ScenarioBase = {
   entity: string;
