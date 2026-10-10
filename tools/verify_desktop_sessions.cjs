@@ -14,9 +14,11 @@ let page,stage='launch';
 const focus=(name)=>page.getByRole('group',{name:'工作区布局'}).getByRole('button',{name,exact:true});
 const step=(name)=>{stage=name;};
 // Tasks are switched from the workspace task list, as in verify_ui_workspace.cjs.
-const openTask=async(title)=>{const expand=page.getByRole('button',{name:'展开任务列表'});if(await expand.isVisible())await expand.click();await page.locator('.workspace-task').filter({hasText:title}).first().click();};
+// Since 0.11.0 the app opens on 总览; the workspace is one tab away (also after a reload).
+const toWorkspace=async()=>{const tab=page.getByRole('navigation',{name:'主导航'}).getByRole('button',{name:'工作区',exact:true});await tab.waitFor();if(await tab.getAttribute('aria-current')!=='page')await tab.click();};
+const openTask=async(title)=>{await toWorkspace();const expand=page.getByRole('button',{name:'展开任务列表'});if(await expand.isVisible())await expand.click();await page.locator('.workspace-task').filter({hasText:title}).first().click();};
 try{
-page=await app.firstWindow();await page.waitForLoadState('domcontentloaded');
+page=await app.firstWindow();await page.waitForLoadState('domcontentloaded');await toWorkspace();
 step('cold_start_seed');await page.getByLabel('你想分析什么？').fill('冷启动：现金回款晚两周');
 await page.getByRole('button',{name:'开始分析',exact:true}).click();
 await focus('对话专注').waitFor();
