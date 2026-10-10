@@ -1,7 +1,7 @@
 import { useId, type ReactNode } from 'react';
 import { ArrowRight, BookOpen, CircleAlert, CircleCheck, CircleDashed, CircleSlash, ClipboardList, FlaskConical, MessageSquarePlus, RefreshCw, Repeat } from 'lucide-react';
 
-import { type GalleryRow, type Overview as OverviewData, type OverviewTask, type OverviewTodo, type TaskRow, when } from '../bridge.js';
+import { SNAPSHOT_FORMAT_WORDS, type GalleryRow, type Overview as OverviewData, type OverviewTask, type OverviewTodo, type TaskRow, when } from '../bridge.js';
 import { Button } from '../components/ui/button.js';
 import { NativeSelect } from '../components/ui/native-select.js';
 import { DisclosureSummary } from '../components/Disclosure.js';
@@ -47,6 +47,7 @@ export function galleryLine(row: GalleryRow): string {
     case 'chart': return row.chart.label || '归档图';
     case 'workbook': return `写回 Excel · ${row.output.dataset}`;
     case 'collection': return `收缴率计算 · 截至 ${row.run.as_of}`;
+    case 'dashboard': return `看板快照 · ${SNAPSHOT_FORMAT_WORDS[row.snapshot.format]}`;
     default: return `旧版流程 · 第 ${row.row.seq} 版`;
   }
 }

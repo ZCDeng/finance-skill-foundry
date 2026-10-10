@@ -74,7 +74,7 @@ export function conversion<T>(operation: string, payload: unknown, signal: Abort
 }
 
 let font: Promise<string> | undefined;
-async function fontData(): Promise<string> {
+export async function fontData(): Promise<string> {
   font ??= (async () => {
     const candidates = [path.join(process.resourcesPath, 'dsh/assets/fonts/NotoSansSC-variable.woff2'),
       path.join(app.getAppPath(), 'src/assets/fonts/noto-sans-sc/NotoSansSC-variable.woff2')];
@@ -98,7 +98,7 @@ async function figureFile(file: string): Promise<Buffer> {
 
 let figureFonts: Promise<{ weight: number; url: string }[]> | undefined;
 /** IBM Plex Mono for exported figures, embedded as data URLs so a saved HTML or PDF needs no network. */
-async function figureFontData(): Promise<{ weight: number; url: string }[]> {
+export async function figureFontData(): Promise<{ weight: number; url: string }[]> {
   figureFonts ??= Promise.all(FIGURE_FACES.map(async ([weight, file]) =>
     ({ weight, url: `data:font/woff2;base64,${(await figureFile(file)).toString('base64')}` })));
   return figureFonts;

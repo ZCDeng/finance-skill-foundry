@@ -163,6 +163,12 @@ const RULES: Rule[] = [
   [/a dashboard card reads a run that succeeded/i, '这次计算没有成功，不能放到看板上。'],
   [/a scenario card is never accepted/i, '回款情景卡是假设，不用认可，也不进月结和文稿。'],
   [/a scenario card (reads a collection health result|reads the lines of one entity|needs one)/i, '回款情景卡要读一个主体本期的回款健康结果（毛利率、期间费用率和距生死线），这次结果里凑不齐。'],
+  // 看板快照 (foundry/dashboard_snapshot.py): held to the board before it is filed.
+  [/no card on the dashboard is accepted yet/i, '看板上还没有认可的卡，先认可要导出的卡。'],
+  [/only the manager (can export the dashboard|exports the dashboard)/i, '看板只能由你导出。'],
+  [/the dashboard changed since this snapshot was laid out|; export again/i, '看板刚在别处更新过，或卡读的结果变了，请刷新后再导出一次。'],
+  [/a dashboard snapshot is a pdf, a pptx or an xlsx|snapshot needs the file the desktop rendered|the rendered (page|file|pdf|png)\b/i, '这份看板快照没有生成好，请再导出一次。'],
+  [/dashboard snapshot integrity check failed|dashboard snapshot \w+ is missing/i, '这份看板快照的文件和存档时不一致，或已经不在了。回到看板重新导出一份。'],
   // Data files.
   [/unsupported format \.xls\b/i, '这是老格式的 Excel（.xls），暂时不能直接读取。请在 Excel 里打开它，「文件 › 另存为」选「Excel 工作簿（.xlsx）」，再加入另存的那份。原文件不用改动。'],
   [/unsupported format \.(\w+)/i, (match) => `暂不支持 .${match[1]} 文件。可以加入的格式：Excel（.xlsx）、CSV、JSON、Markdown 和纯文本。`],

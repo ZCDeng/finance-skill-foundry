@@ -88,9 +88,9 @@ LIST_COMMANDS = {
 }
 COMPLETION_COMMANDS = {"finance-completion-begin", "finance-completion-status", "finance-completion-stop"}
 COMMANDS = {*LIST_COMMANDS, *OPERATIONS, *FILE_OPERATIONS, *COMPLETION_COMMANDS, "finance-source-refresh", "source-locator-preview-file",
-            "dashboard-carry"}
-# A whole report document can outgrow an argv; these also read --spec-file.
-SPEC_FILE_COMMANDS = {"save-explanation-draft", "report-review"}
+            "dashboard-carry", "dashboard-snapshot"}
+# A whole report document (or a board laid out as a page) can outgrow an argv; these also read --spec-file.
+SPEC_FILE_COMMANDS = {"save-explanation-draft", "report-review", "dashboard-snapshot"}
 
 
 def add_parsers(sub):
@@ -223,6 +223,13 @@ def dispatch(args):
         from foundry.task import TaskStore
 
         result = service.dashboard_carry(_json(args.spec, "finance spec"), tasks=TaskStore(Path(args.var)))
+    elif args.cmd == "dashboard-snapshot":
+        # Desktop only: the page comes from main's own renderer and the file goes where the manager chose.
+        if context.session_id:
+            raise FoundryError("only the manager exports the dashboard")
+        from foundry.dashboard_snapshot import save
+
+        result = save(context.task, _json_spec(args, "dashboard snapshot"), actor=getattr(args, "actor", "") or None)
     elif args.cmd in FILE_OPERATIONS:
         files = FinanceFiles(context.task, snapshot_ids=context.snapshot_ids if context.session_id else None,
                              session_id=context.session_id, actor=getattr(args, "actor", "") or None)

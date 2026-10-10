@@ -19,6 +19,7 @@ import { Textarea } from '../components/ui/textarea.js';
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs.js';
 import { DatasetPreview } from './analysis/DatasetPreview.js';
 import { DashboardView, useDashboard } from './analysis/Dashboard.js';
+import { formatPeriod } from '../lib/period.js';
 import { DashboardPinContext } from './analysis/dashboard.js';
 import { MaterialsFileList, materialsAnchor } from './analysis/MaterialsFileList.js';
 import { SourceRefreshPanel } from './analysis/SourceRefreshPanel.js';
@@ -55,7 +56,7 @@ type Props = {
 };
 const TABS: [Tab, string][] = [['datasets', '资料'], ['results', '分析结果'], ['dashboard', '看板'], ['drafts', '文稿'], ['close', '月结'], ['methods', '方法']];
 /** Each page's own 使用指南 article, opened from the 「?」 beside 刷新. */
-const PAGE_ARTICLES: Partial<Record<Tab, string>> = { datasets: 'page-datasets', results: 'page-results', drafts: 'page-drafts', close: 'page-close' };
+const PAGE_ARTICLES: Partial<Record<Tab, string>> = { datasets: 'page-datasets', results: 'page-results', dashboard: 'page-dashboard', drafts: 'page-drafts', close: 'page-close' };
 const EXAMPLES = ['本月利润为什么没有达到预算？', '哪些客户需要优先跟进回款？', '回款晚两周，现金余额会怎样？'];
 
 /** All figures are rendered as received. In particular, Decimal strings never pass through Number. */
@@ -501,7 +502,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           </>}
           {analysis && financeWorkbench}
         </>}
-        {view && tab === 'dashboard' && <DashboardView state={board} runs={view.runs} analyses={view.analyses} datasets={view.datasets}
+        {view && tab === 'dashboard' && <DashboardView task={{ id: task.id, title: task.title, period: formatPeriod(task.period) }} state={board} runs={view.runs} analyses={view.analyses} datasets={view.datasets}
           superseded={view.superseded_datasets} readOnly={readOnly} onOpenResult={(run) => {
             // The run the card reads, not the version's primary one: RunPanel opens on the run kept here.
             writeCopy(`${task.id}:run`, run.id);

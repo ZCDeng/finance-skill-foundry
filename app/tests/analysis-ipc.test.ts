@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: any[]) => Promise<any>>(),
-  run: vi.fn(), openPath: vi.fn(), chooser: vi.fn(), saver: vi.fn(), workspace: vi.fn(), reportExport: vi.fn(),
+  run: vi.fn(), openPath: vi.fn(), chooser: vi.fn(), saver: vi.fn(), workspace: vi.fn(), reportExport: vi.fn(), render: vi.fn(),
 }));
 vi.mock('electron', () => ({
   ipcMain: { handle: (name: string, handler: any) => mocks.handlers.set(name, handler) },
@@ -14,7 +14,9 @@ vi.mock('../electron/foundry.js', async (original) => ({
   runFoundryJson: async (...args: unknown[]) => JSON.parse(await mocks.run(...args)),
 }));
 vi.mock('../electron/harness/workspace.js', () => ({ ensureTaskWorkspace: mocks.workspace }));
-vi.mock('../electron/reports/host.js', () => ({ ReportHost: class { export = mocks.reportExport; } }));
+vi.mock('../electron/reports/host.js', () => ({ ReportHost: class { export = mocks.reportExport; },
+  fontData: async () => 'data:font/woff2;base64,AA==', figureFontData: async () => [] }));
+vi.mock('../electron/reports/dashboard-print.js', () => ({ renderSnapshot: mocks.render }));
 import { registerIpc } from '../electron/ipc/register.js';
 import { CHANNELS } from '../electron/ipc/contract.js';
 
@@ -414,6 +416,65 @@ describe('analysis IPC task and session binding', () => {
     expect((await invoke(CHANNELS.libraryFile, task, { kind: 'workbook', id: '/etc/passwd' }, 'open')).ok).toBe(false);
     expect((await invoke(CHANNELS.libraryFile, task, { kind: 'path', id: '4'.repeat(32) }, 'open')).ok).toBe(false);
     expect((await invoke(CHANNELS.libraryFile, task, { kind: 'export', sha: 'c'.repeat(64), format: 'docx' }, 'delete')).ok).toBe(false);
+  });
+
+  it('prints a 看板 page in main, files it, and copies the filed bytes only where the save dialog says', async () => {
+    const { mkdtemp, readFile, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = await mkdtemp(join(tmpdir(), 'fa-dashboard-ipc-'));
+    const filed = join(dir, 'filed.pdf');
+    await writeFile(filed, '%PDF-1.7 filed');
+    registerIpc({ varRoot: '/store' });
+    const card = '1'.repeat(32), run = '2'.repeat(32);
+    const model = {
+      version: 1, board_id: '3'.repeat(32), task: '华宸物业 8 月月结', period: '2026 年 8 月',
+      figures: [{ card_id: card, title: '距生死线', subject: '集团', part: '本期', value: { text: '-3.22 个百分点', negative: true }, level: 'red', level_label: '红',
+        beside: [], note: '', source: 1, cell: { column: 'value', value: '-3.224' } }],
+      charts: [], sources: [{ n: 1, card_id: card, title: '距生死线', run: 'A', lines: ['公式：收缴率 − 生死线'] }],
+      runs: [{ key: 'A', run_id: run, label: '回款健康', computed: '10-10 计算', files: [] }], beyond: [], left_out: { pinned: [], scenario: [] },
+    };
+    let sent: Record<string, unknown> = {};
+    mocks.run.mockImplementation(async (_binding, command, args: string[]) => {
+      if (command === 'dashboard-snapshot') sent = JSON.parse(args[1]);
+      return JSON.stringify({ snapshot: { id: '5'.repeat(32) }, path: filed });
+    });
+    mocks.render.mockResolvedValue(Buffer.from('%PDF-1.7 page'));
+    mocks.saver.mockResolvedValue({ canceled: false, filePath: join(dir, '经营看板.pdf') });
+    expect(await invoke(CHANNELS.dashboardExport, task, 'pdf', model)).toEqual({
+      ok: true, value: { exported: true, format: 'pdf', path: join(dir, '经营看板.pdf'), snapshot_id: '5'.repeat(32) } });
+    expect(mocks.saver.mock.calls[0][0].defaultPath).toBe('经营看板_华宸物业8月月结_2026年8月.pdf');
+    expect(mocks.render).toHaveBeenCalledWith(expect.stringContaining('-3.22 个百分点'), 'pdf', expect.anything());
+    expect(mocks.run.mock.calls[0][0]).toEqual({ varRoot: '/store', task, actor: 'manager' });
+    expect(sent).toMatchObject({ format: 'pdf', model: { board_id: '3'.repeat(32) }, file: expect.stringMatching(/page\.pdf$/) });
+    expect(await readFile(join(dir, '经营看板.pdf'), 'utf8')).toBe('%PDF-1.7 filed');
+
+    // Excel is written by the backend; nothing is printed.
+    mocks.render.mockClear();
+    mocks.saver.mockResolvedValue({ canceled: false, filePath: join(dir, '经营看板.xlsx') });
+    expect((await invoke(CHANNELS.dashboardExport, task, 'xlsx', model)).ok).toBe(true);
+    expect(mocks.render).not.toHaveBeenCalled();
+    expect(sent).not.toHaveProperty('file');
+
+    mocks.run.mockClear();
+    mocks.saver.mockResolvedValue({ canceled: false, filePath: join(dir, '经营看板.txt') });
+    expect(await invoke(CHANNELS.dashboardExport, task, 'pptx', model)).toMatchObject({ ok: false, message: '文件名要以 .pptx 结尾。' });
+    mocks.saver.mockResolvedValue({ canceled: true, filePath: '' });
+    expect(await invoke(CHANNELS.dashboardExport, task, 'pdf', model)).toEqual({ ok: true, value: { cancelled: true } });
+    expect((await invoke(CHANNELS.dashboardExport, task, 'docx', model)).ok).toBe(false);
+    // A page holds twelve figures; the shape is refused before any dialog.
+    mocks.saver.mockClear();
+    const crowded = { ...model, figures: Array.from({ length: 13 }, () => model.figures[0]) };
+    expect(await invoke(CHANNELS.dashboardExport, task, 'pdf', crowded)).toMatchObject({ ok: false, message: '一页纸放不下这么多卡。' });
+    expect(await invoke(CHANNELS.dashboardExport, task, 'pdf', { ...model, figures: [{ ...model.figures[0], title: '<b>' + 'x'.repeat(300) }] })).toMatchObject({ ok: false });
+    expect(mocks.saver).not.toHaveBeenCalled();
+    expect(mocks.run).not.toHaveBeenCalled();
+
+    // 成果库 opens a filed snapshot by its id only.
+    mocks.run.mockResolvedValue(JSON.stringify({ path: filed }));
+    expect((await invoke(CHANNELS.libraryFile, task, { kind: 'dashboard', id: '5'.repeat(32) }, 'open')).value).toEqual({ opened: filed });
+    expect(mocks.run).toHaveBeenLastCalledWith(expect.objectContaining({ varRoot: '/store', task }), 'dashboard-snapshot-path', ['--snapshot', '5'.repeat(32)], undefined);
+    expect((await invoke(CHANNELS.libraryFile, task, { kind: 'dashboard', id: '../x' }, 'open')).ok).toBe(false);
   });
 
   it('allows only bounded finance business commands through one IPC call', async () => {

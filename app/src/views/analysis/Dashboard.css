@@ -91,4 +91,6 @@
 .dashboard-scenario__base dd { margin: 0; font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .dashboard-scenario > .fnd-chart__caption { margin: 0; }
 .dashboard__asks { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0; }
+/* The export menu sits in a portal, outside .dashboard. */
+.dashboard__export-note { margin: 0; padding: 0 8px 6px; max-width: 248px; font-size: var(--fnd-size-label); line-height: 18px; color: var(--fnd-muted); }
 }

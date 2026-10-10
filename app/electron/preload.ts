@@ -34,6 +34,7 @@ const api = {
   financeCall: (task: string, command: string, spec?: unknown) => ipcRenderer.invoke('finance:call', task, command, spec),
   financeSourceRefresh: (task: string, spec: unknown) => ipcRenderer.invoke('finance:source-refresh', task, spec),
   rollforwardExport: (task: string, runId: string, name?: string) => ipcRenderer.invoke('rollforward:export', task, runId, name),
+  dashboardExport: (task: string, format: string, snapshot: unknown) => ipcRenderer.invoke('dashboard:export', task, format, snapshot),
   timingLog: (entry: unknown) => ipcRenderer.invoke('timing:log', entry),
   appearanceGet: () => ipcRenderer.invoke('appearance:get'),
   appearanceSet: (appearance: string) => ipcRenderer.invoke('appearance:set', appearance),

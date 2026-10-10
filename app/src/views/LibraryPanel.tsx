@@ -1,15 +1,17 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { ExternalLink, FilePen, FolderOpen, X } from 'lucide-react';
+import { ArrowRight, ExternalLink, FilePen, FolderOpen, X } from 'lucide-react';
 
 import {
   type AnalysisDraftRow,
   type AnalysisExportRow,
   type ChartRow,
   type CollectionRunRow,
+  type DashboardSnapshotRow,
   type LibraryDetail,
   type LibraryFile,
   type TaskRow,
   type WorkbookOutputRow,
+  SNAPSHOT_FORMAT_WORDS,
   when,
 } from '../bridge.js';
 import { Button } from '../components/ui/button.js';
@@ -27,7 +29,8 @@ export type LibrarySelection =
     state: { publication_status: string; review_status: string }; exports: AnalysisExportRow[] }
   | { kind: 'chart'; task: TaskRow; chart: ChartRow }
   | { kind: 'workbook'; task: TaskRow; output: WorkbookOutputRow }
-  | { kind: 'collection'; task: TaskRow; run: CollectionRunRow };
+  | { kind: 'collection'; task: TaskRow; run: CollectionRunRow }
+  | { kind: 'dashboard'; task: TaskRow; snapshot: DashboardSnapshotRow };
 
 export interface LibraryPanelActions {
   /** The draft's text, checks and what it rests on. Absent in a build without it: the panel then shows what the list knows. */
@@ -36,8 +39,8 @@ export interface LibraryPanelActions {
   onOpenDraft?(task: TaskRow, draft: AnalysisDraftRow): void;
   /** Open a filed export or a 写回 Excel copy, or show it in Finder. */
   onFile?(task: TaskRow, file: LibraryFile, action: 'open' | 'reveal'): void;
-  /** Open the task where this result lives: 分析结果 for a chart, 资料 for a 收缴率 run. */
-  onOpenTask?(task: TaskRow, target: 'results' | 'billing'): void;
+  /** Open the task where this result lives: 分析结果 for a chart, 资料 for a 收缴率 run, 看板 for a snapshot. */
+  onOpenTask?(task: TaskRow, target: 'results' | 'billing' | 'dashboard'): void;
 }
 
 const FORMAT_LABEL: Record<AnalysisExportRow['format'], string> = { md: 'Markdown', xlsx: 'Excel', docx: 'Word', pdf: 'PDF', html: 'HTML' };
@@ -70,7 +73,8 @@ export function LibraryPanel({ selection, actions, onClose }: { selection: Libra
   const title = selection.kind === 'revision' ? `${selection.title || '文稿'} · 修订 ${selection.revision}`
     : selection.kind === 'chart' ? selection.chart.label || '归档图'
       : selection.kind === 'workbook' ? `写回 Excel · ${selection.output.dataset}`
-        : `收缴率计算 · 截至 ${selection.run.as_of}`;
+        : selection.kind === 'dashboard' ? `看板快照 · ${SNAPSHOT_FORMAT_WORDS[selection.snapshot.format]}`
+          : `收缴率计算 · 截至 ${selection.run.as_of}`;
   return (
     <aside ref={panel} className="fnd-library__panel" aria-labelledby={`${id}-title`}>
       <div className="fnd-library__panel-head">
@@ -83,7 +87,8 @@ export function LibraryPanel({ selection, actions, onClose }: { selection: Libra
       {selection.kind === 'revision' ? <RevisionDetail selection={selection} actions={actions} />
         : selection.kind === 'chart' ? <ChartDetail chart={selection.chart} task={selection.task} actions={actions} />
           : selection.kind === 'workbook' ? <WorkbookDetail output={selection.output} task={selection.task} actions={actions} />
-            : <CollectionDetail run={selection.run} task={selection.task} actions={actions} />}
+            : selection.kind === 'dashboard' ? <DashboardDetail snapshot={selection.snapshot} task={selection.task} actions={actions} />
+              : <CollectionDetail run={selection.run} task={selection.task} actions={actions} />}
     </aside>
   );
 }
@@ -254,5 +259,35 @@ function CollectionDetail({ run, task, actions }: { run: CollectionRunRow; task:
     {run.caliber.status !== 'confirmed' ? <p className="fnd-muted">口径还没有经理确认，这些数只作参考。</p> : null}
     {actions.onOpenTask ? <div className="fnd-library__panel-actions"><Button type="button" variant="outline" onClick={() => actions.onOpenTask!(task, 'billing')}>
       在资料页查看</Button></div> : null}
+  </div>;
+}
+
+/** A 看板快照: the accepted cards it shows, the ones it left out and why, and the file itself. */
+function DashboardDetail({ snapshot, task, actions }: { snapshot: DashboardSnapshotRow; task: TaskRow; actions: LibraryPanelActions }) {
+  const file: LibraryFile = { kind: 'dashboard', id: snapshot.id };
+  const left = [
+    snapshot.left_out.pinned.length ? `待认可 ${snapshot.left_out.pinned.length} 张` : '',
+    snapshot.left_out.scenario.length ? `情景 ${snapshot.left_out.scenario.length} 张` : '',
+    snapshot.beyond.length ? `一页放不下 ${snapshot.beyond.length} 张（${snapshot.beyond.join('、')}）` : '',
+  ].filter(Boolean).join('；');
+  return <div className="fnd-library__panel-body">
+    <Pairs rows={[
+      ['导出时间', when(snapshot.created_at)],
+      ['格式', SNAPSHOT_FORMAT_WORDS[snapshot.format]],
+      ['放进来的卡', snapshot.cards.join('、') || '—'],
+      ...(left ? [['没放进来', left] as [string, React.ReactNode]] : []),
+      ['摘要', <span className="fnd-figure">{snapshot.sha256.slice(0, 12)}</span>],
+    ]} />
+    <p className="fnd-muted">只放经理认可的卡。导出时逐个核对过，每个数都是它读的那次计算里的数；情景卡不放进来。</p>
+    <div className="fnd-library__panel-actions">
+      {actions.onFile ? <>
+        <Button type="button" variant="outline" onClick={() => actions.onFile!(task, file, 'open')}>
+          <ExternalLink size={14} strokeWidth={1.5} aria-hidden />打开</Button>
+        <Button type="button" variant="ghost" onClick={() => actions.onFile!(task, file, 'reveal')}>
+          <FolderOpen size={14} strokeWidth={1.5} aria-hidden />在访达中显示</Button>
+      </> : null}
+      {actions.onOpenTask ? <Button type="button" variant="ghost" onClick={() => actions.onOpenTask!(task, 'dashboard')}>
+        去这个任务的看板<ArrowRight size={14} strokeWidth={1.5} aria-hidden /></Button> : null}
+    </div>
   </div>;
 }

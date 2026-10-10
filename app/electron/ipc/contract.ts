@@ -37,6 +37,12 @@ export const CHANNELS = {
    */
   rollforwardExport: 'rollforward:export',
   /**
+   * 看板快照: the board's accepted cards as one page (PDF, PPT) or a workbook. The renderer sends what the board
+   * shows as data, never markup; main draws the page, asks where to save it, and the CLI holds the data to the
+   * board before it files the bytes in 成果库 (foundry/dashboard_snapshot.py).
+   */
+  dashboardExport: 'dashboard:export',
+  /**
    * Write-only: one line per user wait, appended to a file in this app's own
    * folder. Nothing reads it back over IPC, and it never reaches the task store.
    */
