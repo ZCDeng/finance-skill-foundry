@@ -494,6 +494,39 @@ describe('the 回款情景 card and asking the assistant for cards', () => {
       .toEqual(['第 1 张：风险雷达得分（从高到低）', '第 2 张：回款情景：收缴率变了会怎样']);
   });
 
+  it('walks 60 秒看看它能做什么 over the board: a figure\'s source, the 回款情景 card, then the one-page export', async () => {
+    boardBackend([
+      card({ id: 's1', kind: 'scenario', title: '回款情景：收缴率变了会怎样', run_id: run.id, select: { match } }),
+      card({ id: 'c1', run_id: run.id, state: 'accepted', accepted: { run_id: run.id, at: '2026-10-10T09:00:00Z' } }),
+    ]);
+    Object.assign((globalThis as unknown as { foundry: Partial<Bridge> }).foundry, { dashboardExport: vi.fn() });
+    const onEnd = vi.fn();
+    function Board() {
+      const state = useDashboard('t');
+      return <DashboardView task={{ id: 't', title: '华宸物业 8 月月结', period: '2026 年 8 月' }} state={state} runs={[run]} analyses={[]} datasets={[]}
+        readOnly={false} tour={{ onEnd }} />;
+    }
+    render(<Board />);
+    const hint = await screen.findByRole('complementary', { name: '60 秒看看它能做什么' });
+    const lit = () => Array.from(document.querySelectorAll('[data-spotlight]')).map((node) => node.getAttribute('aria-label') ?? node.textContent);
+    expect(within(hint).getByText('1 / 3')).toBeTruthy();
+    expect(within(hint).getByRole('heading', { name: '点一个数看来源' })).toBeTruthy();
+    expect(lit()).toEqual(['距生死线（本年账单收缴率）']);
+    fireEvent.click(within(hint).getByRole('button', { name: '下一步' }));
+    expect(within(hint).getByRole('heading', { name: '拖一下收缴率' })).toBeTruthy();
+    expect(lit()).toEqual(['回款情景：收缴率变了会怎样']);
+    fireEvent.click(within(hint).getByRole('button', { name: '下一步' }));
+    expect(within(hint).getByRole('heading', { name: '导出一页纸' })).toBeTruthy();
+    expect(lit()).toEqual(['导出一页纸']);
+    fireEvent.click(within(hint).getByRole('button', { name: '上一步' }));
+    expect(lit()).toEqual(['回款情景：收缴率变了会怎样']);
+    fireEvent.click(within(hint).getByRole('button', { name: '下一步' }));
+    fireEvent.click(within(hint).getByRole('button', { name: '看完了' }));
+    expect(onEnd).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(hint).getByRole('button', { name: '关掉，不再提示' }));
+    expect(onEnd).toHaveBeenCalledTimes(2);
+  });
+
   it('puts a question for the assistant into the conversation, unsent', async () => {
     boardBackend([card({})]);
     const heard = vi.fn();

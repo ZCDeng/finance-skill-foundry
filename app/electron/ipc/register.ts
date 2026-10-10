@@ -27,6 +27,7 @@ import { changeTaskLifecycle, emptyTasks, newTask, purgeTask, removeSamples, sam
 import { CHANNELS, type WaitKind } from './contract.js';
 import { appendWait, waitEntry } from '../timing.js';
 import { type Appearance, appearanceOf, readAppearance, writeAppearance } from '../appearance.js';
+import { readFirstLook, writeFirstLook } from '../firstLook.js';
 import * as path from 'node:path';
 import type { ReportHost } from '../reports/host.js';
 import { withDraftSpec } from '../reports/input.js';
@@ -756,6 +757,18 @@ export function registerIpc(
       writeAppearance(appearance.folder(), value);
       appearance.apply(value);
       return { appearance: value };
+    }));
+  // 60 秒看看它能做什么 keeps its one flag in the same folder as the appearance (firstLook.ts).
+  ipcMain.handle(CHANNELS.firstLookGet, () =>
+    answer(async () => {
+      if (!appearance) throw new Error('the first look is not available in this build');
+      return { done: readFirstLook(appearance.folder()) };
+    }));
+  ipcMain.handle(CHANNELS.firstLookDone, () =>
+    answer(async () => {
+      if (!appearance) throw new Error('the first look is not available in this build');
+      writeFirstLook(appearance.folder());
+      return { done: true };
     }));
 
   if (!panes) return { shutdown };

@@ -7,7 +7,10 @@ import { Overview } from '../src/views/Overview.js';
 import { App } from '../src/App.js';
 
 vi.mock('../src/views/Analysis.js', () => ({
-  Analysis: ({ task }: { task: TaskRow | null }) => { const [shown] = useState(task?.title ?? ''); return <p>{task ? `本地成果：${task.title}` : `从问题开始${shown}`}</p>; },
+  Analysis: ({ task, tour }: { task: TaskRow | null; tour?: { onEnd(): void } }) => {
+    const [shown] = useState(task?.title ?? '');
+    return <><p>{task ? `本地成果：${task.title}` : `从问题开始${shown}`}</p>{tour ? <button type="button" onClick={tour.onEnd}>看完了</button> : null}</>;
+  },
 }));
 
 const task = (id: string, title: string, period: string, extra: Partial<TaskRow> = {}): TaskRow =>
@@ -112,6 +115,19 @@ describe('总览', () => {
     expect(screen.getByText('没有挡住月结的事项。')).toBeTruthy();
   });
 
+  it('offers the first look with a way to say no, and says while the 参考结果 is being built', () => {
+    const offer = { busy: false, onStart: vi.fn(), onDismiss: vi.fn() };
+    const { rerender } = render(<Overview {...props} firstLook={offer} />);
+    fireEvent.click(screen.getByRole('button', { name: '不用了' }));
+    expect(offer.onDismiss).toHaveBeenCalled();
+    rerender(<Overview {...props} firstLook={{ ...offer, busy: true, error: '参考结果没有生成出来' }} />);
+    expect((screen.getByRole('button', { name: '正在准备参考结果…' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('第一次要生成参考结果，大约一分钟。')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toBe('参考结果没有生成出来');
+    rerender(<Overview {...props} />);
+    expect(screen.queryByRole('heading', { name: '60 秒看看它能做什么' })).toBeNull();
+  });
+
   it('with every task archived, says so instead of greeting a first run', () => {
     render(<Overview {...props} data={{ schema_version: 1, tasks: [], todo_count: 0 }} />);
     expect(screen.queryByRole('heading', { name: '从这里开始' })).toBeNull();
@@ -161,6 +177,42 @@ describe('总览 in the app', () => {
     const before = api.overview.mock.calls.length;
     window.dispatchEvent(new Event('fnd:task-changed'));
     await waitFor(() => expect(api.overview.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  it('offers 60 秒看看它能做什么 until it is seen through, opening the 参考结果 board with its hints', async () => {
+    const reference = task('c', '示例：华宸物业 8 月（参考结果）', '2026-08', { sample: 'reference' });
+    let done = false;
+    const api = {
+      tasks: vi.fn(async () => ok([july, august, reference])),
+      task: vi.fn(async (id: string) => ok({ task: [july, august, reference].find((row) => row.id === id)!, windows: [], deliverables: [], sessions: [] })),
+      gallery: vi.fn(async () => ok([])),
+      overview: vi.fn(async () => ok(data)),
+      harnessStatus: vi.fn(async () => ok({ wiring: { state: 'ready' as const }, consequence: null, origin: 'http://localhost:1' })),
+      harnessOpen: vi.fn(async (_intent: string, id: string) => ok({ sessionId: `session-${id}`, preset: 'analysis' })),
+      paneVisible: vi.fn(async (value: string) => ok({ screen: value })),
+      taskSampleReference: vi.fn(async () => ok({ id: reference.id, created: false })),
+      firstLookGet: vi.fn(async () => ok({ done })),
+      firstLookDone: vi.fn(async () => { done = true; return ok({ done }); }),
+    } satisfies Partial<Bridge>;
+    (globalThis as unknown as { foundry: Partial<Bridge> }).foundry = api as unknown as Partial<Bridge>;
+    const { unmount } = render(<App />);
+    const offer = (await screen.findByRole('heading', { name: '60 秒看看它能做什么' })).closest('section')!;
+    expect(within(offer).getByText('打开示例的参考结果看板，看三处：点一个数看来源，拖一下收缴率，导出一页纸。')).toBeTruthy();
+    fireEvent.click(within(offer).getByRole('button', { name: '开始看' }));
+    await screen.findByText('本地成果：示例：华宸物业 8 月（参考结果）');
+    expect(api.taskSampleReference).toHaveBeenCalledWith(false);
+    expect(screen.getByRole('button', { name: '工作区' }).getAttribute('aria-current')).toBe('page');
+    // The hints run on the reference's board only, and seeing them through ends the offer for good.
+    fireEvent.click(screen.getByRole('button', { name: '看完了' }));
+    await waitFor(() => expect(api.firstLookDone).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('button', { name: '看完了' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^总览/ }));
+    await screen.findByRole('heading', { name: '等你处理（3）' });
+    expect(screen.queryByRole('heading', { name: '60 秒看看它能做什么' })).toBeNull();
+    unmount();
+    render(<App />);
+    await screen.findByRole('heading', { name: '等你处理（3）' });
+    expect(screen.queryByRole('heading', { name: '60 秒看看它能做什么' })).toBeNull();
   });
 
   it('leaves the 总览 tab out of a build that cannot read it', async () => {

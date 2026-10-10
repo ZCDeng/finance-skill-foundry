@@ -18,7 +18,7 @@ import { Button } from '../components/ui/button.js';
 import { Textarea } from '../components/ui/textarea.js';
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs.js';
 import { DatasetPreview } from './analysis/DatasetPreview.js';
-import { DashboardView, useDashboard } from './analysis/Dashboard.js';
+import { DashboardView, useDashboard, type BoardTour } from './analysis/Dashboard.js';
 import { MonthBrief } from './analysis/MonthBrief.js';
 import { formatPeriod } from '../lib/period.js';
 import { DashboardPinContext } from './analysis/dashboardModel.js';
@@ -56,6 +56,8 @@ type Props = {
   draftRequest?: { count: number; taskId: string; draftId: string };
   /** Go to where a line of 本月三句话 is handled, as a 总览 to-do goes there: the tab, then the block on it. */
   onOpenTarget?(target: string): void;
+  /** 60 秒看看它能做什么 is walking this task's board. */
+  tour?: BoardTour;
 };
 const TABS: [Tab, string][] = [['datasets', '资料'], ['results', '分析结果'], ['dashboard', '看板'], ['drafts', '文稿'], ['close', '月结'], ['methods', '方法']];
 /** Each page's own 使用指南 article, opened from the 「?」 beside 刷新. */
@@ -63,7 +65,7 @@ const PAGE_ARTICLES: Partial<Record<Tab, string>> = { datasets: 'page-datasets',
 const EXAMPLES = ['本月利润为什么没有达到预算？', '哪些客户需要优先跟进回款？', '回款晚两周，现金余额会怎样？'];
 
 /** All figures are rendered as received. In particular, Decimal strings never pass through Number. */
-export function Analysis({ task, tasks, active: visible = true, embedded = false, section, onSectionChange, onPick, onNew, onChat, onLocatorPreview, draftRequest, onOpenTarget }: Props) {
+export function Analysis({ task, tasks, active: visible = true, embedded = false, section, onSectionChange, onPick, onNew, onChat, onLocatorPreview, draftRequest, onOpenTarget, tour }: Props) {
   const [state, setState] = useState<AnalysisState | null>(null);
   const [tab, setTab] = useState<Tab>('datasets');
   const [question, setQuestionState] = useState(() => readCopy<string>(`${task?.id ?? 'new'}:question`) ?? '');
@@ -553,7 +555,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           {analysis && financeWorkbench}
         </>}
         {view && tab === 'dashboard' && <DashboardView task={{ id: task.id, title: task.title, period: formatPeriod(task.period) }} state={board} runs={view.runs} analyses={view.analyses} datasets={view.datasets}
-          superseded={view.superseded_datasets ?? []} readOnly={readOnly} onOpenResult={(run) => {
+          superseded={view.superseded_datasets ?? []} readOnly={readOnly} tour={tour} onOpenResult={(run) => {
             // The run the card reads, not the version's primary one: RunPanel opens on the run kept here.
             writeCopy(`${task.id}:run`, run.id);
             setSelectedAnalysis(run.analysis_id);
