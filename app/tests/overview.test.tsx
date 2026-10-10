@@ -215,6 +215,53 @@ describe('总览 in the app', () => {
     expect(screen.queryByRole('heading', { name: '60 秒看看它能做什么' })).toBeNull();
   });
 
+  function mountFirstLook(extra: Partial<Bridge>) {
+    const reference = task('c', '示例：华宸物业 8 月（参考结果）', '2026-08', { sample: 'reference' });
+    const api = {
+      tasks: vi.fn(async () => ok([july, august, reference])),
+      task: vi.fn(async (id: string) => ok({ task: [july, august, reference].find((row) => row.id === id)!, windows: [], deliverables: [], sessions: [] })),
+      gallery: vi.fn(async () => ok([])),
+      overview: vi.fn(async () => ok(data)),
+      harnessStatus: vi.fn(async () => ok({ wiring: { state: 'ready' as const }, consequence: null, origin: 'http://localhost:1' })),
+      harnessOpen: vi.fn(async (_intent: string, id: string) => ok({ sessionId: `session-${id}`, preset: 'analysis' })),
+      paneVisible: vi.fn(async (value: string) => ok({ screen: value })),
+      taskSampleReference: vi.fn(async () => ok({ id: reference.id, created: false })),
+      firstLookGet: vi.fn(async () => ok({ done: false })),
+      firstLookDone: vi.fn(async () => ok({ done: true })),
+      ...extra,
+    } satisfies Partial<Bridge>;
+    (globalThis as unknown as { foundry: Partial<Bridge> }).foundry = api as unknown as Partial<Bridge>;
+    render(<App />);
+    return { api, reference };
+  }
+
+  it('brings the offer back, saying why, when 不用了 could not be written down', async () => {
+    mountFirstLook({ firstLookDone: vi.fn(async (): Promise<Answer<{ done: boolean }>> => ({ ok: false, refused: false, message: '磁盘已满' })) });
+    const offer = (await screen.findByRole('heading', { name: '60 秒看看它能做什么' })).closest('section')!;
+    fireEvent.click(within(offer).getByRole('button', { name: '不用了' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('没能记下你已看过，下次打开还会出现：磁盘已满');
+    expect(screen.getByRole('heading', { name: '60 秒看看它能做什么' })).toBeTruthy();
+  });
+
+  it('stays where the manager went while the 参考结果 was still being built', async () => {
+    let finish: (answer: Answer<{ id: string; created: boolean }>) => void = () => undefined;
+    const { api, reference } = mountFirstLook({ taskSampleReference: vi.fn(() => new Promise<Answer<{ id: string; created: boolean }>>((resolve) => { finish = resolve; })) });
+    const offer = (await screen.findByRole('heading', { name: '60 秒看看它能做什么' })).closest('section')!;
+    fireEvent.click(within(offer).getByRole('button', { name: '开始看' }));
+    await waitFor(() => expect(api.taskSampleReference).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: '成果库' }));
+    finish({ ok: true, value: { id: reference.id, created: true } });
+    await waitFor(() => expect(screen.getByRole('button', { name: '成果库' }).getAttribute('aria-current')).toBe('page'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.getByRole('button', { name: '成果库' }).getAttribute('aria-current')).toBe('page');
+    expect(screen.queryByRole('button', { name: '看完了', hidden: true })).toBeNull();
+    // The offer still waits on 总览, and the built reference now opens at once.
+    fireEvent.click(screen.getByRole('button', { name: /^总览/ }));
+    const again = (await screen.findByRole('heading', { name: '60 秒看看它能做什么' })).closest('section')!;
+    expect(api.firstLookDone).not.toHaveBeenCalled();
+    expect(within(again).getByRole('button', { name: '开始看' })).toBeTruthy();
+  });
+
   it('leaves the 总览 tab out of a build that cannot read it', async () => {
     const { Shell } = await import('../src/components/Shell.js');
     render(<Shell screen="analysis" onScreen={() => {}} overview={false}><p>x</p></Shell>);

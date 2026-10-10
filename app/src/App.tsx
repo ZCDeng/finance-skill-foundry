@@ -611,14 +611,25 @@ export function App() {
   }, [api]);
   const endFirstLook = useCallback(() => {
     setFirstLookOffered(false);
+    setFirstLookError('');
     setTouring(null);
-    void api?.firstLookDone?.().catch(() => undefined);
+    if (!api?.firstLookDone) return;
+    // A flag that did not reach the disk would bring the offer back next launch unasked, so it comes back now, saying why.
+    void api.firstLookDone().then((answer) => (answer.ok ? '' : answer.message), (failure: unknown) => (failure instanceof Error ? failure.message : String(failure)))
+      .then((message) => {
+        if (!message) return;
+        setFirstLookError(`没能记下你已看过，下次打开还会出现：${message}`);
+        setFirstLookOffered(true);
+      });
   }, [api]);
   const startFirstLook = useCallback(() => {
+    const selection = selectionRevision.current;
     setFirstLookBusy(true);
     setFirstLookError('');
     void buildReference(false).then((id) => {
       if (!id) { setFirstLookError(referenceFailure.current || '参考结果没有生成出来，请稍后再试。'); return; }
+      // The build can take a minute: a manager who went elsewhere meanwhile stays there, and the offer waits on 总览.
+      if (selectionRevision.current !== selection || screenRef.current !== 'overview') return;
       setTouring(id);
       setScreen('analysis');
       showSampleTask(id, 'dashboard');
