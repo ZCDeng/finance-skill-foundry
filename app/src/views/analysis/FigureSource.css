@@ -1,0 +1,100 @@
+@layer components {
+/* A figure that opens its source: it reads as the figure until the pointer or keyboard reaches it, so a table of
+ * figures stays a table. Font, size and weight are the figure's own. */
+.fnd-figure-source {
+  display: inline;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  border-radius: 2px;
+  text-decoration: underline dotted transparent;
+  text-underline-offset: 4px;
+  transition: text-decoration-color var(--fnd-transition), background var(--fnd-transition);
+}
+
+.fnd-figure-source:hover,
+.fnd-figure-source[data-state='open'] {
+  text-decoration-color: var(--fnd-line-hover);
+  background: var(--fnd-surface-strong);
+}
+
+/* Read from a file a newer one has replaced: still shown, quieter, and underlined in the watch colour until the
+ * result is calculated again. */
+.fnd-figure-source[data-stale] {
+  opacity: 0.72;
+  text-decoration-color: var(--fnd-level-watch);
+}
+
+.fnd-source-card {
+  width: min(28em, calc(100vw - 48px));
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  /* 24px sides: the SQL fold hangs its chevron in the gutter, as every fold in the app does. */
+  padding: 16px 24px;
+  display: grid;
+  gap: 12px;
+  font-size: var(--fnd-size-small);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.fnd-source-card p,
+.fnd-source-card h4,
+.fnd-source-card dl,
+.fnd-source-card ul { margin: 0; }
+
+.fnd-source-card__head { display: grid; gap: 4px; }
+.fnd-source-card__title { color: var(--fnd-muted); }
+.fnd-source-card__value { font-size: var(--fnd-size-title); font-weight: var(--fnd-weight-strong); color: var(--fnd-ink); }
+
+.fnd-source-card__stale {
+  padding: 8px 12px;
+  border-radius: var(--fnd-radius-mark);
+  border: 1px solid var(--fnd-level-watch);
+  background: var(--fnd-level-watch-fill);
+  color: var(--fnd-ink);
+}
+
+.fnd-source-card__heading {
+  font-size: var(--fnd-size-label);
+  font-weight: 500;
+  color: var(--fnd-muted);
+  padding-bottom: 4px;
+}
+
+.fnd-source-card__list { display: grid; gap: 4px; }
+.fnd-source-card__list > div { display: grid; grid-template-columns: 6em minmax(0, 1fr); gap: 8px; }
+.fnd-source-card__list dt { color: var(--fnd-muted); }
+.fnd-source-card__list dd { margin: 0; }
+
+.fnd-source-card__files { list-style: none; padding: 0; display: grid; gap: 4px; }
+.fnd-source-card__files li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.fnd-source-card__digest { font-family: var(--fnd-font-figure); font-size: var(--fnd-size-label); color: var(--fnd-muted); }
+.fnd-source-card__replaced { font-size: var(--fnd-size-label); color: var(--fnd-ink); padding: 0 8px; border-radius: var(--fnd-radius-pill); background: var(--fnd-level-watch-fill); }
+
+.fnd-source-card__computed { color: var(--fnd-muted); }
+
+.fnd-source-card__method pre {
+  margin: 0;
+  max-height: 16em;
+  overflow: auto;
+  padding: 8px 12px;
+  border-radius: var(--fnd-radius-mark);
+  background: var(--fnd-surface-strong);
+  font-family: var(--fnd-font-figure);
+  font-size: var(--fnd-size-label);
+  white-space: pre-wrap;
+}
+
+.fnd-source-card__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.fnd-source-card__note { font-size: var(--fnd-size-label); color: var(--fnd-muted); }
+
+/* The line under a result's heading: which files it read and whether any has been replaced since. */
+.analysis-freshness { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; font-size: var(--fnd-size-small); color: var(--fnd-muted); }
+.analysis-freshness__stale { color: var(--fnd-ink); padding: 0 8px; border-radius: var(--fnd-radius-pill); background: var(--fnd-level-watch-fill); }
+}

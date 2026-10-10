@@ -9,8 +9,9 @@ import { assumptionSummary, Table, textValue } from './presentation.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
 import { TechnicalInfo, type TechnicalRow } from './TechnicalInfo.js';
 import { formatPeriod } from '../../lib/period.js';
-import { Figure } from '../../components/Figure.js';
 import { hasParenthesizedNegative } from '../../lib/figures.js';
+import { FigureSource } from './FigureSource.js';
+import { figureSource, type FigureSourceContext, type FigureSourceInfo } from './figureSource.js';
 
 /** How many sentences stand above the cards before the rest fold away. */
 const shownConclusions = 3;
@@ -23,7 +24,7 @@ const referenceSourceFields = ['source', '来源'];
 // Vite sets DEV; narrowed here so the app's tsconfig need not carry Vite's client types.
 const devBuild = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;
 
-type Kpi = { title: string; period: string; periodLabel: string; unit: string; basis: string; estimated: boolean; estimatedBudget: string; actualLabel: string; budgetLabel: string; actual: string; budget: string; difference: string; rate: string; rateLabel: string; notes: string[] };
+type Kpi = { row: Record<string, unknown>; title: string; period: string; periodLabel: string; unit: string; basis: string; estimated: boolean; estimatedBudget: string; actualLabel: string; budgetLabel: string; actual: string; budget: string; difference: string; rate: string; rateLabel: string; notes: string[] };
 
 /** Attainment fields in the order a card reads them; the first with a value fills the card's last line. */
 const rateFields = ['attainment_rate', 'attainment_pct', 'achievement_pct', 'completion_pct', 'attainment', 'attainment_ratio', 'budget_attainment', 'budget_attainment_rate', 'budget_completion', 'budget_completion_rate', 'completion_rate', 'completion', 'achievement_rate', 'achievement', 'actual_budget_rate', 'actual_budget_ratio', 'actual_to_budget', 'ratio'];
@@ -100,6 +101,7 @@ function kpiRows(rows: Record<string, unknown>[]): Record<string, unknown>[] {
 
 function kpiFor(row: Record<string, unknown>, columns: DisplayColumn[]): Kpi {
   return {
+    row,
     title: metricTitle(row),
     period: row.period == null || row.period === '' ? '' : String(row.period),
     periodLabel: row.period == null || row.period === '' ? '未声明期间' : formatPeriod(row.period),
@@ -167,8 +169,10 @@ function ConclusionLine({ conclusion }: { conclusion: ScriptConclusion }) {
   </div>;
 }
 
-export function BusinessResultView({ run, onSources, actions, technicalRows, diagnostics = [] }: {
+export function BusinessResultView({ run, onSources, actions, technicalRows, diagnostics = [], source }: {
   run: AnalysisRun; onSources?(): void;
+  /** The calculation behind the figures: with it each figure opens a card saying where it came from. */
+  source?: FigureSourceContext;
   /** The run's next steps (整理成文稿 first). They follow the cards, or the tables when there are no cards. */
   actions?: ReactNode;
   /** Identifiers shown above the raw fields in 技术信息, such as the version's question. */
@@ -200,6 +204,27 @@ export function BusinessResultView({ run, onSources, actions, technicalRows, dia
     warnCollisions(sourceRows);
     warnCollisions(otherRows);
   }, [sourceRows, otherRows]);
+  // Each shown row back to the row it was formatted from, so a figure's card reads the row's own fields.
+  const rowSources = useMemo(() => new Map<Record<string, unknown>, Record<string, unknown>>([
+    ...rows.map((row, index) => [row, filteredRows[index]] as const),
+    ...others.map((row, index) => [row, visibleOthers[index]] as const),
+  ]), [rows, filteredRows, others, visibleOthers]);
+  const rowFacts = (row: Record<string, unknown>): [string, string][] => {
+    const value = rowPeriod(row);
+    return [
+      ['期间', value == null || value === '' ? '' : formatPeriod(value)],
+      ['单位', row.unit == null ? '' : String(row.unit)],
+      ['依据', rowBasisLabel(row)],
+    ];
+  };
+  const kpiSource = (kpi: Kpi, part: string, value: string): FigureSourceInfo | undefined => source
+    ? figureSource(source, kpi.row, { metric: kpi.title, part, value, facts: [['期间', kpi.periodLabel], ['单位', kpi.unit], ['依据', kpi.basis]] })
+    : undefined;
+  const tableFigure = source ? (shown: Record<string, unknown>, column: { name: string }, text: string, hang: boolean) => {
+    const row = rowSources.get(shown);
+    if (!row) return undefined;
+    return <FigureSource text={text} hang={hang} info={figureSource(source, row, { metric: metricTitle(row), part: column.name, value: text, facts: rowFacts(row) })} />;
+  } : undefined;
   const tableColumn = (column: DisplayColumn, sources = false) => {
     const metricLabel = column.name.toLowerCase() === 'metric_label';
     const source = sources && referenceSourceFields.includes(column.name.toLowerCase());
@@ -226,7 +251,7 @@ export function BusinessResultView({ run, onSources, actions, technicalRows, dia
     {kpis.length ? <div className="analysis-kpi-grid" aria-label="关键指标">
       {kpis.map((kpi, index) => <article key={`${kpi.title}:${kpi.period}:${index}`} className="analysis-kpi-card">
         <span className="analysis-kpi-title" title={kpi.title}>{kpi.title}</span>
-        <strong aria-label={`${kpi.title}实际`}><Figure text={kpi.actual} /></strong>
+        <strong aria-label={`${kpi.title}实际`}><FigureSource text={kpi.actual} info={kpiSource(kpi, '实际', kpi.actual)} /></strong>
         {kpi.actualLabel ? <small className="analysis-kpi-source">{kpi.actualLabel}</small> : null}
         {/* Each part stays whole; the line breaks only at a separator. */}
         <small className="analysis-kpi-meta">{[kpi.periodLabel, kpi.unit, `依据：${kpi.basis}`].map((part, partIndex) => <Fragment key={partIndex}>{partIndex ? ' · ' : ''}<span>{part}</span></Fragment>)}
@@ -236,10 +261,10 @@ export function BusinessResultView({ run, onSources, actions, technicalRows, dia
             // One right-aligned column: beside a parenthesized negative, bare figures hang one place in.
             const hang = hasParenthesizedNegative([kpi.budget, kpi.estimatedBudget ?? '', kpi.difference, kpi.rate]);
             return <>
-              <div><dt>{kpi.estimated ? '预算（估算）' : '预算'}</dt><dd><Figure text={kpi.budget} hang={hang} /></dd></div>
-              {kpi.estimatedBudget ? <div><dt>预算（估算）</dt><dd><Figure text={kpi.estimatedBudget} hang={hang} /></dd></div> : null}
-              <div><dt>差异</dt><dd><Figure text={kpi.difference} hang={hang} /></dd></div>
-              <div><dt>{kpi.rateLabel}</dt><dd><Figure text={kpi.rate} hang={hang} /></dd></div>
+              <div><dt>{kpi.estimated ? '预算（估算）' : '预算'}</dt><dd><FigureSource text={kpi.budget} info={kpiSource(kpi, kpi.estimated ? '预算（估算）' : '预算', kpi.budget)} hang={hang} /></dd></div>
+              {kpi.estimatedBudget ? <div><dt>预算（估算）</dt><dd><FigureSource text={kpi.estimatedBudget} info={kpiSource(kpi, '预算（估算）', kpi.estimatedBudget)} hang={hang} /></dd></div> : null}
+              <div><dt>差异</dt><dd><FigureSource text={kpi.difference} info={kpiSource(kpi, '差异', kpi.difference)} hang={hang} /></dd></div>
+              <div><dt>{kpi.rateLabel}</dt><dd><FigureSource text={kpi.rate} info={kpiSource(kpi, kpi.rateLabel, kpi.rate)} hang={hang} /></dd></div>
             </>;
           })()}
         </dl>
@@ -251,9 +276,9 @@ export function BusinessResultView({ run, onSources, actions, technicalRows, dia
     {kpis.length > 0 && Boolean(run.assumptions?.length) && <p className="analysis-note" aria-label="本次计算的假设">本次计算的假设：{assumptionSummary(run.assumptions)}</p>}
     <div className="analysis-business-table">
       {rows.length > 0 || !others.length ? <Table key={`${run.id}:${period || 'all'}`} columns={columns.map((column) => tableColumn(column))}
-        rows={rows} caption="业务结果" scrollHint /> : null}
+        rows={rows} caption="业务结果" scrollHint figure={tableFigure} /> : null}
       {others.length > 0 && <Table key={`${run.id}:${period || 'all'}:others`} columns={otherColumns.filter((column) => column !== otherGroup).map((column) => tableColumn(column, true))}
-        rows={others} caption="其他结果" groupBy={otherGroup ? '__group' : undefined} groupFallback="未声明组织" scrollHint />}
+        rows={others} caption="其他结果" groupBy={otherGroup ? '__group' : undefined} groupFallback="未声明组织" scrollHint figure={tableFigure} />}
     </div>
     {kpis.length === 0 && actions}
     {onSources ? <div className="analysis-actions"><Button variant="outline" type="button" onClick={onSources}>查看来源与范围</Button></div> : null}
