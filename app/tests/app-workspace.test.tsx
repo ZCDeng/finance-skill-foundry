@@ -304,6 +304,16 @@ describe('first run', () => {
     expect(await screen.findByRole('heading', { name: '第一次使用' })).toBeTruthy();
   });
 
+  it('keeps the 总览 article when the guide is opened from 总览 on an empty store', async () => {
+    mount({ tasks: vi.fn(async () => ok([])), overview: vi.fn(async () => ok({ schema_version: 1 as const, tasks: [], todo_count: 0 })) });
+    await screen.findByRole('heading', { name: '从这里开始' });
+    fireEvent.click(screen.getByRole('button', { name: /使用指南/ }));
+    expect(await screen.findByRole('heading', { name: '总览：每天先看这里' })).toBeTruthy();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(screen.queryByRole('heading', { name: '第一次使用' })).toBeNull();
+    expect(screen.getByRole('heading', { name: '总览：每天先看这里' })).toBeTruthy();
+  });
+
   it('stays closed when the store only holds archived tasks', async () => {
     const tasks = vi.fn(async (view?: string) => ok(view === 'all' ? [{ ...a, lifecycle_status: 'archived' as const }] : []));
     mount({ tasks });
