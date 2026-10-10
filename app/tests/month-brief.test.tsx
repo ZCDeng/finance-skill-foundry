@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AnalysisRun, BriefLine, Bridge, MonthBrief as Brief } from '../src/bridge.js';
 import { MonthBrief, partsOf } from '../src/views/analysis/MonthBrief.js';
 import type { Dashboard, DashboardCard } from '../src/views/analysis/dashboardModel.js';
 import { ASK_EVENT, ASK_PROMPTS } from '../src/views/guide/ask.js';
+import { TASK_CHANGED_EVENT } from '../src/views/guide/QuickStartChecklist.js';
 import fixture from './fixtures/collection-health-run.json';
 
 // A collection_health run on a property group's dashboard and ten city companies of its 11·城市公司明细表.
@@ -101,6 +102,16 @@ describe('本月三句话', () => {
     fireEvent.click(screen.getByRole('button', { name: '让助手改措辞' }));
     window.removeEventListener(ASK_EVENT, asked);
     expect((asked.mock.calls[0][0] as CustomEvent).detail).toBe(ASK_PROMPTS['month-brief']);
+  });
+
+  it('reads the lines again when the task says it changed, as when the assistant has just reworded one', async () => {
+    const worded = '先处理「应收滚动：待外部确认，差额 1200」，一共 2 件事等你拍板。';
+    const { financeCall } = mount(brief());
+    expect((await screen.findAllByRole('listitem'))[2].textContent).toBe(`等你拍板${lines[2].text}`);
+    financeCall.mockResolvedValue({ ok: true, value: brief({ lines: { waiting: worded }, by: 'assistant', created_at: '2026-10-10T09:05:00Z' }) });
+    await act(async () => { window.dispatchEvent(new Event(TASK_CHANGED_EVENT)); });
+    expect(financeCall).toHaveBeenCalledTimes(2);
+    expect(screen.getAllByRole('listitem')[2].textContent).toBe(`等你拍板${worded}`);
   });
 
   it('falls back to the rule\'s line when a wording lost a figure, and says when it cannot be read', async () => {

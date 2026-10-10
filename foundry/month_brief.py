@@ -235,7 +235,8 @@ def word(store, spec: Any) -> dict:
     if not isinstance(asked, dict) or not asked or set(asked) - set(LABELS):
         raise FoundryError("lines names change, risk or waiting, each with its new wording")
     lines = {line["key"]: line for line in current["lines"]}
-    kept = {}
+    # A line not named keeps the wording it has: the assistant may reword one sentence at a time.
+    kept = dict(current["worded"]["lines"]) if current["worded"] else {}
     for key, text in asked.items():
         label, line = LABELS[key], lines[key]
         if not isinstance(text, str) or not text.strip() or len(text.strip()) > MAX_WORDED or "\n" in text.strip():

@@ -7,6 +7,7 @@ import { DisclosureSummary } from '../../components/Disclosure.js';
 import { Figure } from '../../components/Figure.js';
 import { formatPeriod } from '../../lib/period.js';
 import { AskLink } from '../guide/GuideHub.js';
+import { TASK_CHANGED_EVENT } from '../guide/QuickStartChecklist.js';
 import type { Dashboard, DashboardCard } from './dashboardModel.js';
 import { figureView } from './dashboardViews.js';
 import { FigureSource } from './FigureSource.js';
@@ -21,7 +22,8 @@ import { errorText } from './shared.js';
  */
 export function MonthBrief({ taskId, refreshKey, board, runs, analyses, datasets, superseded, readOnly = false, onOpen, onOpenResult }: {
   taskId: string;
-  /** Read again when this changes: the files, runs, drafts or board the lines are picked from. */
+  /** Read again when this changes: the files, runs, drafts or board the lines are picked from. Anything else that
+   * changes the task says so on TASK_CHANGED_EVENT, and the lines are read again then too. */
   refreshKey: string;
   board: Dashboard | null;
   runs: AnalysisRun[];
@@ -37,6 +39,13 @@ export function MonthBrief({ taskId, refreshKey, board, runs, analyses, datasets
   const [brief, setBrief] = useState<Brief | null>(null);
   const [error, setError] = useState('');
   const [original, setOriginal] = useState(false);
+  // A confirmation, a disposition or the assistant's new wording changes the lines without a new file or run.
+  const [changes, setChanges] = useState(0);
+  useEffect(() => {
+    const changed = () => setChanges((value) => value + 1);
+    window.addEventListener(TASK_CHANGED_EVENT, changed);
+    return () => window.removeEventListener(TASK_CHANGED_EVENT, changed);
+  }, []);
   // A new task starts blank: no line of the last one stays up while this one is read.
   useEffect(() => { setBrief(null); setOriginal(false); }, [taskId]);
   useEffect(() => {
@@ -50,7 +59,7 @@ export function MonthBrief({ taskId, refreshKey, board, runs, analyses, datasets
       if (answer.ok) { setBrief(Array.isArray(answer.value?.lines) ? answer.value : null); setError(''); } else setError(answer.message);
     })().catch((failure: unknown) => { if (live) setError(errorText(failure)); });
     return () => { live = false; };
-  }, [taskId, refreshKey]);
+  }, [taskId, refreshKey, changes]);
   const replaced = useMemo(() => new Set(superseded), [superseded]);
   // A quiet note in its place: the brief only gathers what the pages below already say, and they carry their own alerts.
   if (!brief) return error ? <p className="analysis-note">{`本月三句话暂时读不出：${error}`}</p> : null;

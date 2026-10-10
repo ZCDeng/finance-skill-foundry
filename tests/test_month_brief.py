@@ -105,6 +105,10 @@ def test_the_assistant_rewords_a_line_but_keeps_every_figure_and_adds_none(tmp_p
     assert saved["worded"]["lines"] == {"waiting": worded} and saved["worded"]["by"] == "assistant"
     # The desktop reads the same wording while the figures stand, and the rule's line once they move.
     assert manager.month_brief({})["worded"]["lines"] == {"waiting": worded}
+    # Rewording one more sentence keeps the one reworded before it.
+    risk = "风险雷达上 1 个主体都是绿色，暂时不用先看。"
+    saved = assistant.month_brief_word({"signature": signature, "lines": {"risk": risk}})
+    assert saved["worded"]["lines"] == {"waiting": worded, "risk": risk}
     kpi = [dict(row) for row in KPI]
     kpi[3]["本年累计"] = "80.00%"
     _readd(manager, tmp_path, "kpi", kpi)
