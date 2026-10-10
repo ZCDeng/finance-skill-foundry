@@ -325,7 +325,7 @@ export function Deliverables({
 
 
 type KindFilter = 'all' | 'documents' | 'chart' | 'workbook' | 'collection';
-type StatusFilter = 'all' | 'review' | 'accepted';
+type StatusFilter = 'all' | 'unreviewed' | 'reviewed' | 'accepted';
 type ModeFilter = 'all' | 'management' | 'audit';
 type Filters = { query: string; period: string; kind: KindFilter; status: StatusFilter; mode: ModeFilter };
 const NO_FILTERS: Filters = { query: '', period: '', kind: 'all', status: 'all', mode: 'all' };
@@ -333,7 +333,7 @@ const NO_FILTERS: Filters = { query: '', period: '', kind: 'all', status: 'all',
 const KIND_FILTERS: [KindFilter, string][] = [
   ['all', '全部类型'], ['documents', '文稿与导出件'], ['chart', '归档图'], ['workbook', '写回 Excel'], ['collection', '收缴率计算'],
 ];
-const STATUS_FILTERS: [StatusFilter, string][] = [['all', '全部状态'], ['review', '待复核'], ['accepted', '经理认可']];
+const STATUS_FILTERS: [StatusFilter, string][] = [['all', '全部状态'], ['unreviewed', '待复核'], ['reviewed', '已阅'], ['accepted', '经理认可']];
 const MODE_FILTERS: [ModeFilter, string][] = [['all', '全部版本'], ['management', '管理版'], ['audit', '审计版']];
 const CALIBER_SHORT: Record<CollectionRunRow['caliber']['status'], string> = { confirmed: '已确认口径', default: '默认口径', trial: '试算' };
 
@@ -343,7 +343,8 @@ function passes(line: Line, filters: Filters): boolean {
   if (filters.kind !== 'all' && (filters.kind === 'documents' ? line.kind !== 'revision' : line.kind !== filters.kind)) return false;
   if (filters.status !== 'all' || filters.mode !== 'all') {
     if (line.kind !== 'revision') return false;
-    if (filters.status !== 'all' && (line.state.review_status === 'accepted') !== (filters.status === 'accepted')) return false;
+    // The revision's own review state, in the words the 文稿 toolbar uses: 未阅 is 待复核 here, 已阅 and 经理认可 are their own.
+    if (filters.status !== 'all' && line.state.review_status !== filters.status) return false;
     if (filters.mode !== 'all' && !line.exports.some((row) => row.content_mode === filters.mode)) return false;
   }
   return true;
@@ -479,12 +480,13 @@ function DeliverablesList({
       </div>
       {/* Present from the start so a change is announced, not inserted with its words. */}
       <span className="sr-only" role="status">
-        {filtered ? shown.length ? `找到 ${shown.length} 个任务` : nothing : ''}
+        {filtered ? shown.length ? `找到 ${shown.length} 个任务` : old.length ? `旧版流程里有 ${old.length} 个相符的版本` : nothing : ''}
       </span>
       <div className={chosen ? 'fnd-library__layout fnd-library__layout--panel' : 'fnd-library__layout'}>
         <div className="fnd-stack fnd-library__main">
           {shown.length === 0 ? (
-            <p className="fnd-muted">{nothing}</p>
+            // Only old-flow versions match: they are in their fold below, open so they are not missed.
+            old.length ? null : <p className="fnd-muted">{nothing}</p>
           ) : (
             <div className="fnd-tablewrap" tabIndex={0} role="region" aria-label="成果库">
               <table className="fnd-table fnd-library__table">
@@ -534,7 +536,7 @@ function DeliverablesList({
             </div>
           )}
           {old.length ? (
-            <details className="analysis-details fnd-library__old">
+            <details className="analysis-details fnd-library__old" open={shown.length === 0 || undefined}>
               <DisclosureSummary>旧版流程的版本 · {old.length}</DisclosureSummary>
               <p className="fnd-muted">改版前「出稿」流程留下的结论稿、底稿和表格，只读保存。</p>
               <div className="fnd-tablewrap" tabIndex={0} role="region" aria-label="旧版流程的版本">

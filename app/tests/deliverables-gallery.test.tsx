@@ -218,13 +218,32 @@ describe('the 成果库 list', () => {
     fireEvent.change(screen.getByRole('combobox', { name: '期间' }), { target: { value: '2026-08' } });
     expect(groupNames()).toEqual([A.title]);
     fireEvent.change(screen.getByRole('combobox', { name: '期间' }), { target: { value: '' } });
-    fireEvent.change(screen.getByRole('combobox', { name: '文稿状态' }), { target: { value: 'review' } });
+    fireEvent.change(screen.getByRole('combobox', { name: '文稿状态' }), { target: { value: 'unreviewed' } });
     // A's 当前版 is accepted, so only its earlier revision stays, listed as it is and not called 当前版.
     expect(groupNames()).toEqual([A.title, B.title]);
     expect(screen.queryByRole('button', { name: V2 })).toBeNull();
     expect(screen.getByRole('button', { name: V1 }).closest('tr')!.textContent).not.toContain('当前版');
     // Under a status filter the old flow, which has none, is left out.
     expect(screen.queryByText(/旧版流程的版本/)).toBeNull();
+  });
+
+  it('keeps a revision already read (已阅) out of 待复核', () => {
+    const read: AnalysisDraftRow = { ...v2, review_status: 'reviewed' };
+    render(<Deliverables rows={[{ type: 'draft', key: `draft:${read.draft_id}`, at: SECOND, task: A, draft: read }]} {...LIST} onOpen={() => {}} onExport={() => {}} />);
+    fireEvent.change(screen.getByRole('combobox', { name: '文稿状态' }), { target: { value: 'unreviewed' } });
+    expect(screen.queryByRole('button', { name: V2 })).toBeNull();
+    fireEvent.change(screen.getByRole('combobox', { name: '文稿状态' }), { target: { value: 'reviewed' } });
+    expect(screen.getByRole('button', { name: V2 })).toBeTruthy();
+  });
+
+  it('with only old-flow versions matching, opens their fold instead of saying nothing matched', () => {
+    const rows: GalleryRow[] = [{ type: 'deliverable', key: `deliverable:${A.id}:2`, at: SECOND, task: A, row: brief }];
+    render(<Deliverables rows={rows} {...LIST} onOpen={() => {}} onExport={() => {}} />);
+    expect(screen.queryByText(/没有符合筛选条件的成果/)).toBeNull();
+    expect((screen.getByText(/旧版流程的版本 · 1/).closest('details') as HTMLDetailsElement).open).toBe(true);
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索任务、标题或期间' }), { target: { value: 'emit' } });
+    expect(screen.getByRole('status').textContent).toBe('旧版流程里有 1 个相符的版本');
+    expect(screen.queryByText(/没有和「emit」相符的成果/)).toBeNull();
   });
 
   it('titles the screen 成果库 whether or not there is anything in it, and says how to get a first result', () => {
