@@ -146,6 +146,9 @@ def normalize_select(kind: str, select: Any, run: dict) -> dict:
         for key in SCENARIO_LINES:
             if sum(1 for _, row in found if row.get("metric_key") == key) != 1:
                 raise FoundryError(f"a scenario card needs one {key} line of its entity; name the 本期 lines")
+        # The what-if moves this period's collection rate; last year's lines would be shown as this period's.
+        if any(row.get("scenario") != "本期" for _, row in found):
+            raise FoundryError("a scenario card reads its entity's 本期 lines only; name scenario 本期")
         return {"match": match}
     if result.get("method") != BRIDGE_METHOD:
         raise FoundryError("a bridge card reads a budget or prior-period variance result")

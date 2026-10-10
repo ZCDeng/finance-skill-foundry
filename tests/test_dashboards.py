@@ -222,6 +222,9 @@ def test_a_scenario_card_reads_one_entitys_lines_and_is_never_accepted(tmp_path)
         manager.dashboard_save({"parent_id": board["id"], "cards": [{**scenario, "select": {"match": {"entity": "集团"}}}]})
     with pytest.raises(FoundryError, match="one entity"):
         manager.dashboard_save({"parent_id": board["id"], "cards": [{**scenario, "select": {"match": {"scenario": "本期"}}}]})
+    # Last year's lines are a whole set too, but the what-if moves this period's rate.
+    with pytest.raises(FoundryError, match="本期 lines only"):
+        manager.dashboard_save({"parent_id": board["id"], "cards": [{**scenario, "select": {"match": {"entity": "集团", "scenario": "上年同期"}}}]})
 
     # The assistant proposes one like any card; the session's answer shows only the cards on runs it may read.
     assistant = FinanceStore(manager.task, snapshot_ids=set(bindings.values()), actor="assistant")

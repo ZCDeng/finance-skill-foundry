@@ -256,7 +256,7 @@ export function DashboardView({ state, runs, analyses, datasets, superseded = []
   };
   const acceptAll = () => {
     setConfirmAll(false);
-    act(`已认可 ${waiting.length} 张卡。`, (now) => now.map((card) => (card.state === 'pinned' ? { ...card, state: 'accepted' } : card)));
+    act(`已认可 ${waiting.length} 张卡。`, (now) => now.map((card) => (card.state === 'pinned' && card.kind !== 'scenario' ? { ...card, state: 'accepted' } : card)));
   };
   const moveAll = () => {
     const moves = new Map(movable.map(({ card, next }) => [card.id, next.id]));

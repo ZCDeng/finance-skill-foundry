@@ -587,6 +587,8 @@ window.__ModuleLoader__.load({
         prompt: '回款晚两周，未来 13 周现金够不够？' },
       { id: 'dashboard-cards', section: '看板', label: '提议看板卡', skill: 'financial-statements', keywords: ['看板', '卡片', '钉住', '只看', '拆开', '排名'],
         prompt: '看看这个任务已经算好的结果，提议几张值得放上看板的卡，说明每张看什么。先放在「助手提议」里，我钉住才算。' },
+      { id: 'dashboard-by-city', section: '看板', label: '按城市公司排名', skill: 'cash', keywords: ['城市公司', '排名', '从低到高', '生死线'],
+        prompt: '在看板上提议一张按城市公司排的卡：距生死线从低到高，标出生死线。先放在「助手提议」里。' },
       { id: 'collection-scenario', section: '看板', label: '回款情景卡', skill: 'cash', keywords: ['情景', '假如', '滑块', '生死线'],
         prompt: '在看板上加一张回款情景卡：拖收缴率看距生死线、现金经营利润和一年回款怎么变。' },
     ];

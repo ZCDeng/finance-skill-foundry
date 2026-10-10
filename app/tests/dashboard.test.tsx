@@ -159,13 +159,15 @@ describe('the board', () => {
 
   it('lets the manager accept one card, and all of them after a confirmation', async () => {
     const backend = boardBackend([card({}), card({ id: 'c2', kind: 'rank', title: '风险雷达得分（从高到低）', template: 'city',
-      select: { match: { metric_key: 'risk_score', scenario: '本期', entity_origin: 'table' }, label: 'entity', column: 'value', order: 'desc', limit: 10 } })]);
+      select: { match: { metric_key: 'risk_score', scenario: '本期', entity_origin: 'table' }, label: 'entity', column: 'value', order: 'desc', limit: 10 } }),
+      card({ id: 's1', kind: 'scenario', title: '回款情景', select: { match: { entity: '集团', scenario: '本期' } } })]);
     await view();
     fireEvent.click(within(screen.getByRole('article', { name: '距生死线（本年账单收缴率）' })).getByRole('button', { name: '认可' }));
     await waitFor(() => expect(backend.board()?.cards[0].state).toBe('accepted'));
     fireEvent.click(await screen.findByRole('button', { name: '全部认可（1 张）' }));
     fireEvent.click(await screen.findByRole('button', { name: '全部认可' }));
-    await waitFor(() => expect(backend.board()?.cards.map((row) => row.state)).toEqual(['accepted', 'accepted']));
+    // The what-if stays as it was: the backend refuses to accept it, and would refuse the whole save with it.
+    await waitFor(() => expect(backend.board()?.cards.map((row) => row.state)).toEqual(['accepted', 'accepted', 'pinned']));
   });
 
   it('shows the assistant\'s proposals apart until the manager pins them', async () => {
