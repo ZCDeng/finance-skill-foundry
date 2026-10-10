@@ -622,7 +622,10 @@ class AnalysisStore:
             "datasets": datasets,
             # Snapshots a newer file or a published source refresh has replaced: a result that read one is out of
             # date until it is calculated again. The rule the controls and the close status use.
-            "superseded_datasets": sorted(superseded_snapshots(self.task, datasets, allowed=allowed)),
+            "superseded_datasets": sorted(superseded_snapshots(
+                self.task, datasets, allowed=allowed,
+                # A reader's batches come from the listing its drafts and runs share (_batches_in_view).
+                batches=None if allowed is None else self._batches_in_view(set(allowed), cache))),
             "analyses": analyses,
             # Row declarations are read as the workbench shows them: recomputed when stored under older
             # rules, and with the latest requirements' estimates added. Stored records are never rewritten.
