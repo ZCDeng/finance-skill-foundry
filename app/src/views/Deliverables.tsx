@@ -1,5 +1,9 @@
 import { Fragment, useMemo, useState } from 'react';
-import { ArrowLeft, Eye, FilePen, FileSpreadsheet, FileText, ExternalLink, Search } from 'lucide-react';
+import { ArrowLeft, BarChart3, Eye, FilePen, FileSpreadsheet, FileText, ExternalLink, Percent, Search } from 'lucide-react';
+
+import { DisclosureSummary } from '../components/Disclosure.js';
+import { NativeSelect } from '../components/ui/native-select.js';
+import { LibraryPanel, type LibraryPanelActions, type LibrarySelection } from './LibraryPanel.js';
 
 import { Reader } from '../components/Reader.js';
 import { Button } from '../components/ui/button.js';
@@ -8,17 +12,20 @@ import { formatPeriod } from '../lib/period.js';
 import {
   type AnalysisDraftRow,
   type AnalysisExportRow,
+  type ChartRow,
+  type CollectionRunRow,
   type DeliverableRow,
   type ExportFormat,
   type GalleryRow,
   type TaskRow,
+  type WorkbookOutputRow,
   bytes,
   isWorkbook,
   when,
 } from '../bridge.js';
 import { draftStateText } from './analysis/presentation.js';
 import { TechnicalInfo } from './analysis/TechnicalInfo.js';
-import { Empty, EmptyDescription } from '../components/ui/empty.js';
+import { Empty, EmptyDescription, EmptyTitle } from '../components/ui/empty.js';
 import { Loading, SkeletonRows } from '../components/Loading.js';
 
 const KIND_LABEL: Record<DeliverableRow['kind'], string> = {
@@ -81,7 +88,10 @@ type RevisionLine = {
   draft: AnalysisDraftRow | null; state: { publication_status: string; review_status: string }; exports: AnalysisExportRow[];
 };
 type OldLine = { kind: 'old'; key: string; at: string; row: DeliverableRow };
-type Line = RevisionLine | OldLine;
+type ChartLine = { kind: 'chart'; key: string; at: string; chart: ChartRow };
+type WorkbookLine = { kind: 'workbook'; key: string; at: string; output: WorkbookOutputRow };
+type CollectionLine = { kind: 'collection'; key: string; at: string; run: CollectionRunRow };
+type Line = RevisionLine | OldLine | ChartLine | WorkbookLine | CollectionLine;
 type TaskGroup = { task: TaskRow; lines: Line[] };
 
 /**
@@ -101,7 +111,18 @@ function groupByTask(rows: GalleryRow[]): TaskGroup[] {
       group.lines.push({ kind: 'old', key: entry.key, at: entry.at, row: entry.row });
       continue;
     }
-    if (entry.type !== 'draft' && entry.type !== 'export') continue;
+    if (entry.type === 'chart') {
+      group.lines.push({ kind: 'chart', key: entry.key, at: entry.at, chart: entry.chart });
+      continue;
+    }
+    if (entry.type === 'workbook') {
+      group.lines.push({ kind: 'workbook', key: entry.key, at: entry.at, output: entry.output });
+      continue;
+    }
+    if (entry.type === 'collection') {
+      group.lines.push({ kind: 'collection', key: entry.key, at: entry.at, run: entry.run });
+      continue;
+    }
     const source = entry.type === 'draft' ? entry.draft : entry.exported;
     const id = `${entry.task.id}:${source.draft_id}`;
     let line = revisions.get(id);
@@ -133,8 +154,10 @@ export interface OpenDeliverable {
 }
 
 /**
- * Every version this machine has produced, grouped by task: the old flow's
- * versions, each 文稿 revision with the files exported from it, newest first.
+ * Every result this machine has produced, grouped by task: each 文稿 revision
+ * with the files exported from it, the 归档图, the 写回 Excel copies and the
+ * 收缴率 runs, newest first; the old flow's versions fold at the bottom.
+ * Choosing a row opens a side panel with what it is and where it came from.
  *
  * The list is an index, not the thing. It used to be only the index -- time,
  * task, kind, cause, size, digest, and no way to see what any of it said --
@@ -163,6 +186,10 @@ export function Deliverables({
   onExport,
   busy,
   onBack,
+  onDetail,
+  onFile,
+  onOpenTask,
+  onSample,
 }: {
   rows: GalleryRow[];
   open: OpenDeliverable | null;
@@ -181,9 +208,15 @@ export function Deliverables({
   /** The window currently being written, if any. */
   busy: string | null;
   onBack(): void;
+  onDetail?: LibraryPanelActions['onDetail'];
+  onFile?: LibraryPanelActions['onFile'];
+  onOpenTask?: LibraryPanelActions['onOpenTask'];
+  /** Make the practice task, for an empty library. */
+  onSample?(): void;
 }) {
-  // Kept here, above the open version, so going back to the list finds the search as it was left.
-  const [query, setQuery] = useState('');
+  // Kept here, above the open version, so going back to the list finds the search, filters and selection as left.
+  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const [selected, setSelected] = useState<string | null>(null);
   if (open) {
     return (
       <div className="fnd-stack" style={{ gap: 20 }}>
@@ -284,135 +317,303 @@ export function Deliverables({
   }
 
   return (
-    <DeliverablesList rows={rows} query={query} onQuery={setQuery} onOpen={onOpen} onOpenDraft={onOpenDraft} onOpenExport={onOpenExport} />
+    <DeliverablesList rows={rows} filters={filters} onFilters={setFilters} selected={selected} onSelect={setSelected}
+      onOpen={onOpen} onOpenExport={onOpenExport} onSample={onSample}
+      actions={{ onDetail, onFile, onOpenTask, onOpenDraft }} />
   );
 }
 
+
+type KindFilter = 'all' | 'documents' | 'chart' | 'workbook' | 'collection';
+type StatusFilter = 'all' | 'unreviewed' | 'reviewed' | 'accepted';
+type ModeFilter = 'all' | 'management' | 'audit';
+type Filters = { query: string; period: string; kind: KindFilter; status: StatusFilter; mode: ModeFilter };
+const NO_FILTERS: Filters = { query: '', period: '', kind: 'all', status: 'all', mode: 'all' };
+
+const KIND_FILTERS: [KindFilter, string][] = [
+  ['all', '全部类型'], ['documents', '文稿与导出件'], ['chart', '归档图'], ['workbook', '写回 Excel'], ['collection', '收缴率计算'],
+];
+const STATUS_FILTERS: [StatusFilter, string][] = [['all', '全部状态'], ['unreviewed', '待复核'], ['reviewed', '已阅'], ['accepted', '经理认可']];
+const MODE_FILTERS: [ModeFilter, string][] = [['all', '全部版本'], ['management', '管理版'], ['audit', '审计版']];
+const CALIBER_SHORT: Record<CollectionRunRow['caliber']['status'], string> = { confirmed: '已确认口径', default: '默认口径', trial: '试算' };
+
+/** A line passes the type, status and version filters. Status and version are a 文稿's; anything else drops out under them. */
+function passes(line: Line, filters: Filters): boolean {
+  if (line.kind === 'old') return false;
+  if (filters.kind !== 'all' && (filters.kind === 'documents' ? line.kind !== 'revision' : line.kind !== filters.kind)) return false;
+  if (filters.status !== 'all' || filters.mode !== 'all') {
+    if (line.kind !== 'revision') return false;
+    // The revision's own review state, in the words the 文稿 toolbar uses: 未阅 is 待复核 here, 已阅 and 经理认可 are their own.
+    if (filters.status !== 'all' && line.state.review_status !== filters.status) return false;
+    if (filters.mode !== 'all' && !line.exports.some((row) => row.content_mode === filters.mode)) return false;
+  }
+  return true;
+}
+
+/** Search reads the task's name, its period (as written and as shown) and each line's own title. */
+function lineText(line: Line): string {
+  return line.kind === 'revision' ? line.title : line.kind === 'chart' ? line.chart.label
+    : line.kind === 'workbook' ? `${line.output.filename} ${line.output.dataset}` : line.kind === 'collection' ? `收缴率 ${line.run.as_of}` : line.row.cause;
+}
+function taskText(task: TaskRow): string {
+  return [task.title, task.period ?? '', task.period ? formatPeriod(task.period) : ''].join(' ');
+}
+
+/** What the side panel shows for a line; the old flow opens in its own view instead. */
+function selectionOf(task: TaskRow, line: Line): LibrarySelection | null {
+  if (line.kind === 'revision') {
+    return { kind: 'revision', task, draftId: line.draftId, revision: line.revision, title: line.title, draft: line.draft, state: line.state, exports: line.exports };
+  }
+  if (line.kind === 'chart') return { kind: 'chart', task, chart: line.chart };
+  if (line.kind === 'workbook') return { kind: 'workbook', task, output: line.output };
+  if (line.kind === 'collection') return { kind: 'collection', task, run: line.run };
+  return null;
+}
+
 /**
- * The list, its own component so its grouping is a hook of its own: Deliverables
- * returns early while a version is open. The search text is Deliverables', so it
- * outlives a visit to one version.
+ * The list, its own component so its grouping is a hook of its own: Deliverables returns early while an
+ * old-flow version is open. Filters and the selection are Deliverables', so they outlive that visit.
+ *
+ * In each task the newest 文稿 revision is the 当前版; earlier ones fold under 「更早的 N 版」, because the
+ * question a CFO brings here is "which one is current", and the history is for the one asking after it.
  */
 function DeliverablesList({
-  rows,
-  query,
-  onQuery,
-  onOpen,
-  onOpenDraft,
-  onOpenExport,
+  rows, filters, onFilters, selected, onSelect, onOpen, onOpenExport, onSample, actions,
 }: {
   rows: GalleryRow[];
-  query: string;
-  onQuery(query: string): void;
+  filters: Filters;
+  onFilters(filters: Filters): void;
+  selected: string | null;
+  onSelect(key: string | null): void;
   onOpen(task: TaskRow, row: DeliverableRow): void;
-  onOpenDraft?(task: TaskRow, draft: AnalysisDraftRow): void;
   onOpenExport?(task: TaskRow, exported: AnalysisExportRow): void;
+  onSample?(): void;
+  actions: LibraryPanelActions;
 }) {
   const groups = useMemo(() => groupByTask(rows), [rows]);
-  const needle = query.trim();
-  const shown = needle
-    ? groups.filter((group) => group.task.title.toLowerCase().includes(needle.toLowerCase()))
-    : groups;
-  const nothing = `没有名称包含「${needle}」的任务`;
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const periods = useMemo(() => [...new Set(groups.map((group) => group.task.period).filter((value): value is string => Boolean(value)))].sort().reverse(), [groups]);
+  const needle = filters.query.trim().toLowerCase();
+  const set = (patch: Partial<Filters>) => onFilters({ ...filters, ...patch });
+
+  const shown = groups.flatMap(({ task, lines }) => {
+    if (filters.period && task.period !== filters.period) return [];
+    const taskHit = !needle || taskText(task).toLowerCase().includes(needle);
+    const kept = lines.filter((line) => passes(line, filters) && (taskHit || lineText(line).toLowerCase().includes(needle)));
+    if (!kept.length) return [];
+    // 当前版 is the task's newest revision whatever the filters keep; when they leave it out, the revisions
+    // they keep are listed as they are, not folded under a version that is not shown.
+    const newest = lines.filter((line): line is RevisionLine => line.kind === 'revision').reduce<RevisionLine | null>(
+      (best, line) => best && best.revision >= line.revision ? best : line, null);
+    const revisions = kept.filter((line): line is RevisionLine => line.kind === 'revision').sort((a, b) => b.revision - a.revision);
+    const others = kept.filter((line) => line.kind !== 'revision');
+    const current = revisions[0] && revisions[0] === newest ? revisions[0] : null;
+    return [{ task, current, older: current ? revisions.slice(1) : [], loose: current ? [] : revisions, others }];
+  });
+  const old = groups.flatMap(({ task, lines }) => lines
+    .filter((line): line is OldLine => line.kind === 'old')
+    .filter(() => !filters.period || task.period === filters.period)
+    .filter(() => filters.kind === 'all' || filters.kind === 'documents')
+    .filter(() => filters.status === 'all' && filters.mode === 'all')
+    .filter((line) => !needle || taskText(task).toLowerCase().includes(needle) || line.row.cause.toLowerCase().includes(needle))
+    .map((line) => ({ task, line })));
+
+  const chosen = (() => {
+    if (!selected) return null;
+    for (const { task, lines } of groups) {
+      const line = lines.find((item) => item.key === selected);
+      if (line) return selectionOf(task, line);
+    }
+    return null;
+  })();
+  const filtered = needle || filters.period || filters.kind !== 'all' || filters.status !== 'all' || filters.mode !== 'all';
+  const nothing = needle ? `没有和「${filters.query.trim()}」相符的成果` : '没有符合筛选条件的成果';
 
   if (rows.length === 0) {
     return (
       <div className="fnd-stack">
         <h1 className="fnd-library__title">成果库</h1>
-        <Empty><EmptyDescription>还没有产出物。出一次稿就会有第一版。</EmptyDescription></Empty>
+        <Empty className="fnd-library__empty">
+          <EmptyTitle>还没有成果</EmptyTitle>
+          <EmptyDescription>
+            出一次稿、保存一张归档图、写回一份 Excel 或算一次收缴率，都会存到这里，按任务归在一起，每一版都能追溯到它读的资料。
+          </EmptyDescription>
+          {onSample ? <Button type="button" variant="outline" onClick={onSample}>用示例练习</Button> : null}
+        </Empty>
       </div>
     );
   }
 
+  const row = (task: TaskRow, line: Line, nested = false, current = false) => (
+    <LibraryRow key={line.key} task={task} line={line} nested={nested} current={current} selected={selected === line.key}
+      onSelect={() => onSelect(selected === line.key ? null : line.key)} onOpenExport={onOpenExport} />
+  );
+
   return (
     <div className="fnd-stack">
       <div className="fnd-library__head">
-        <h1 className="fnd-library__title">成果库</h1>
+        <div>
+          <h1 className="fnd-library__title">成果库</h1>
+          <p className="fnd-muted fnd-library__lead">每个任务的当前版排在最前；选一行，在右边看它的检查、来源和导出件。</p>
+        </div>
         <label className="fnd-library__search">
           <Search size={14} strokeWidth={1.5} aria-hidden />
-          <Input type="search" aria-label="按任务名搜索" placeholder="按任务名搜索" value={query}
-            onChange={(event) => onQuery(event.target.value)} />
+          <Input type="search" aria-label="搜索任务、标题或期间" placeholder="搜索任务、标题或期间" value={filters.query}
+            onChange={(event) => set({ query: event.target.value })} />
         </label>
+      </div>
+      <div className="fnd-library__filters" role="group" aria-label="筛选">
+        <NativeSelect aria-label="期间" value={filters.period} onChange={(event) => set({ period: event.target.value })}>
+          <option value="">全部期间</option>
+          {periods.map((period) => <option key={period} value={period}>{formatPeriod(period)}</option>)}
+        </NativeSelect>
+        <NativeSelect aria-label="类型" value={filters.kind} onChange={(event) => set({ kind: event.target.value as KindFilter })}>
+          {KIND_FILTERS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </NativeSelect>
+        <NativeSelect aria-label="文稿状态" value={filters.status} onChange={(event) => set({ status: event.target.value as StatusFilter })}>
+          {STATUS_FILTERS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </NativeSelect>
+        <NativeSelect aria-label="导出版本" value={filters.mode} onChange={(event) => set({ mode: event.target.value as ModeFilter })}>
+          {MODE_FILTERS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </NativeSelect>
+        {filtered ? <Button type="button" variant="ghost" size="sm" onClick={() => onFilters(NO_FILTERS)}>清除筛选</Button> : null}
       </div>
       {/* Present from the start so a change is announced, not inserted with its words. */}
       <span className="sr-only" role="status">
-        {needle ? shown.length ? `找到 ${shown.length} 个任务` : nothing : ''}
+        {filtered ? shown.length ? `找到 ${shown.length} 个任务` : old.length ? `旧版流程里有 ${old.length} 个相符的版本` : nothing : ''}
       </span>
-      {shown.length === 0 ? (
-        <p className="fnd-muted">{nothing}</p>
-      ) : (
-        <div className="fnd-tablewrap" tabIndex={0} role="region" aria-label="成果库">
-          <table className="fnd-table">
-            <caption className="sr-only">按任务分组的文稿版本与导出件</caption>
-            <thead>
-              <tr>
-                <th scope="col">来源文稿</th>
-                <th scope="col">状态</th>
-                <th scope="col">导出件</th>
-                <th scope="col">最近更新</th>
-              </tr>
-            </thead>
-            {shown.map(({ task, lines }) => (
-              <tbody key={task.id}>
-                <tr>
-                  <th scope="rowgroup" colSpan={4}>
-                    <span>{task.title}</span>
-                    {task.period ? <span className="fnd-muted"> · <span className="fnd-period">{formatPeriod(task.period)}</span></span> : null}
-                  </th>
-                </tr>
-                {lines.map((line) => line.kind === 'revision' ? (
-                  <RevisionRow key={line.key} task={task} line={line} onOpenDraft={onOpenDraft} onOpenExport={onOpenExport} />
-                ) : (
-                  <tr key={line.key} className="fnd-table__open">
-                    <td>
-                      {/*
-                        * The button's name starts with what it shows and carries the
-                        * task, so a screen reader is told which version it is about
-                        * to open rather than hearing "打开" seven times.
-                        */}
-                      <button
-                        type="button"
-                        className="fnd-linkish"
-                        onClick={() => onOpen(task, line.row)}
-                      >
-                        {isWorkbook(line.row) ? (
-                          <FileSpreadsheet size={13} strokeWidth={1.5} aria-hidden />
-                        ) : (
-                          <FileText size={13} strokeWidth={1.5} aria-hidden />
-                        )}
-                        {`${isWorkbook(line.row) ? '表格' : KIND_LABEL[line.row.kind]} 第 ${line.row.seq} 版`}
-                        <span className="sr-only">{`（打开 ${task.title} 的${KIND_LABEL[line.row.kind]} 第 ${line.row.seq} 版）`}</span>
-                      </button>
-                      <span className="fnd-muted"><span aria-hidden> · </span><span>{line.row.cause}</span></span>
-                    </td>
-                    {/* The old flow has no review or publication record; nothing is invented for it. */}
-                    <td>—</td>
-                    <td>—</td>
-                    <td className="fnd-library__when">{when(line.at)}</td>
+      <div className={chosen ? 'fnd-library__layout fnd-library__layout--panel' : 'fnd-library__layout'}>
+        <div className="fnd-stack fnd-library__main">
+          {shown.length === 0 ? (
+            // Only old-flow versions match: they are in their fold below, open so they are not missed.
+            old.length ? null : <p className="fnd-muted">{nothing}</p>
+          ) : (
+            <div className="fnd-tablewrap" tabIndex={0} role="region" aria-label="成果库">
+              <table className="fnd-table fnd-library__table">
+                <caption className="sr-only">按任务分组的成果：文稿版本与导出件、归档图、写回 Excel 和收缴率计算</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">成果</th>
+                    <th scope="col">状态</th>
+                    <th scope="col">导出件</th>
+                    <th scope="col">最近更新</th>
                   </tr>
-                ))}
-              </tbody>
-            ))}
-          </table>
+                </thead>
+                {shown.map(({ task, current, older, loose, others }) => {
+                  const open = expanded.has(task.id) || older.some((line) => line.key === selected);
+                  return (
+                    <tbody key={task.id}>
+                      <tr>
+                        <th scope="rowgroup" colSpan={4}>
+                          <span>{task.title}</span>
+                          {task.period ? <span className="fnd-muted"> · <span className="fnd-period">{formatPeriod(task.period)}</span></span> : null}
+                          {task.lifecycle_status === 'archived' ? <span className="fnd-library__tag">已归档</span> : null}
+                        </th>
+                      </tr>
+                      {current ? row(task, current, false, true) : null}
+                      {loose.map((line) => row(task, line))}
+                      {older.length ? (
+                        <tr className="fnd-library__older">
+                          <td colSpan={4}>
+                            <button type="button" className="fnd-linkish" aria-expanded={open}
+                              onClick={() => setExpanded((held) => {
+                                const next = new Set(held);
+                                if (next.has(task.id)) next.delete(task.id); else next.add(task.id);
+                                return next;
+                              })}>
+                              {open ? '收起更早的版本' : `更早的 ${older.length} 版`}
+                              <span className="sr-only">{`（${task.title}）`}</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ) : null}
+                      {open ? older.map((line) => row(task, line, true)) : null}
+                      {others.map((line) => row(task, line))}
+                    </tbody>
+                  );
+                })}
+              </table>
+            </div>
+          )}
+          {old.length ? (
+            <details className="analysis-details fnd-library__old" open={shown.length === 0 || undefined}>
+              <DisclosureSummary>旧版流程的版本 · {old.length}</DisclosureSummary>
+              <p className="fnd-muted">改版前「出稿」流程留下的结论稿、底稿和表格，只读保存。</p>
+              <div className="fnd-tablewrap" tabIndex={0} role="region" aria-label="旧版流程的版本">
+                <table className="fnd-table">
+                  <thead><tr><th scope="col">任务</th><th scope="col">版本</th><th scope="col">时间</th></tr></thead>
+                  <tbody>
+                    {old.map(({ task, line }) => (
+                      <tr key={line.key} className="fnd-table__open">
+                        <td>{task.title}{task.period ? <span className="fnd-muted"> · <span className="fnd-period">{formatPeriod(task.period)}</span></span> : null}</td>
+                        <td>
+                          {/* The name starts with what it shows and carries the task, so a screen reader hears which version. */}
+                          <button type="button" className="fnd-linkish" onClick={() => onOpen(task, line.row)}>
+                            {isWorkbook(line.row) ? <FileSpreadsheet size={13} strokeWidth={1.5} aria-hidden /> : <FileText size={13} strokeWidth={1.5} aria-hidden />}
+                            {`${isWorkbook(line.row) ? '表格' : KIND_LABEL[line.row.kind]} 第 ${line.row.seq} 版`}
+                            <span className="sr-only">{`（打开 ${task.title} 的${KIND_LABEL[line.row.kind]} 第 ${line.row.seq} 版）`}</span>
+                          </button>
+                          <span className="fnd-muted"><span aria-hidden> · </span><span>{line.row.cause}</span></span>
+                        </td>
+                        <td className="fnd-library__when">{when(line.at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          ) : null}
         </div>
-      )}
+        {chosen ? <LibraryPanel key={selected} selection={chosen} actions={actions} onClose={() => onSelect(null)} /> : null}
+      </div>
     </div>
   );
 }
 
 /**
- * One 文稿 revision: its source draft, its state once, and its exports as chips by version kind. Every
- * button's name starts with what it shows; the task, the revision and the file's own time follow for a
- * screen reader only.
+ * One line of the library. Its name is a button that opens the side panel; a 文稿 revision also keeps its
+ * exports as chips by version kind, each opening the file. Every button's name starts with what it shows;
+ * the task and the time follow for a screen reader only.
  */
-function RevisionRow({ task, line, onOpenDraft, onOpenExport }: {
+function LibraryRow({ task, line, nested, current, selected, onSelect, onOpenExport }: {
   task: TaskRow;
-  line: RevisionLine;
-  onOpenDraft?(task: TaskRow, draft: AnalysisDraftRow): void;
+  line: Line;
+  nested: boolean;
+  current: boolean;
+  selected: boolean;
+  onSelect(): void;
   onOpenExport?(task: TaskRow, exported: AnalysisExportRow): void;
 }) {
-  const { draft } = line;
-  const name = `${line.title} · 修订 ${line.revision}`;
+  if (line.kind === 'old') return null;
+  const [icon, name, state] = line.kind === 'revision'
+    ? [<FilePen size={13} strokeWidth={1.5} aria-hidden />, `${line.title} · 修订 ${line.revision}`, draftStateText(line.state)]
+    : line.kind === 'chart'
+      ? [<BarChart3 size={13} strokeWidth={1.5} aria-hidden />, `归档图 · ${line.chart.label || '未命名'}`, '已归档']
+      : line.kind === 'workbook'
+        ? [<FileSpreadsheet size={13} strokeWidth={1.5} aria-hidden />, `写回 Excel · ${line.output.dataset}`, `写入 ${line.output.applied} 格`]
+        : [<Percent size={13} strokeWidth={1.5} aria-hidden />, `收缴率计算 · 截至 ${line.run.as_of}`, CALIBER_SHORT[line.run.caliber.status]];
+  return (
+    <tr className={nested ? 'fnd-library__row fnd-library__row--older' : 'fnd-library__row'} data-selected={selected || undefined}>
+      <td>
+        <button type="button" className="fnd-linkish" aria-pressed={selected} onClick={onSelect}>
+          {icon}
+          {name}
+          <span className="sr-only">{`（${task.title}，${when(line.at)}，查看详情）`}</span>
+        </button>
+        {current ? <span className="fnd-library__current">当前版</span> : null}
+      </td>
+      <td className="fnd-library__state">{state}</td>
+      <td>{line.kind === 'revision' ? <ExportChips task={task} line={line} onOpenExport={onOpenExport} /> : '—'}</td>
+      <td className="fnd-library__when">{when(line.at)}</td>
+    </tr>
+  );
+}
+
+function ExportChips({ task, line, onOpenExport }: {
+  task: TaskRow;
+  line: RevisionLine;
+  onOpenExport?(task: TaskRow, exported: AnalysisExportRow): void;
+}) {
   const marker = line.exports.find((row) => row.review_marker)?.review_marker ?? '';
   const byMode = MODE_ORDER
     .map((mode) => ({
@@ -422,63 +623,44 @@ function RevisionRow({ task, line, onOpenDraft, onOpenExport }: {
         .sort((a, b) => FORMAT_ORDER.indexOf(a.format) - FORMAT_ORDER.indexOf(b.format)),
     }))
     .filter(({ files }) => files.length);
+  if (!byMode.length) return <>—</>;
   return (
-    <tr>
-      <td>
-        {draft ? (
-          <button
-            type="button"
-            className="fnd-linkish"
-            onClick={() => onOpenDraft?.(task, draft)}
-            disabled={!onOpenDraft}
-          >
-            <FilePen size={13} strokeWidth={1.5} aria-hidden />
-            {name}
-            <span className="sr-only">{`（${task.title} 的文稿 修订 ${line.revision}，${when(draft.created_at)}）`}</span>
-          </button>
-        ) : name}
-      </td>
-      <td className="fnd-library__state">{draftStateText(line.state)}</td>
-      <td>
-        {byMode.length ? (
-          <div className="fnd-library__exports">
-            {byMode.map(({ mode, files }) => {
-              const stamps = exportStamps(files);
-              return (
-                <Fragment key={mode}>
-                  <span className="fnd-library__mode">{ROW_LABEL[mode]}</span>
-                  <div className="fnd-library__chips">
-                    {files.map((exported) => {
-                      const label = FORMAT_LABEL[exported.format];
-                      const stamp = stamps.get(exported.export_id);
-                      const kind = exported.content_mode ? MODE_LABEL[exported.content_mode] ?? exported.content_mode : '';
-                      const detail = [`修订 ${exported.revision}`, kind, when(exported.created_at)].filter(Boolean).join(' · ');
-                      const flagged = exported.review_marker ? `，文件带「${exported.review_marker}」标记` : '';
-                      return (
-                        <Button
-                          key={exported.export_id}
-                          variant="outline"
-                          size="chip"
-                          type="button"
-                          onClick={() => onOpenExport?.(task, exported)}
-                          disabled={!onOpenExport}
-                        >
-                          {stamp ? `${label} · ${stamp}` : label}
-                          {/* The space is its own text node: a name trims the edges of each element's text. */}
-                          {' '}
-                          <span className="sr-only">{`导出件（${detail}），${task.title}，用默认程序打开${flagged}`}</span>
-                        </Button>
-                      );
-                    })}
-                  </div>
-                </Fragment>
-              );
-            })}
-          </div>
-        ) : '—'}
-        {marker ? <p className="fnd-library__marker">导出件带「{marker}」标记</p> : null}
-      </td>
-      <td className="fnd-library__when">{when(line.at)}</td>
-    </tr>
+    <>
+      <div className="fnd-library__exports">
+        {byMode.map(({ mode, files }) => {
+          const stamps = exportStamps(files);
+          return (
+            <Fragment key={mode}>
+              <span className="fnd-library__mode">{ROW_LABEL[mode]}</span>
+              <div className="fnd-library__chips">
+                {files.map((exported) => {
+                  const label = FORMAT_LABEL[exported.format];
+                  const stamp = stamps.get(exported.export_id);
+                  const kind = exported.content_mode ? MODE_LABEL[exported.content_mode] ?? exported.content_mode : '';
+                  const detail = [`修订 ${exported.revision}`, kind, when(exported.created_at)].filter(Boolean).join(' · ');
+                  const flagged = exported.review_marker ? `，文件带「${exported.review_marker}」标记` : '';
+                  return (
+                    <Button
+                      key={exported.export_id}
+                      variant="outline"
+                      size="chip"
+                      type="button"
+                      onClick={() => onOpenExport?.(task, exported)}
+                      disabled={!onOpenExport}
+                    >
+                      {stamp ? `${label} · ${stamp}` : label}
+                      {/* The space is its own text node: a name trims the edges of each element's text. */}
+                      {' '}
+                      <span className="sr-only">{`导出件（${detail}），${task.title}，用默认程序打开${flagged}`}</span>
+                    </Button>
+                  );
+                })}
+              </div>
+            </Fragment>
+          );
+        })}
+      </div>
+      {marker ? <p className="fnd-library__marker">导出件带「{marker}」标记</p> : null}
+    </>
   );
 }

@@ -122,10 +122,9 @@ describe('the deliverable gallery', () => {
     expect(screen.getByText('query-locked:followup-1')).toBeTruthy();
     // The kind is visible text, not only part of a button's name.
     expect(screen.getByText('底稿 第 3 版')).toBeTruthy();
-    // The period heads the task's group once, in words, rather than repeating in a column.
-    expect(screen.queryByRole('columnheader', { name: '期间' })).toBeNull();
-    const group = document.querySelector("th[scope='rowgroup']")!;
-    expect(group.querySelector('.fnd-muted')!.textContent).toBe(' · 2026 年 8 月');
+    // The old flow keeps its own fold, with the task and its period in words on each row.
+    expect(screen.getByText(/旧版流程的版本 · 1/)).toBeTruthy();
+    expect(screen.getByText('底稿 第 3 版').closest('tr')!.textContent).toContain('2026 年 8 月');
     // Size, digest and session place a version for an audit, not for choosing one.
     expect(screen.queryByText('8.2 KB')).toBeNull();
     expect(screen.queryByText('cccccccccccc')).toBeNull();

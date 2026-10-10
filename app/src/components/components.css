@@ -1354,6 +1354,69 @@ details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary)::d
 .fnd-library__chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .fnd-library__marker { margin: 6px 0 0; color: var(--fnd-muted); font-size: var(--fnd-size-label); }
 .fnd-library__state, .fnd-library__when { white-space: nowrap; }
+.fnd-library__lead { margin: 4px 0 0; }
+.fnd-library__filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.fnd-library__filters .fnd-native-select { width: auto; flex: 0 0 auto; }
+.fnd-library__filters select { width: auto; min-width: 128px; }
+/* With the side panel open the exports are listed there, so the list gives their column back to the names. */
+.fnd-library__layout--panel .fnd-library__table :is(th, td):nth-child(3) { display: none; }
+.fnd-library__table td:first-child { min-width: 220px; }
+.fnd-library__tag, .fnd-library__current {
+  margin-left: 8px; padding: 0 6px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-chip);
+  font-size: var(--fnd-size-label); font-weight: 400; color: var(--fnd-muted); white-space: nowrap;
+}
+.fnd-library__current { border-color: var(--fnd-selected); color: var(--fnd-ink); }
+.fnd-library__row[data-selected] > td { background: var(--fnd-surface-strong); }
+.fnd-library__row[data-selected] > td:first-child { box-shadow: inset 2px 0 0 var(--fnd-selected); }
+/* Earlier revisions sit under the current one, indented like the second level of a fold. */
+.fnd-library__row--older > td:first-child { padding-left: 24px; }
+.fnd-library__older > td { padding-top: 2px; padding-bottom: 6px; font-size: var(--fnd-size-small); }
+.fnd-library__old { margin-top: 8px; }
+.fnd-library__empty { align-items: flex-start; text-align: left; }
+
+/* The list and its side panel. The panel stays in view while the list scrolls; under 1100px it drops below. */
+.fnd-library__layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; }
+.fnd-library__layout--panel { grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); }
+.fnd-library__main { min-width: 0; }
+.fnd-library__panel {
+  position: sticky; top: 0; display: flex; flex-direction: column; gap: 16px; max-height: calc(100vh - 120px); overflow: auto;
+  padding: 16px 20px 20px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-surface);
+}
+@media (max-width: 1100px) {
+  .fnd-library__layout--panel { grid-template-columns: minmax(0, 1fr); }
+  .fnd-library__panel { position: static; max-height: none; }
+}
+.fnd-library__panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.fnd-library__panel-head p { margin: 4px 0 0; font-size: var(--fnd-size-small); }
+.fnd-library__panel-title { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; overflow-wrap: anywhere; }
+.fnd-library__panel-body { display: flex; flex-direction: column; gap: 16px; }
+.fnd-library__panel-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.fnd-library__panel-actions:empty { display: none; }
+.fnd-library__panel-section { display: flex; flex-direction: column; gap: 8px; }
+.fnd-library__panel-section h3 { margin: 0; font-size: var(--fnd-size-body); font-weight: 600; }
+.fnd-library__panel-section > p { margin: 0; font-size: var(--fnd-size-small); }
+.fnd-library__pairs { display: grid; gap: 6px; margin: 0; }
+.fnd-library__pairs > div { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 12px; }
+.fnd-library__pairs dt { color: var(--fnd-muted); }
+.fnd-library__pairs dd { margin: 0; overflow-wrap: anywhere; }
+.fnd-library__files, .fnd-library__checks, .fnd-library__sources { margin: 0; padding: 0; list-style: none; display: grid; }
+.fnd-library__files li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; padding: 4px 0; border-top: 1px solid var(--fnd-line); }
+.fnd-library__files li:first-child { border-top: 0; }
+.fnd-library__file-actions { display: inline-flex; gap: 2px; }
+.fnd-library__checks li { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; }
+.fnd-library__checks li[data-status='pass'] > span:last-child { color: var(--fnd-level-ok); }
+.fnd-library__checks li[data-status='open'] > span:last-child { color: var(--fnd-level-watch); }
+.fnd-library__sources { gap: 8px; }
+.fnd-library__sources > li { padding-left: 12px; border-left: 1px solid var(--fnd-line); }
+.fnd-library__sources ul { margin: 4px 0 0; padding: 0 0 0 12px; list-style: none; font-size: var(--fnd-size-small); overflow-wrap: anywhere; }
+.fnd-library__source-run { overflow-wrap: anywhere; }
+.fnd-library__diff ol { margin: 8px 0 0; padding: 8px 0; list-style: none; max-height: 360px; overflow: auto; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); font-size: var(--fnd-size-small); }
+.fnd-library__diff li { padding: 1px 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fnd-library__diff ins, .fnd-library__diff del { text-decoration: none; }
+.fnd-library__diff li[data-kind='added'] { background: color-mix(in srgb, var(--fnd-level-ok) 12%, transparent); box-shadow: inset 2px 0 0 var(--fnd-level-ok); }
+.fnd-library__diff li[data-kind='removed'] { background: color-mix(in srgb, var(--fnd-warning) 10%, transparent); box-shadow: inset 2px 0 0 var(--fnd-warning); }
+.fnd-library__diff li[data-kind='removed'] del { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--fnd-warning) 60%, transparent); }
+.fnd-library__diff li[data-kind='same'], .fnd-library__diff li[data-kind='gap'] { color: var(--fnd-muted); }
 
 /* Workspace has its own independently scrolling panes. clip, not hidden: a hidden box can still be scrolled, and a
    scrollIntoView deep in the results pane (a jump to a file row, the settings panel) slid the whole column 32px up

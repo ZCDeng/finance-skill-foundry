@@ -12,9 +12,13 @@ import type {
   AnalysisState,
   Answer,
   Bridge,
+  ChartRow,
+  CollectionRunRow,
   DeliverableRow,
   GalleryRow,
+  LibraryDetail,
   TaskRow,
+  WorkbookOutputRow,
 } from '../src/bridge.js';
 import { Deliverables } from '../src/views/Deliverables.js';
 import { EXPORT_MENU_FORMATS } from '../src/views/analysis/ReportEditor.js';
@@ -56,6 +60,15 @@ const ROWS: GalleryRow[] = [
   { type: 'draft', key: `draft:${v2.draft_id}`, at: SECOND, task: A, draft: v2 },
   { type: 'deliverable', key: `deliverable:${A.id}:2`, at: SECOND, task: A, row: brief },
 ];
+const CHART: ChartRow = { id: 'c'.repeat(32), label: '收缴率趋势', run_id: null, created_at: SECOND, datasets: ['收费明细'] };
+const WORKBOOK: WorkbookOutputRow = {
+  id: 'b'.repeat(32), filename: '8月套表-写回.xlsx', sha256: '9'.repeat(64), created_at: SECOND, dataset: '8 月套表', applied: 12, kept: 3,
+};
+const COLLECTION: CollectionRunRow = {
+  id: 'r'.repeat(32), created_at: SECOND, run_by: 'manager', as_of: '2026-08-31', group_by: [],
+  caliber: { version: null, status: 'trial', differs: [] }, inputs: { receivable: '应收明细' },
+  figures: { collection_rate_current: '0.8212', arrears_recovery_rate: '0.3656', collection_rate_total: '0.7316' },
+};
 const LIST = { open: null, onOpenWorkbook: () => {}, busy: null, onBack: () => {} };
 
 afterEach(() => {
@@ -65,43 +78,48 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** The 状态 cell of the row whose open button carries `label`. */
+/** The 状态 cell of the row whose button carries `label`. */
 function statusOf(label: RegExp): HTMLElement {
   const header = screen.getAllByRole('columnheader').map((cell) => cell.textContent);
   const row = screen.getByRole('button', { name: label }).closest('tr')!;
   return within(row).getAllByRole('cell')[header.indexOf('状态')];
 }
+const V2 = /^八月利润说明 · 修订 2/;
+const V1 = /^八月利润说明 · 修订 1/;
+const groupNames = () => [...document.querySelectorAll("th[scope='rowgroup']")].map((cell) => cell.firstElementChild!.textContent);
 
 describe('the 成果库 list', () => {
-  it('writes each revision\'s state once, and only a dash for the old flow', () => {
+  it('puts a task\'s newest revision first as 当前版 and folds the earlier ones', () => {
     render(<Deliverables rows={ROWS} {...LIST} onOpen={() => {}} onExport={() => {}} />);
-    expect(statusOf(/结论稿/).textContent).toBe('—');
-    // v2's draft and its HTML export are one row, so they share one 状态 cell.
-    expect(statusOf(/文稿 修订 2/)).toBe(statusOf(/HTML 导出件/));
-    expect(statusOf(/文稿 修订 2/).textContent).toBe('已归档 · 经理认可');
-    // v1 only has an export; its state is v1's own, written once.
-    expect(statusOf(/PDF 导出件/).textContent).toBe('草稿 · 未阅');
-    // The review stamp the file carries stays visible in the row and in the button's name.
+    const current = screen.getByRole('button', { name: V2 }).closest('tr')!;
+    expect(current.textContent).toContain('当前版');
+    expect(statusOf(V2).textContent).toBe('已归档 · 经理认可');
+    // v2's draft and its HTML export are one row.
+    expect(within(current).getByRole('button', { name: /^HTML 导出件/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: V1 })).toBeNull();
+    const more = screen.getByRole('button', { name: /更早的 1 版/ });
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(more);
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+    // v1 only has an export; its state is v1's own.
+    expect(statusOf(V1).textContent).toBe('草稿 · 未阅');
+    expect(screen.getByRole('button', { name: V1 }).closest('tr')!.textContent).not.toContain('当前版');
     const pdf = screen.getByRole('button', { name: /PDF 导出件/ });
     expect(pdf.closest('tr')!.textContent).toContain('导出件带「分析草稿·待复核」标记');
     expect(pdf.textContent).toContain('分析草稿·待复核');
   });
 
-  it('gives every row its own key even when a draft and an old version share a seq', () => {
+  it('keeps the old flow\'s versions in a fold of their own at the bottom', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     render(<Deliverables rows={ROWS} {...LIST} onOpen={() => {}} onExport={() => {}} />);
     expect(error.mock.calls.flat().join(' ')).not.toMatch(/same key/);
-    const bodies = document.querySelectorAll('tbody');
-    expect(bodies).toHaveLength(1);
-    const [head, ...lines] = within(bodies[0] as HTMLElement).getAllByRole('row');
-    expect(head.textContent).toContain('八月经营分析');
-    // In the order the rows first appear: revision 1 that only has an export, revision 2 with its HTML,
-    // and the old-flow brief.
-    expect(lines).toHaveLength(3);
-    expect(within(lines[0]).getByRole('button', { name: /PDF 导出件/ })).toBeTruthy();
-    expect(within(lines[1]).getByRole('button', { name: /文稿 修订 2/ })).toBeTruthy();
-    expect(within(lines[1]).getByRole('button', { name: /HTML 导出件/ })).toBeTruthy();
-    expect(within(lines[2]).getByRole('button', { name: /结论稿/ })).toBeTruthy();
+    const library = screen.getByRole('region', { name: '成果库' });
+    expect(within(library).queryByRole('button', { name: /结论稿/ })).toBeNull();
+    const fold = screen.getByText(/旧版流程的版本 · 1/).closest('details')!;
+    expect(fold.open).toBe(false);
+    const old = within(fold).getByRole('button', { name: /结论稿/ });
+    expect(old.textContent!.startsWith('结论稿 第 2 版')).toBe(true);
+    expect(old.textContent).toContain(`打开 ${A.title} 的结论稿 第 2 版`);
   });
 
   it('names each task once, in its group heading, and orders groups by their newest row', () => {
@@ -111,15 +129,29 @@ describe('the 成果库 list', () => {
       { type: 'draft', key: `draft:${ofB.draft_id}`, at: LATER, task: B, draft: ofB },
       { type: 'draft', key: `draft:${v2.draft_id}`, at: SECOND, task: A, draft: v2 },
       { type: 'export', key: `export:${pdfOfV1.export_id}`, at: SECOND, task: A, exported: pdfOfV1 },
-      { type: 'deliverable', key: `deliverable:${B.id}:2`, at: SECOND, task: B, row: brief },
-      { type: 'deliverable', key: `deliverable:${A.id}:2`, at: SECOND, task: A, row: brief },
     ];
     render(<Deliverables rows={rows} {...LIST} onOpen={() => {}} onExport={() => {}} />);
     const named = screen.getAllByText(A.title);
     expect(named).toHaveLength(1);
     expect(named[0].closest("th[scope='rowgroup']")).toBeTruthy();
-    const groups = [...document.querySelectorAll("th[scope='rowgroup']")].map((cell) => cell.firstElementChild!.textContent);
-    expect(groups).toEqual([B.title, A.title]);
+    expect(groupNames()).toEqual([B.title, A.title]);
+  });
+
+  it('lists 归档图, 写回 Excel and 收缴率 runs beside the 文稿', () => {
+    const rows: GalleryRow[] = [
+      { type: 'collection', key: 'collection:r', at: SECOND, task: A, run: COLLECTION },
+      { type: 'workbook', key: 'workbook:w', at: SECOND, task: A, output: WORKBOOK },
+      { type: 'chart', key: 'chart:c', at: SECOND, task: A, chart: CHART },
+      { type: 'draft', key: `draft:${v2.draft_id}`, at: SECOND, task: A, draft: v2 },
+    ];
+    render(<Deliverables rows={rows} {...LIST} onOpen={() => {}} onExport={() => {}} />);
+    expect(statusOf(/^收缴率计算 · 截至 2026-08-31/).textContent).toBe('试算');
+    expect(statusOf(/^写回 Excel · 8 月套表/).textContent).toBe('写入 12 格');
+    expect(statusOf(/^归档图 · 收缴率趋势/).textContent).toBe('已归档');
+    fireEvent.change(screen.getByRole('combobox', { name: '类型' }), { target: { value: 'collection' } });
+    expect(screen.queryByRole('button', { name: V2 })).toBeNull();
+    expect(screen.getByRole('button', { name: /^收缴率计算/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^归档图/ })).toBeNull();
   });
 
   it('lays a revision\'s exports out as chips, 管理版 and 审计版 apart', () => {
@@ -134,7 +166,7 @@ describe('the 成果库 list', () => {
       { type: 'draft', key: `draft:${v2.draft_id}`, at: SECOND, task: A, draft: v2 },
     ];
     render(<Deliverables rows={rows} {...LIST} onOpen={() => {}} onExport={() => {}} onOpenExport={onOpenExport} />);
-    const row = screen.getByRole('button', { name: /文稿 修订 2/ }).closest('tr')!;
+    const row = screen.getByRole('button', { name: V2 }).closest('tr')!;
     expect(within(row).getByText('管理版')).toBeTruthy();
     expect(within(row).getByText('审计版')).toBeTruthy();
     const audit = within(row).getByRole('button', { name: /^PDF 导出件（修订 2 · 审计版 · / });
@@ -142,13 +174,17 @@ describe('the 成果库 list', () => {
     expect(audit.hasAttribute('aria-pressed')).toBe(false);
     fireEvent.click(audit);
     expect(onOpenExport).toHaveBeenCalledWith(A, auditPdf);
+    // The version filter keeps revisions that have an export of that kind.
+    fireEvent.change(screen.getByRole('combobox', { name: '导出版本' }), { target: { value: 'audit' } });
+    expect(screen.getByRole('button', { name: V2 })).toBeTruthy();
   });
 
   it('writes the period once, in words, in the group heading', () => {
     const undated = { ...B, period: null };
+    const ofB: AnalysisDraftRow = { ...v2, draft_id: '9'.repeat(32), revision: 1, title: '西南回款说明' };
     const rows: GalleryRow[] = [
       { type: 'draft', key: `draft:${v2.draft_id}`, at: SECOND, task: A, draft: v2 },
-      { type: 'deliverable', key: `deliverable:${B.id}:2`, at: SECOND, task: undated, row: brief },
+      { type: 'draft', key: `draft:${ofB.draft_id}`, at: SECOND, task: undated, draft: ofB },
     ];
     render(<Deliverables rows={rows} {...LIST} onOpen={() => {}} onExport={() => {}} />);
     expect(screen.queryByRole('columnheader', { name: '期间' })).toBeNull();
@@ -158,50 +194,86 @@ describe('the 成果库 list', () => {
     expect(plain.textContent).toBe(B.title);
   });
 
-  it('searches by task name and says what it found', () => {
-    const rows: GalleryRow[] = [
-      ...ROWS,
-      { type: 'deliverable', key: `deliverable:${B.id}:2`, at: SECOND, task: B, row: brief },
-    ];
+  it('searches task names, titles and periods, filters by period and status, and says what it found', () => {
+    const ofB: AnalysisDraftRow = { ...v2, draft_id: '9'.repeat(32), revision: 1, title: '西南回款说明', review_status: 'unreviewed' };
+    const july = { ...B, period: '2026-07' };
+    const rows: GalleryRow[] = [...ROWS, { type: 'draft', key: `draft:${ofB.draft_id}`, at: SECOND, task: july, draft: ofB }];
     render(<Deliverables rows={rows} {...LIST} onOpen={() => {}} onExport={() => {}} />);
     const status = screen.getByRole('status');
     expect(status.textContent).toBe('');
-    const search = screen.getByRole('searchbox', { name: '按任务名搜索' });
+    const search = screen.getByRole('searchbox', { name: '搜索任务、标题或期间' });
     fireEvent.change(search, { target: { value: '西南' } });
-    const groups = [...document.querySelectorAll("th[scope='rowgroup']")].map((cell) => cell.firstElementChild!.textContent);
-    expect(groups).toEqual([B.title]);
+    expect(groupNames()).toEqual([B.title]);
     expect(status.textContent).toBe('找到 1 个任务');
+    fireEvent.change(search, { target: { value: '利润说明' } });
+    expect(groupNames()).toEqual([A.title]);
+    fireEvent.change(search, { target: { value: '2026 年 7 月' } });
+    expect(groupNames()).toEqual([B.title]);
     fireEvent.change(search, { target: { value: '不存在' } });
-    expect(screen.queryByRole('table')).toBeNull();
-    expect(status.textContent).toBe('没有名称包含「不存在」的任务');
-    expect(screen.getByText('没有名称包含「不存在」的任务', { selector: 'p' })).toBeTruthy();
+    expect(screen.queryByRole('table', { name: /按任务分组/ })).toBeNull();
+    expect(status.textContent).toBe('没有和「不存在」相符的成果');
+    expect(screen.getByText('没有和「不存在」相符的成果', { selector: 'p' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '清除筛选' }));
+    expect(groupNames()).toEqual([A.title, B.title]);
+    fireEvent.change(screen.getByRole('combobox', { name: '期间' }), { target: { value: '2026-08' } });
+    expect(groupNames()).toEqual([A.title]);
+    fireEvent.change(screen.getByRole('combobox', { name: '期间' }), { target: { value: '' } });
+    fireEvent.change(screen.getByRole('combobox', { name: '文稿状态' }), { target: { value: 'unreviewed' } });
+    // A's 当前版 is accepted, so only its earlier revision stays, listed as it is and not called 当前版.
+    expect(groupNames()).toEqual([A.title, B.title]);
+    expect(screen.queryByRole('button', { name: V2 })).toBeNull();
+    expect(screen.getByRole('button', { name: V1 }).closest('tr')!.textContent).not.toContain('当前版');
+    // Under a status filter the old flow, which has none, is left out.
+    expect(screen.queryByText(/旧版流程的版本/)).toBeNull();
   });
 
-  it('titles the screen 成果库 whether or not there is anything in it', () => {
+  it('keeps a revision already read (已阅) out of 待复核', () => {
+    const read: AnalysisDraftRow = { ...v2, review_status: 'reviewed' };
+    render(<Deliverables rows={[{ type: 'draft', key: `draft:${read.draft_id}`, at: SECOND, task: A, draft: read }]} {...LIST} onOpen={() => {}} onExport={() => {}} />);
+    fireEvent.change(screen.getByRole('combobox', { name: '文稿状态' }), { target: { value: 'unreviewed' } });
+    expect(screen.queryByRole('button', { name: V2 })).toBeNull();
+    fireEvent.change(screen.getByRole('combobox', { name: '文稿状态' }), { target: { value: 'reviewed' } });
+    expect(screen.getByRole('button', { name: V2 })).toBeTruthy();
+  });
+
+  it('with only old-flow versions matching, opens their fold instead of saying nothing matched', () => {
+    const rows: GalleryRow[] = [{ type: 'deliverable', key: `deliverable:${A.id}:2`, at: SECOND, task: A, row: brief }];
+    render(<Deliverables rows={rows} {...LIST} onOpen={() => {}} onExport={() => {}} />);
+    expect(screen.queryByText(/没有符合筛选条件的成果/)).toBeNull();
+    expect((screen.getByText(/旧版流程的版本 · 1/).closest('details') as HTMLDetailsElement).open).toBe(true);
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索任务、标题或期间' }), { target: { value: 'emit' } });
+    expect(screen.getByRole('status').textContent).toBe('旧版流程里有 1 个相符的版本');
+    expect(screen.queryByText(/没有和「emit」相符的成果/)).toBeNull();
+  });
+
+  it('titles the screen 成果库 whether or not there is anything in it, and says how to get a first result', () => {
     render(<Deliverables rows={ROWS} {...LIST} onOpen={() => {}} onExport={() => {}} />);
     expect(screen.getByRole('heading', { level: 1, name: '成果库' })).toBeTruthy();
     cleanup();
-    render(<Deliverables rows={[]} {...LIST} onOpen={() => {}} onExport={() => {}} />);
+    const onSample = vi.fn();
+    render(<Deliverables rows={[]} {...LIST} onOpen={() => {}} onExport={() => {}} onSample={onSample} />);
     expect(screen.getByRole('heading', { level: 1, name: '成果库' })).toBeTruthy();
-    expect(screen.getByText('还没有产出物。出一次稿就会有第一版。')).toBeTruthy();
+    expect(screen.getByText('还没有成果')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '用示例练习' }));
+    expect(onSample).toHaveBeenCalled();
   });
 
-  it('heads the columns 来源文稿, 状态, 导出件, 最近更新, each scoped to its column', () => {
-    render(<Deliverables rows={ROWS} {...LIST} onOpen={() => {}} onExport={() => {}} />);
+  it('heads the columns 成果, 状态, 导出件, 最近更新, each scoped to its column', () => {
+    render(<Deliverables rows={ROWS.filter((row) => row.type !== 'deliverable')} {...LIST} onOpen={() => {}} onExport={() => {}} />);
     const headers = screen.getAllByRole('columnheader');
-    expect(headers.map((cell) => cell.textContent)).toEqual(['来源文稿', '状态', '导出件', '最近更新']);
+    expect(headers.map((cell) => cell.textContent)).toEqual(['成果', '状态', '导出件', '最近更新']);
     for (const cell of headers) expect(cell.getAttribute('scope')).toBe('col');
   });
 
   it('writes 最近更新 as plain text, and keeps the table a focusable region', () => {
     render(<Deliverables rows={ROWS} {...LIST} onOpen={() => {}} onExport={() => {}} />);
-    const header = screen.getAllByRole('columnheader').map((cell) => cell.textContent);
-    for (const row of [...document.querySelectorAll('tbody tr')].filter((tr) => !tr.querySelector("th[scope='rowgroup']"))) {
+    const region = screen.getByRole('region', { name: '成果库' });
+    const header = within(region).getAllByRole('columnheader').map((cell) => cell.textContent);
+    for (const row of region.querySelectorAll('tr.fnd-library__row')) {
       const cell = within(row as HTMLElement).getAllByRole('cell')[header.indexOf('最近更新')];
       expect(cell.textContent).not.toBe('');
       expect(within(cell).queryByRole('button')).toBeNull();
     }
-    const region = screen.getByRole('region', { name: '成果库' });
     expect(region.getAttribute('tabindex')).toBe('0');
     expect(region.classList.contains('fnd-tablewrap')).toBe(true);
   });
@@ -237,20 +309,17 @@ describe('the 成果库 list', () => {
     expect(counted).toEqual(['HTML', 'HTML · 第 2 份', 'HTML · 第 1 份']);
   });
 
-  it('starts every button\'s name with what it shows and carries the file\'s own time', () => {
+  it('starts every button\'s name with what it shows and carries the task and time', () => {
     render(<Deliverables rows={ROWS} {...LIST} onOpen={() => {}} onExport={() => {}} />);
-    const draft = screen.getByRole('button', { name: /文稿 修订 2/ });
+    const draft = screen.getByRole('button', { name: V2 });
     expect(draft.getAttribute('aria-label')).toBeNull();
-    expect(draft.textContent!.startsWith('八月利润说明 · 修订 2')).toBe(true);
+    expect(draft.textContent).toContain(A.title);
     expect(draft.textContent).toContain(when(v2.created_at));
+    fireEvent.click(screen.getByRole('button', { name: /更早的 1 版/ }));
     const pdf = screen.getByRole('button', { name: /PDF 导出件/ });
     expect(pdf.getAttribute('aria-label')).toBeNull();
     expect(pdf.textContent!.startsWith('PDF')).toBe(true);
     expect(pdf.textContent).toContain(when(pdfOfV1.created_at));
-    const old = screen.getByRole('button', { name: /结论稿/ });
-    expect(old.getAttribute('aria-label')).toBeNull();
-    expect(old.textContent!.startsWith('结论稿 第 2 版')).toBe(true);
-    expect(old.textContent).toContain(`打开 ${A.title} 的结论稿 第 2 版`);
   });
 
   it('puts an export with no named version kind in an 其他 row, and leaves revision rows without a hover fill', () => {
@@ -262,20 +331,22 @@ describe('the 成果库 list', () => {
       { type: 'draft', key: `draft:${v2.draft_id}`, at: SECOND, task: A, draft: v2 },
     ];
     render(<Deliverables rows={rows} {...LIST} onOpen={() => {}} onExport={() => {}} />);
-    const row = screen.getByRole('button', { name: /文稿 修订 2/ }).closest('tr')!;
+    const row = screen.getByRole('button', { name: V2 }).closest('tr')!;
     expect(within(row).getAllByText('其他')).toHaveLength(1);
     expect([...row.querySelectorAll('.fnd-library__chips')].map((chips) => chips.children.length)).toEqual([2]);
     expect(row.classList.contains('fnd-table__open')).toBe(false);
   });
 
-  it('keeps the search when a version is opened and closed again', () => {
+  it('keeps the search and the selection when an old version is opened and closed again', () => {
     const props = { rows: ROWS, ...LIST, onOpen: () => {}, onExport: () => {} };
     const { rerender } = render(<Deliverables {...props} />);
-    fireEvent.change(screen.getByRole('searchbox', { name: '按任务名搜索' }), { target: { value: '八月' } });
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索任务、标题或期间' }), { target: { value: '八月' } });
+    fireEvent.click(screen.getByRole('button', { name: V2 }));
     rerender(<Deliverables {...props} open={{ task: A, row: brief, text: '# 本期结论稿' }} />);
     expect(screen.queryByRole('searchbox')).toBeNull();
     rerender(<Deliverables {...props} />);
-    expect((screen.getByRole('searchbox', { name: '按任务名搜索' }) as HTMLInputElement).value).toBe('八月');
+    expect((screen.getByRole('searchbox', { name: '搜索任务、标题或期间' }) as HTMLInputElement).value).toBe('八月');
+    expect(screen.getByRole('complementary', { name: /八月利润说明 · 修订 2/ })).toBeTruthy();
   });
 
   it('goes back to 成果库 by name and shows the opened version\'s period in words', () => {
@@ -294,19 +365,26 @@ describe('the 成果库 list', () => {
       { type: 'draft', key: `draft:${v2.draft_id}`, at: SECOND, task: A, draft: v2 },
     ];
     render(<Deliverables rows={rows} {...LIST} onOpen={() => {}} onExport={() => {}} />);
-    const row = screen.getByRole('button', { name: /文稿 修订 2/ }).closest('tr')!;
+    const row = screen.getByRole('button', { name: V2 }).closest('tr')!;
     const chips = within(row).getAllByRole('button').filter((button) => button.getAttribute('data-size') === 'chip');
     const label = { docx: 'Word', pdf: 'PDF', html: 'HTML', md: 'Markdown', xlsx: 'Excel' };
     expect(chips.map((chip) => chip.firstChild!.textContent)).toEqual(EXPORT_MENU_FORMATS.map((format) => label[format]));
   });
 
-  it('opens a draft, an export and an old version each its own way', () => {
+  it('opens a revision\'s panel, an export and an old version each its own way', () => {
     const onOpen = vi.fn(), onOpenDraft = vi.fn(), onOpenExport = vi.fn();
     render(<Deliverables rows={ROWS} {...LIST} onOpen={onOpen} onExport={() => {}} onOpenDraft={onOpenDraft} onOpenExport={onOpenExport} />);
-    fireEvent.click(screen.getByRole('button', { name: /文稿 修订 2/ }));
+    const name = screen.getByRole('button', { name: V2 });
+    fireEvent.click(name);
+    expect(name.getAttribute('aria-pressed')).toBe('true');
+    const panel = screen.getByRole('complementary', { name: /八月利润说明 · 修订 2/ });
+    fireEvent.click(within(panel).getByRole('button', { name: /在文稿页打开/ }));
+    expect(onOpenDraft).toHaveBeenCalledWith(A, v2);
+    fireEvent.click(within(panel).getByRole('button', { name: '关闭详情' }));
+    expect(screen.queryByRole('complementary')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /更早的 1 版/ }));
     fireEvent.click(screen.getByRole('button', { name: /PDF 导出件/ }));
     fireEvent.click(screen.getByRole('button', { name: /结论稿/ }));
-    expect(onOpenDraft).toHaveBeenCalledWith(A, v2);
     expect(onOpenExport).toHaveBeenCalledWith(A, pdfOfV1);
     expect(onOpen).toHaveBeenCalledWith(A, brief);
   });
@@ -322,6 +400,75 @@ describe('the 成果库 list', () => {
     expect(within(technical).getByText(brief.sha256)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /导出 Excel/ }));
     expect(onExport).toHaveBeenCalledWith(A, brief.window_id);
+  });
+});
+
+/*
+ * The side panel: what a 文稿 revision rests on, its checks, its exports and a comparison with another
+ * version; for a 写回 Excel copy and a 收缴率 run, what they are and where to open them.
+ */
+describe('the 成果库 side panel', () => {
+  const v1Draft: AnalysisDraftRow = { ...v2, draft_id: '1'.repeat(32), revision: 1, review_status: 'unreviewed', publication_status: 'draft' };
+  const detail = (id: string, body: string): LibraryDetail => ({
+    schema_version: 1, task_id: A.id,
+    draft: { draft_id: id, revision: id === v2.draft_id ? 2 : 1, title: '八月利润说明', created_at: SECOND,
+      review_status: 'accepted', publication_status: 'archived', parent_id: null, body },
+    checks: [
+      { key: 'execution', label: '计算执行', status: 'pass' },
+      { key: 'numeric_citation', label: '数字引用', status: 'fail' },
+    ],
+    rests_on: [{ run_id: 'r'.repeat(32), label: '八月毛利率', created_at: SECOND, datasets: [{ id: 'd1', name: '利润表.xlsx', hash: 'abcdef012345' }] }],
+    requirements: { seq: 1, scope: { period: '2026-08', organization: '华东区' } },
+    versions: [
+      { draft_id: v1Draft.draft_id, revision: 1, title: '八月利润说明', created_at: SECOND },
+      { draft_id: v2.draft_id, revision: 2, title: '八月利润说明', created_at: SECOND },
+    ],
+  });
+  const rows: GalleryRow[] = [
+    { type: 'export', key: `export:${htmlOfV2.export_id}`, at: SECOND, task: A, exported: htmlOfV2 },
+    { type: 'draft', key: `draft:${v2.draft_id}`, at: SECOND, task: A, draft: v2 },
+    { type: 'draft', key: `draft:${v1Draft.draft_id}`, at: SECOND, task: A, draft: v1Draft },
+    { type: 'workbook', key: 'workbook:w', at: SECOND, task: A, output: WORKBOOK },
+    { type: 'collection', key: 'collection:r', at: SECOND, task: A, run: COLLECTION },
+  ];
+
+  it('shows a revision\'s checks, sources and scope, and compares it with another version', async () => {
+    const onDetail = vi.fn(async (_task: TaskRow, id: string) => detail(id, id === v2.draft_id
+      ? '# 八月利润说明\n\n毛利率 32.1%。\n\n费用率下降。' : '# 八月利润说明\n\n毛利率 31.0%。\n\n费用率下降。'));
+    const onFile = vi.fn();
+    render(<Deliverables rows={rows} {...LIST} onOpen={() => {}} onExport={() => {}} onDetail={onDetail} onFile={onFile} />);
+    fireEvent.click(screen.getByRole('button', { name: V2 }));
+    const panel = screen.getByRole('complementary', { name: /修订 2/ });
+    expect(onDetail).toHaveBeenCalledWith(A, v2.draft_id);
+    const sources = await within(panel).findByRole('region', { name: '来源追溯' });
+    expect(sources.textContent).toContain('八月毛利率');
+    expect(sources.textContent).toContain('利润表.xlsx');
+    expect(sources.textContent).toContain('abcdef012345');
+    expect(sources.textContent).toContain('华东区');
+    expect(within(panel).getByRole('region', { name: '检查' }).textContent).toContain('数字引用需要处理');
+    fireEvent.click(within(panel).getByRole('button', { name: /^打开HTML/ }));
+    expect(onFile).toHaveBeenCalledWith(A, { kind: 'export', sha: htmlOfV2.sha256, format: 'html' }, 'open');
+    fireEvent.change(within(panel).getByRole('combobox', { name: '和哪一版比较' }), { target: { value: v1Draft.draft_id } });
+    await waitFor(() => expect(panel.querySelector('ins')).toBeTruthy());
+    expect(panel.querySelector('ins')!.textContent).toContain('毛利率 32.1%。');
+    expect(panel.querySelector('del')!.textContent).toContain('毛利率 31.0%。');
+    expect(within(panel).getByText(/新增 1 行，删除 1 行/).textContent).toContain('从所选那一版到这一版');
+  });
+
+  it('opens a 写回 Excel copy and points a 收缴率 run at its task', () => {
+    const onFile = vi.fn(), onOpenTask = vi.fn();
+    render(<Deliverables rows={rows} {...LIST} onOpen={() => {}} onExport={() => {}} onFile={onFile} onOpenTask={onOpenTask} />);
+    fireEvent.click(screen.getByRole('button', { name: /^写回 Excel/ }));
+    let panel = screen.getByRole('complementary');
+    expect(panel.textContent).toContain('12 个');
+    fireEvent.click(within(panel).getByRole('button', { name: /在访达中显示/ }));
+    expect(onFile).toHaveBeenCalledWith(A, { kind: 'workbook', id: WORKBOOK.id }, 'reveal');
+    fireEvent.click(screen.getByRole('button', { name: /^收缴率计算/ }));
+    panel = screen.getByRole('complementary');
+    expect(panel.textContent).toContain('82.12%');
+    expect(panel.textContent).toContain('口径还没有经理确认');
+    fireEvent.click(within(panel).getByRole('button', { name: '在资料页查看' }));
+    expect(onOpenTask).toHaveBeenCalledWith(A, 'billing');
   });
 });
 
@@ -380,7 +527,13 @@ describe('opening 成果库 rows in the app', () => {
   }
   async function openLibrary() {
     fireEvent.click(await screen.findByRole('button', { name: '成果库' }));
-    return screen.findByRole('button', { name: new RegExp(`${B.title} 的文稿 修订 2`) });
+    return screen.findByRole('button', { name: new RegExp(`^${B.title}修订稿 · 修订 2`) });
+  }
+  /** Choose a revision's row, then 在文稿页打开 in its side panel. */
+  function openFromPanel(owner: TaskRow) {
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${owner.title}修订稿 · 修订 2`) }));
+    const panel = screen.getByRole('complementary', { name: /修订 2/ });
+    fireEvent.click(within(panel).getByRole('button', { name: /在文稿页打开/ }));
   }
   async function selectedVersion() {
     const picker = await screen.findByRole('button', { name: '文稿版本' });
@@ -392,7 +545,8 @@ describe('opening 成果库 rows in the app', () => {
   it('opens a draft of another task on its 文稿 tab with that version selected', async () => {
     mount();
     await screen.findByRole('heading', { name: A.title });
-    fireEvent.click(await openLibrary());
+    await openLibrary();
+    openFromPanel(B);
     await screen.findByRole('heading', { name: B.title });
     expect(screen.getByRole('tab', { name: /文稿/ }).getAttribute('aria-selected')).toBe('true');
     const picker = await selectedVersion();
@@ -416,7 +570,8 @@ describe('opening 成果库 rows in the app', () => {
     render(<App />);
     await screen.findByRole('heading', { name: A.title });
     fireEvent.click(await screen.findByRole('button', { name: '成果库' }));
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(`${B.title} 的文稿 修订 2`) }));
+    await screen.findByRole('button', { name: new RegExp(`^${B.title}修订稿 · 修订 2`) });
+    openFromPanel(archivedB);
     await screen.findByRole('heading', { name: B.title });
     fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
     expect(screen.getByRole('button', { name: '已归档' }).getAttribute('aria-pressed')).toBe('true');
@@ -431,7 +586,7 @@ describe('opening 成果库 rows in the app', () => {
     await screen.findByRole('heading', { name: A.title });
     await waitFor(() => expect(api.harnessOpen).toHaveBeenCalledTimes(1));
     await openLibrary();
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(`${A.title} 的文稿 修订 2`) }));
+    openFromPanel(A);
     expect(screen.getByRole('tab', { name: /文稿/ }).getAttribute('aria-selected')).toBe('true');
     const picker = await selectedVersion();
     await waitFor(() => expect(picker.textContent).toMatch(/修订 2$/));
@@ -445,6 +600,8 @@ describe('opening 成果库 rows in the app', () => {
     const api = mount();
     await screen.findByRole('heading', { name: A.title });
     await openLibrary();
+    // A's PDF is of revision 1, folded under its 当前版.
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(`更早的 1 版（${A.title}）`) }));
     fireEvent.click(screen.getByRole('button', { name: /PDF 导出件/ }));
     await waitFor(() => expect(api.analysisExportOpen).toHaveBeenCalledWith(A.id, pdfOfV1.sha256, 'pdf'));
   });
