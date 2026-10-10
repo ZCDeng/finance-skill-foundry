@@ -103,7 +103,19 @@ const assert = require('node:assert/strict');
           const node = document.querySelector(selector), rect = node?.getBoundingClientRect();
           return [selector, rect && node.checkVisibility() ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null];
         })) }));
+      // A fold's chevron hangs 24px to the left of its words; inside a bordered card or a table cell it must stay
+      // inside (.fnd-fold-inset). Each visible chevron is held to the first framed box around its fold.
+      measurement.foldsAcrossEdge = await page.evaluate(() => [...document.querySelectorAll('.fnd-disclosure-summary__icon')].filter(icon => icon.checkVisibility()).flatMap(icon => {
+        const summary = icon.closest('summary'), mark = icon.getBoundingClientRect();
+        for (let node = summary.parentElement; node && node !== document.body; node = node.parentElement) {
+          const style = getComputedStyle(node), edge = parseFloat(style.borderLeftWidth) || 0;
+          if (!node.matches('td, th') && !(edge > 0 && style.borderLeftStyle !== 'none')) continue;
+          return mark.left < node.getBoundingClientRect().left + edge ? [summary.textContent.trim().slice(0, 40)] : [];
+        }
+        return [];
+      }));
       measures.push({ name, nativeBounds: native?.bounds, ...measurement }); assert.equal(measurement.horizontalOverflow, false, name + ' horizontal overflow');
+      assert.deepEqual(measurement.foldsAcrossEdge, [], name + ' fold chevrons stay inside their card or cell');
     };
     await page.waitForFunction(async () => { const result = await window.foundry.harnessStatus(); return result.ok && result.value.wiring.state === 'ready'; }, undefined, { timeout: 45000 });
     await page.waitForFunction(() => !document.querySelector('.workspace-connection'));

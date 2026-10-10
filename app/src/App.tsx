@@ -1071,7 +1071,6 @@ export function App() {
         setScreen(next);
       }}
       onGuide={inWorkspace || screen === 'overview' ? () => { const from = screen; firstRunShown.current = true; setScreen('analysis'); openGuideAt(from === 'overview' ? 'overview' : ''); } : undefined}
-      todoCount={overview?.todo_count ?? 0}
       overview={Boolean(api?.overview)}
       covered={preview !== null && (screen === 'deliverables' || screen === 'tasks' || locatorPreview)}
       strip={

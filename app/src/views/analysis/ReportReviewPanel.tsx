@@ -176,7 +176,7 @@ export function ReportReviewPanel({ taskId, review, pdf }: { taskId: string; rev
             return <li key={item.id} className={`analysis-report-review-item analysis-report-review-item--${item.status}`}>
               <div className="analysis-report-review-item-head">
                 <strong className="analysis-report-review-number">{item.text}</strong>
-                <span className="analysis-report-review-status">{STATUS_WORDS[String(item.status)] ?? '需人工核对'}</span>
+                <span className="analysis-report-review-status fnd-fold-inset">{STATUS_WORDS[String(item.status)] ?? '需人工核对'}</span>
                 <span className="analysis-note">{reviewPlace(item.location)}</span>
               </div>
               {item.excerpt && <blockquote className="analysis-report-review-excerpt">{item.excerpt}</blockquote>}

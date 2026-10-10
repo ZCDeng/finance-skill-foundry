@@ -152,10 +152,10 @@ describe('总览 in the app', () => {
     return api;
   }
 
-  it('opens on 总览 with the count on its tab, and 去处理 lands on that task', async () => {
+  it('opens on 总览, the count in its heading and not on the tab, and 去处理 lands on that task', async () => {
     mount();
     await screen.findByRole('heading', { name: '等你处理（3）' });
-    expect(screen.getByRole('button', { name: '总览，3 项等你处理' }).getAttribute('aria-current')).toBe('page');
+    expect(screen.getByRole('button', { name: '总览' }).getAttribute('aria-current')).toBe('page');
     fireEvent.click(screen.getByRole('button', { name: /去处理：华东 8 月月结，期间未确认/ }));
     await screen.findByText('本地成果：华东 8 月月结');
     expect(screen.getByRole('button', { name: '工作区' }).getAttribute('aria-current')).toBe('page');
@@ -170,7 +170,7 @@ describe('总览 in the app', () => {
     await waitFor(() => expect(api.overview.mock.calls.length).toBeGreaterThan(before));
   });
 
-  it('reads 总览 again when a task changes in the workspace, so the tab count follows', async () => {
+  it('reads 总览 again when a task changes in the workspace, so its to-dos follow', async () => {
     const api = mount();
     await screen.findByRole('heading', { name: '等你处理（3）' });
     fireEvent.click(screen.getByRole('button', { name: '工作区' }));

@@ -610,10 +610,12 @@ describe('the disclosure summary', () => {
     expect(declarations(COMPONENTS, `${SUMMARY}[data-tone='quiet'] > ${ICON}`).left).toBe('6px');
     // In the taskbar the fold is a control in a row, so it keeps the chevron inside.
     expect(declarations(COMPONENTS, `.fnd-taskbar__technical ${SUMMARY}`)['margin-inline-start']).toBe('0');
-    // In a bordered card with a narrower gutter the chevron stays inside rather than crossing the border.
+    // In a bordered card (.fnd-fold-inset) or a table cell the chevron stays inside rather than crossing the edge,
+    // and what the fold opens starts on the same 24px line as its words.
     const flat = COMPONENTS.replace(/\/\*[\s\S]*?\*\//g, '');
-    const inset = [...flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, selector]) => selector.includes('.analysis-structure-sheet') && selector.trim().endsWith(SUMMARY));
-    expect(inset?.[2]).toMatch(/margin-inline-start:\s*0/);
+    const rule = (test: (selector: string) => boolean) => [...flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([selector]) => test(selector.trim()))?.[2];
+    expect(rule((selector) => selector.startsWith(':is(.fnd-fold-inset, td, th)') && selector.split(',\n')[0].endsWith(SUMMARY))).toMatch(/margin-inline-start:\s*0/);
+    expect(rule((selector) => selector.startsWith(':is(.fnd-fold-inset, td, th) details:has(> .fnd-disclosure-summary)::details-content'))).toMatch(/padding-inline-start:\s*24px/);
   });
 
   it('turns the chevron a quarter when open, on the shared transition', () => {

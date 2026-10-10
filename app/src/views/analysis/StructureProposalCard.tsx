@@ -284,7 +284,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
         <span className="analysis-note">确认表结构后才能计算</span>
       </div>
       {tables.map((sheet) => (
-        <div key={sheet.sheet} className="analysis-structure-sheet">
+        <div key={sheet.sheet} className="analysis-structure-sheet fnd-fold-inset">
           <label className="analysis-structure-sheet-name">
             <Checkbox checked={chosen[sheet.sheet] ?? false} disabled={locked}
               aria-label={`采用 ${sheet.sheet}`}

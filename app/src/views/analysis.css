@@ -533,6 +533,8 @@
 .analysis-billing-drill__source { display: flex; flex-direction: column; gap: 2px; color: var(--fnd-muted); font-size: var(--fnd-size-label); }
 /* 本月三句话 at the top of a task: a line each, its label in a column of its own. */
 .analysis-brief { padding: 12px 16px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-surface); }
+/* Folded, the card is the one summary line, not a box with room for the lines it hides. */
+.analysis-brief:not([open]) { padding-block: 4px; }
 .analysis-brief__lines { display: grid; gap: 8px; margin: 8px 0 0; padding: 0; list-style: none; }
 .analysis-brief__lines > li { display: grid; grid-template-columns: 5em minmax(0, 1fr); gap: 12px; align-items: baseline; }
 .analysis-brief__lines p { margin: 0; font-size: var(--fnd-size-body); line-height: 1.7; overflow-wrap: anywhere; }
