@@ -954,6 +954,12 @@ export function App() {
   const boundLifecycle = bound?.lifecycle_status ?? 'active';
   const boundReadOnly = Boolean(bound && boundLifecycle !== 'active');
   const pickAnalysisTask = (id: string) => {
+    // Picking the task already open keeps its conversation: current would not change, so nothing would reconnect it.
+    if (id && id === currentRef.current) {
+      explicitSelection.current = true;
+      setScreen('analysis');
+      return;
+    }
     selectionRevision.current += 1;
     explicitSelection.current = true; currentRef.current = id || null;
     setCurrent(id || null); setDetail(null); setSession(null); setConversationProblem(null); setScreen('analysis');
