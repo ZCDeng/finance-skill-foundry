@@ -218,6 +218,18 @@ def test_the_billing_figures_the_guide_quotes_are_the_ones_the_reference_compute
     assert abs(labelled / Decimal(figures["receivable"]) - Decimal(billing_sample.REPORTED_CURRENT)) < Decimal("0.001")
     assert pct(billing_sample.REPORTED_CURRENT) == expected["reported_current"]
 
+    # 往下拆 the reference run: the project owing most under the city, and the bills the property master does not place.
+    from foundry.billing_drill import Drill
+
+    drill = Drill(store, run["id"])
+    cities = drill.level("collection_rate_current")
+    assert cities["run_check"]["ties"] and cities["ties"]
+    assert [row["outstanding"] for row in cities["rows"] if row["value"] is None] == [expected["drill_empty_city_outstanding"]]
+    projects = drill.level("collection_rate_current", [expected["city"]])
+    worst = projects["rows"][0]
+    assert projects["ties"] and (worst["label"], worst["outstanding"], pct(worst["rate"])) == (
+        expected["drill_worst_project"], expected["drill_worst_project_outstanding"], expected["drill_worst_project_current"])
+
     ids = {kind: row["id"] for kind, row in details.items()}
     by_project = store.collection_run({**ids, "as_of": expected["as_of"], "group_by": ["project"]})["result"]["groups"]
     waivers = {group["key"]["project"]: group["figures"]["waiver_rate"] for group in by_project}

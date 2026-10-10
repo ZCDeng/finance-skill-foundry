@@ -616,12 +616,41 @@ describe('analysis IPC task and session binding', () => {
     expect(mocks.run).toHaveBeenLastCalledWith(as, 'collection-caliber-confirm', ['--version', '2'], { timeoutMs: undefined });
     await invoke(CHANNELS.billingCall, task, 'collection-run', { as_of: '2026-08-31' });
     expect(mocks.run).toHaveBeenLastCalledWith(as, 'collection-run', ['--spec', '{"as_of":"2026-08-31"}'], { timeoutMs: 30 * 60_000 });
+    await invoke(CHANNELS.billingCall, task, 'collection-drill', { run: detail, figure: 'collection_rate_current', path: ['海口城市公司', null], extra: 1 });
+    expect(mocks.run).toHaveBeenLastCalledWith(as, 'collection-drill',
+      ['--spec', JSON.stringify({ run: detail, figure: 'collection_rate_current', path: ['海口城市公司', null] })], { timeoutMs: 30 * 60_000 });
     const calls = mocks.run.mock.calls.length;
+    expect((await invoke(CHANNELS.billingCall, task, 'collection-drill', { run: detail, figure: 'waiver_rate' })).ok).toBe(false);
+    expect((await invoke(CHANNELS.billingCall, task, 'collection-drill', { run: detail, figure: 'collection_rate_current', path: [1] })).ok).toBe(false);
+    expect((await invoke(CHANNELS.billingCall, task, 'collection-drill', { run: '../x', figure: 'collection_rate_current' })).ok).toBe(false);
+    expect((await invoke(CHANNELS.billingCall, task, 'collection-drill-export', { run: detail, figure: 'collection_rate_current', destination: '/etc/x.xlsx' })).ok).toBe(false);
     expect((await invoke(CHANNELS.billingCall, task, 'detail-add', {})).ok).toBe(false);
     expect((await invoke(CHANNELS.billingCall, task, 'collection-caliber-propose', {})).ok).toBe(false);
     expect((await invoke(CHANNELS.billingCall, task, 'detail-confirm', { detail: '../x' })).ok).toBe(false);
     expect((await invoke(CHANNELS.billingCall, task, 'toString')).ok).toBe(false);
     expect(mocks.run).toHaveBeenCalledTimes(calls);
+  });
+
+  it('exports one level of 往下拆 only where the save dialog says', async () => {
+    registerIpc({ varRoot: '/store' });
+    const run = 'c'.repeat(32);
+    mocks.saver.mockResolvedValue({ canceled: false, filePath: '/chosen/当期收缴率-海口城市公司-项目.xlsx' });
+    mocks.run.mockResolvedValue(JSON.stringify({ path: '/chosen/当期收缴率-海口城市公司-项目.xlsx', rows: 6, level: { key: 'project', label: '项目' } }));
+    expect(await invoke(CHANNELS.billingDrillExport, task, { run, figure: 'collection_rate_current', path: ['海口城市公司'], name: '当期收缴率-海口城市公司-项目' }))
+      .toEqual({ ok: true, value: { exported: true, rows: 6 } });
+    expect(mocks.saver.mock.calls[0][0].defaultPath).toBe('当期收缴率-海口城市公司-项目.xlsx');
+    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, actor: 'manager' }, 'collection-drill-export', ['--spec', JSON.stringify({
+      run, figure: 'collection_rate_current', path: ['海口城市公司'], destination: '/chosen/当期收缴率-海口城市公司-项目.xlsx' })], { timeoutMs: 30 * 60_000 });
+    // A suggested name cannot steer the folder, and nothing past the dialog's own extension is written.
+    await invoke(CHANNELS.billingDrillExport, task, { run, figure: 'collection_rate_current', path: [], name: '../../etc/x' });
+    expect(mocks.saver.mock.calls[1][0].defaultPath).toBe('.._.._etc_x.xlsx');
+    mocks.run.mockClear();
+    mocks.saver.mockResolvedValue({ canceled: false, filePath: '/chosen/x.csv' });
+    expect((await invoke(CHANNELS.billingDrillExport, task, { run, figure: 'collection_rate_current', path: [] })).ok).toBe(false);
+    mocks.saver.mockResolvedValue({ canceled: true, filePath: '' });
+    expect(await invoke(CHANNELS.billingDrillExport, task, { run, figure: 'collection_rate_current', path: [] })).toEqual({ ok: true, value: { cancelled: true } });
+    expect((await invoke(CHANNELS.billingDrillExport, task, { run: '../run', figure: 'collection_rate_current' })).ok).toBe(false);
+    expect(mocks.run).not.toHaveBeenCalled();
   });
 
   it('reads the 收费明细 of an archived task but adds, confirms and runs nothing there', async () => {

@@ -503,6 +503,17 @@ export function registerIpc(
     if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) throw new Error('invalid 口径 version');
     return value;
   };
+  const DRILL_FIGURES = ['collection_rate_current', 'collection_rate_month', 'arrears_recovery_rate', 'collection_rate_total'];
+  /** A drill names a run, one of the rates and the names it went down by; nothing else reaches the CLI. */
+  const drillSpec = (spec: Record<string, unknown>) => {
+    const figure = String(spec.figure ?? '');
+    if (!DRILL_FIGURES.includes(figure)) throw new Error('invalid drill figure');
+    const path = spec.path ?? [];
+    if (!Array.isArray(path) || path.length > 3 || path.some((value) => value !== null && (typeof value !== 'string' || value.length > 200))) {
+      throw new Error('invalid drill path');
+    }
+    return { run: detailId(spec.run), figure, path };
+  };
   const billingArgs: Record<string, (spec: Record<string, unknown>) => string[]> = {
     'detail-list': () => [],
     'collection-caliber': () => [],
@@ -515,6 +526,7 @@ export function registerIpc(
       ...(spec.params === undefined ? [] : ['--params', objectJson(spec.params)])],
     'collection-run': (spec) => ['--spec', objectJson(spec)],
     'collection-run-read': (spec) => ['--run', detailId(spec.run)],
+    'collection-drill': (spec) => ['--spec', objectJson(drillSpec(spec))],
   };
   // An archived or trashed task can be read, never added to: the same rule as its conversation.
   const billingWrites = new Set(['detail-confirm', 'collection-caliber-confirm', 'collection-run']);
@@ -530,7 +542,26 @@ export function registerIpc(
       const args = build(spec && typeof spec === 'object' && !Array.isArray(spec) ? spec as Record<string, unknown> : {});
       if (billingWrites.has(name)) await activeTask(rawTask);
       return JSON.parse(await runFoundry({ ...binding, task: taskId(rawTask) }, name, args,
-        { timeoutMs: name === 'collection-run' ? LONG_MS : undefined }));
+        // The first drill of a run works its bills out once, as long as the run itself.
+        { timeoutMs: name === 'collection-run' || name === 'collection-drill' ? LONG_MS : undefined }));
+    }));
+  ipcMain.handle(CHANNELS.billingDrillExport, (_e, rawTask: unknown, rawSpec: unknown) =>
+    answer(async () => {
+      const task = taskId(rawTask);
+      const raw = rawSpec && typeof rawSpec === 'object' && !Array.isArray(rawSpec) ? rawSpec as Record<string, unknown> : {};
+      const spec = drillSpec(raw);
+      // Only a suggested file name comes from the renderer; the folder is the manager's pick.
+      const named = typeof raw.name === 'string' && raw.name.trim() ? lineOf(raw.name, 'file name', 200) : '往下拆';
+      const selected = await dialog.showSaveDialog({
+        title: '导出往下拆（Excel）', defaultPath: `${named.replace(/\.xlsx$/i, '').replace(/[\\/:*?"<>|]/g, '_')}.xlsx`,
+        filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }],
+      });
+      if (selected.canceled || !selected.filePath) return { cancelled: true as const };
+      // A name past the dialog's own extension would skip its overwrite check, so one without it is refused, not fixed.
+      if (path.extname(selected.filePath).toLowerCase() !== '.xlsx') throw new FoundryRefusal('文件名要以 .xlsx 结尾。', REFUSED);
+      const result = JSON.parse(await runFoundry({ ...binding, task }, 'collection-drill-export',
+        ['--spec', objectJson({ ...spec, destination: selected.filePath })], { timeoutMs: LONG_MS }));
+      return { exported: true as const, rows: Number(result.rows ?? 0) };
     }));
   const BILLING_KINDS: Record<string, string> = { receivable: '应收明细', receipt: '实收明细', property: '房产主数据' };
   ipcMain.handle(CHANNELS.billingAdd, (_e, rawTask: unknown, rawKind: unknown) =>

@@ -40,6 +40,10 @@
     "bills_without_property": 32,
     "advance_labelled_current": "448473.72",
     "arrears_labelled_current": "9421.90",
-    "variant_total": "85.46"
+    "variant_total": "85.46",
+    "drill_worst_project": "南洋城",
+    "drill_worst_project_outstanding": "1267650.26",
+    "drill_worst_project_current": "70.69",
+    "drill_empty_city_outstanding": "240.00"
   }
 }

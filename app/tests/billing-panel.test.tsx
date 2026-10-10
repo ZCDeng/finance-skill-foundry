@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { BillingDetail, Bridge, CollectionCaliber, CollectionRun } from '../src/bridge.js';
+import type { BillingCommand, BillingDetail, Bridge, CollectionCaliber, CollectionRun, DrillLevel } from '../src/bridge.js';
 import { BillingPanel, caliberLines, percent, percentToRate } from '../src/views/analysis/BillingPanel.js';
 
 afterEach(() => { cleanup(); delete (globalThis as { foundry?: Partial<Bridge> }).foundry; });
@@ -181,4 +181,95 @@ it('opens on the run a card in the conversation asked for, not the newest, and l
   expect(new Set(reads)).toEqual(new Set([older.id]));
   expect(scroll).toHaveBeenCalledWith({ block: 'start' });
   HTMLElement.prototype.scrollIntoView = before;
+});
+
+const sums = (base: string, done: string, outstanding: string, rate: string | null) => ({ base, done, outstanding, rate });
+function drillLevel(path: (string | null)[], ties = true): DrillLevel {
+  const levels = [{ key: 'city', label: '城市公司' }, { key: 'project', label: '项目' }, { key: 'property_id', label: '房产' }, { key: 'bill', label: '账单' }];
+  const whole = { label: '全部', ...sums('1000.00', '821.20', '178.80', '0.8212') };
+  const common = { run_id: '8'.repeat(32), figure: 'collection_rate_current' as const, label: '当期收缴率', base_label: '本年应收', done_label: '当期已收',
+    as_of: '2026-08-31', caliber: { version: 1, status: 'confirmed' as const, differs: [] }, levels, whole,
+    run_check: { base: '1000.00', done: '821.20', ties: true }, gap: ties ? { base: '0.00', done: '0.00' } : { base: '-10.00', done: '0.00' } };
+  if (!path.length) {
+    return { ...common, path: [], level: levels[0], total: sums('1000.00', '821.20', '178.80', '0.8212'), ties, row_count: 2, rows: [
+      { value: '海口城市公司', label: '海口城市公司', properties: 90, ...sums('990.00', '818.20', '171.80', '0.8265') },
+      { value: null, label: '（空）', properties: 1, ...sums('10.00', '3.00', '7.00', '0.3000') }] };
+  }
+  return { ...common, path: [{ level: 'city', value: '海口城市公司', label: '海口城市公司', ...sums('990.00', '818.20', '171.80', '0.8265') }],
+    level: levels[1], total: sums('990.00', '818.20', '171.80', '0.8265'), ties, row_count: 250,
+    rows: [{ value: '南洋城', label: '南洋城', properties: 40, ...sums('500.00', '350.00', '150.00', '0.7000') }] };
+}
+
+it('takes a rate apart level by level, says each level adds up, and exports one where the manager picks', async () => {
+  const runs = [run('8', 'confirmed')];
+  mount({ details: [table('receivable', '1', true), table('receipt', '2', true)],
+    caliber: { defaults, confirmed: null, proposed: null, effective: defaults, versions: [] }, runs });
+  const foundry = (globalThis as unknown as { foundry: Partial<Bridge> }).foundry;
+  const plain = foundry.billingCall!;
+  const drill = vi.fn(async (task: string, command: BillingCommand, spec?: Record<string, unknown>) => command === 'collection-drill'
+    ? { ok: true as const, value: drillLevel(spec!.path as (string | null)[]) } : plain(task, command, spec));
+  const save = vi.fn(async () => ({ ok: true as const, value: { exported: true as const, rows: 250 } }));
+  foundry.billingCall = drill as unknown as Bridge['billingCall'];
+  foundry.billingDrillExport = save as unknown as Bridge['billingDrillExport'];
+  render(<BillingPanel taskId="t" period="2026-08" />);
+  fireEvent.click(await screen.findByRole('button', { name: '往下拆当期收缴率' }));
+  const section = await screen.findByRole('region', { name: '往下拆：当期收缴率' });
+  expect(drill).toHaveBeenLastCalledWith('t', 'collection-drill', { run: '8'.repeat(32), figure: 'collection_rate_current', path: [] });
+  await within(section).findByText(/等于这次计算结果的数/);
+  expect(within(section).getAllByRole('row').map((row) => row.textContent)).toEqual([
+    '城市公司户数本年应收当期已收未收当期收缴率', '海口城市公司90990.00818.20171.8082.65%', '（空）110.003.007.0030.00%']);
+  fireEvent.click(within(section).getByRole('button', { name: '拆开「海口城市公司」，看项目' }));
+  await within(section).findByText('南洋城');
+  expect(drill).toHaveBeenLastCalledWith('t', 'collection-drill', { run: '8'.repeat(32), figure: 'collection_rate_current', path: ['海口城市公司'] });
+  expect(within(section).getByText(/等于上一层「海口城市公司」的数/)).toBeTruthy();
+  expect(within(section).getByText('共 250 行，按未收从多到少列出前 1 行；全部见导出。点名称往下拆一层。')).toBeTruthy();
+  const trail = within(section).getByRole('navigation', { name: '拆到哪一层' });
+  expect(within(trail).getByText('海口城市公司').getAttribute('aria-current')).toBe('location');
+  fireEvent.click(within(section).getByRole('button', { name: /导出 Excel/ }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith('t', { run: '8'.repeat(32), figure: 'collection_rate_current', path: ['海口城市公司'],
+    name: '当期收缴率-海口城市公司-项目' }));
+  expect(await within(section).findByText('已导出 250 行。')).toBeTruthy();
+  fireEvent.click(within(trail).getByRole('button', { name: '全部' }));
+  await waitFor(() => expect(drill).toHaveBeenLastCalledWith('t', 'collection-drill', { run: '8'.repeat(32), figure: 'collection_rate_current', path: [] }));
+  fireEvent.click(within(section).getByRole('button', { name: /收起/ }));
+  expect(screen.queryByRole('region', { name: /往下拆/ })).toBeNull();
+});
+
+it('marks a level that does not add up to the row above it', async () => {
+  const runs = [run('8', 'confirmed')];
+  mount({ details: [table('receivable', '1', true), table('receipt', '2', true)],
+    caliber: { defaults, confirmed: null, proposed: null, effective: defaults, versions: [] }, runs });
+  const foundry = (globalThis as unknown as { foundry: Partial<Bridge> }).foundry;
+  const plain = foundry.billingCall!;
+  foundry.billingCall = (async (task: string, command: BillingCommand, spec?: Record<string, unknown>) => command === 'collection-drill'
+    ? { ok: true as const, value: drillLevel(['海口城市公司'], false) } : plain(task, command, spec)) as unknown as Bridge['billingCall'];
+  render(<BillingPanel taskId="t" period="2026-08" />);
+  fireEvent.click(await screen.findByRole('button', { name: '往下拆清欠率' }));
+  const section = await screen.findByRole('region', { name: '往下拆：当期收缴率' });
+  expect((await within(section).findByText(/和上一层「海口城市公司」的数对不上/)).textContent).toContain('本年应收差 (10.00)');
+});
+
+it('offers no drill of a total rate counted over every receipt', async () => {
+  const counted = { ...run('8', 'confirmed'), params: { ...run('8', 'confirmed').params, total_method: 'all_receipts' as const } };
+  mount({ details: [table('receivable', '1', true), table('receipt', '2', true)],
+    caliber: { defaults, confirmed: null, proposed: null, effective: defaults, versions: [] }, runs: [counted] });
+  render(<BillingPanel taskId="t" period="2026-08" />);
+  expect(await screen.findByRole('button', { name: '往下拆当期收缴率' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '往下拆综合收缴率' })).toBeNull();
+});
+
+it('says so when the whole no longer adds up to what the run filed', async () => {
+  mount({ details: [table('receivable', '1', true), table('receipt', '2', true)],
+    caliber: { defaults, confirmed: null, proposed: null, effective: defaults, versions: [] }, runs: [run('8', 'confirmed')] });
+  const foundry = (globalThis as unknown as { foundry: Partial<Bridge> }).foundry;
+  const plain = foundry.billingCall!;
+  const level = { ...drillLevel([]), run_check: { base: '1001.00', done: '821.20', ties: false } };
+  foundry.billingCall = (async (task: string, command: BillingCommand, spec?: Record<string, unknown>) => command === 'collection-drill'
+    ? { ok: true as const, value: level } : plain(task, command, spec)) as unknown as Bridge['billingCall'];
+  render(<BillingPanel taskId="t" period="2026-08" />);
+  fireEvent.click(await screen.findByRole('button', { name: '往下拆当期收缴率' }));
+  const section = await screen.findByRole('region', { name: '往下拆：当期收缴率' });
+  expect((await within(section).findByRole('alert')).textContent).toBe(
+    '从明细重新加总的本年应收 1,000.00、当期已收 821.20，和这次计算记下的 1,001.00、821.20 不一致。请重新计算后再拆。');
+  expect(within(section).queryByText(/等于这次计算结果的数/)).toBeNull();
 });
