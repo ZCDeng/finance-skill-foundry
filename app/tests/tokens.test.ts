@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -335,7 +335,7 @@ describe('where the warning colour is drawn', () => {
     const { cn } = await import('../src/lib/utils.js');
     // As Button renders it: cn() lets the chip radius and label size replace the control ones.
     const classes = cn(buttonVariants({ variant: 'outline', size: 'chip' })).split(' ');
-    expect(classes).toContain('rounded-[var(--fnd-radius-chip)]');
+    expect(classes).toContain('rounded-[var(--fnd-radius-pill)]');
     expect(classes).not.toContain('rounded-[var(--fnd-radius-control)]');
     expect(classes).toContain('text-[length:var(--fnd-size-label)]');
     expect(classes).toContain('h-7');
@@ -716,5 +716,52 @@ describe('the 资料 page, settings panel and task drawer controls', () => {
     expect(declarations(ANALYSIS, '.analysis-source-meta')['font-size']).toBe('var(--fnd-size-label)');
     // The old formula-health rule that only re-zeroed a margin nobody sets any more is gone.
     expect(ANALYSIS).not.toContain('.analysis-formula-health [data-slot="button"]');
+  });
+});
+
+describe('the shape, type and spacing scales', () => {
+  /** Every app stylesheet outside the token, font and bridge files, comments removed. */
+  const sheets = (() => {
+    const root = fileURLToPath(new URL('../src', import.meta.url));
+    const found: [string, string][] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const full = `${dir}/${name}`;
+        if (statSync(full).isDirectory()) walk(full);
+        else if (name.endsWith('.css') && !full.includes('/styles/')) {
+          found.push([full.slice(root.length + 1), readFileSync(full, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')]);
+        }
+      }
+    };
+    walk(root);
+    return found;
+  })();
+  const values = (property: RegExp) =>
+    sheets.flatMap(([file, css]) => [...css.matchAll(property)].map((match) => [file, match[0]] as const));
+
+  it('rounds corners only with the four radius tokens, or a 1–2px tick', () => {
+    expect(sheets.length).toBeGreaterThanOrEqual(7);
+    for (const [file, rule] of values(/border-radius:\s*[^;}]+/g)) {
+      expect(rule, file).toMatch(/border-radius:\s*(var\(--fnd-radius-(mark|control|container|pill)(,[^)]*)?\)|0|[12]px|50%|inherit)\s*$/);
+    }
+  });
+
+  it('sizes text only with the type tokens, apart from the brand wordmark and relative code', () => {
+    for (const [file, rule] of values(/font-size:\s*[^;}]+/g)) {
+      expect(rule, file).toMatch(/font-size:\s*(var\(--fnd-(size-[a-z0-9]+|doc-[a-z]+)(,[^)]*)?\)|inherit|1em|0\.9em|22px)\s*$/);
+    }
+    expect(values(/font-size:\s*22px/g).map(([file]) => file)).toEqual(['components/components.css']);
+  });
+
+  it('keeps every gap and padding on the 4px grid, with 2px and 6px for tight icon pairs', () => {
+    // Two measured exceptions: 5px around a 22px summary line makes the 32px compact row, and
+    // 11px plus the 1px fold rule is the 12px step; 31px clears the combobox search icon.
+    const allowed = new Set([0, 1, 2, 5, 6, 11, 31]);
+    for (const [file, rule] of values(/\b(?:row-|column-)?(?:gap|padding(?:-[a-z-]+)?):\s*[^;}]+/g)) {
+      for (const [, px] of rule.matchAll(/\b(\d+)px/g)) {
+        const n = Number(px);
+        expect(n % 4 === 0 || allowed.has(n), `${file}: ${rule}`).toBe(true);
+      }
+    }
   });
 });

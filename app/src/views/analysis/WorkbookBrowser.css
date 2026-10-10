@@ -2,9 +2,9 @@
 .analysis-workbook-browser {
   display: grid;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 12px 12px;
   border: 1px solid var(--fnd-line);
-  border-radius: 8px;
+  border-radius: var(--fnd-radius-container);
   background: var(--fnd-surface-strong);
 }
 
@@ -19,7 +19,7 @@
 .analysis-workbook-overview-jump label {
   display: grid;
   flex: 1 1 20rem;
-  gap: 3px;
+  gap: 4px;
   min-width: 0;
   font-size: var(--fnd-size-small);
 }
@@ -41,7 +41,7 @@
 
 .analysis-workbook-browser-form label {
   display: grid;
-  gap: 3px;
+  gap: 4px;
   font-size: var(--fnd-size-small);
 }
 
@@ -58,7 +58,7 @@
   overflow: auto;
   max-height: 280px;
   border: 1px solid var(--fnd-line);
-  border-radius: 6px;
+  border-radius: var(--fnd-radius-mark);
   background: var(--fnd-surface);
 }
 
@@ -71,7 +71,7 @@
 .analysis-workbook-grid th,
 .analysis-workbook-grid td {
   border: 1px solid var(--fnd-line);
-  padding: 3px 6px;
+  padding: 4px 6px;
   min-width: 4.5rem;
   white-space: nowrap;
 }

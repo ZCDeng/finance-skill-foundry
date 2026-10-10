@@ -22,7 +22,7 @@ function AlertDialogContent({ className, ...props }: ComponentProps<typeof Alert
         className={cn(
           'fixed top-1/2 left-1/2 z-50 grid w-[min(440px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 gap-4 p-6',
           'border border-border bg-popover text-popover-foreground outline-none',
-          'rounded-[var(--fnd-radius-menu)] shadow-[var(--fnd-shadow-lg)]',
+          'rounded-[var(--fnd-radius-container)] shadow-[var(--fnd-shadow-lg)]',
           className,
         )}
         {...props}

@@ -26,7 +26,7 @@ function HoverCardContent({ className, align = 'start', sideOffset = 6, collisio
         collisionPadding={collisionPadding}
         className={cn(
           'z-50 flex overflow-hidden border border-border bg-popover text-popover-foreground outline-none',
-          'rounded-[var(--fnd-radius-menu)] shadow-[var(--fnd-shadow-menu)]',
+          'rounded-[var(--fnd-radius-container)] shadow-[var(--fnd-shadow-menu)]',
           'max-h-(--radix-hover-card-content-available-height)',
           className,
         )}

@@ -28,7 +28,7 @@ function DropdownMenuContent({
         sideOffset={sideOffset}
         className={cn(
           'z-50 min-w-[8rem] overflow-x-hidden overflow-y-auto border border-border bg-popover p-1.5 text-popover-foreground',
-          'rounded-[var(--fnd-radius-menu)] shadow-[var(--fnd-shadow-menu)]',
+          'rounded-[var(--fnd-radius-container)] shadow-[var(--fnd-shadow-menu)]',
           'max-h-(--radix-dropdown-menu-content-available-height)',
           className,
         )}
@@ -57,7 +57,7 @@ function DropdownMenuItem({
       data-inset={inset}
       data-variant={variant}
       className={cn(
-        'relative flex cursor-pointer items-center gap-1.5 rounded-[var(--fnd-radius-menu-item)] px-3 py-2',
+        'relative flex cursor-pointer items-center gap-1.5 rounded-[var(--fnd-radius-mark)] px-3 py-2',
         'text-[length:var(--fnd-size-small)] outline-none select-none',
         'focus:bg-[var(--fnd-surface-strong)] focus:text-foreground',
         'data-disabled:pointer-events-none data-disabled:opacity-50',
@@ -81,7 +81,7 @@ function DropdownMenuCheckboxItem({
     <DropdownMenuPrimitive.CheckboxItem
       data-slot="dropdown-menu-checkbox-item"
       className={cn(
-        'relative flex cursor-pointer items-center gap-1.5 rounded-[var(--fnd-radius-menu-item)] py-2 pr-2 pl-8',
+        'relative flex cursor-pointer items-center gap-1.5 rounded-[var(--fnd-radius-mark)] py-2 pr-2 pl-8',
         'text-[length:var(--fnd-size-small)] outline-none select-none',
         'focus:bg-[var(--fnd-surface-strong)] focus:text-foreground',
         'data-disabled:pointer-events-none data-disabled:opacity-50',
@@ -113,7 +113,7 @@ function DropdownMenuRadioItem({
     <DropdownMenuPrimitive.RadioItem
       data-slot="dropdown-menu-radio-item"
       className={cn(
-        'relative flex cursor-pointer items-center gap-1.5 rounded-[var(--fnd-radius-menu-item)] py-2 pr-2 pl-8',
+        'relative flex cursor-pointer items-center gap-1.5 rounded-[var(--fnd-radius-mark)] py-2 pr-2 pl-8',
         'text-[length:var(--fnd-size-small)] outline-none select-none',
         'focus:bg-[var(--fnd-surface-strong)] focus:text-foreground',
         'data-disabled:pointer-events-none data-disabled:opacity-50',
@@ -184,7 +184,7 @@ function DropdownMenuSubTrigger({
       data-slot="dropdown-menu-sub-trigger"
       data-inset={inset}
       className={cn(
-        'flex cursor-pointer items-center gap-1.5 rounded-[var(--fnd-radius-menu-item)] px-3 py-2',
+        'flex cursor-pointer items-center gap-1.5 rounded-[var(--fnd-radius-mark)] px-3 py-2',
         'text-[length:var(--fnd-size-small)] outline-none select-none',
         'focus:bg-[var(--fnd-surface-strong)] data-[state=open]:bg-[var(--fnd-surface-strong)]',
         className,
@@ -206,7 +206,7 @@ function DropdownMenuSubContent({
       data-slot="dropdown-menu-sub-content"
       className={cn(
         'z-50 min-w-[8rem] overflow-hidden border border-border bg-popover p-1.5 text-popover-foreground',
-        'rounded-[var(--fnd-radius-menu)] shadow-[var(--fnd-shadow-menu)]',
+        'rounded-[var(--fnd-radius-container)] shadow-[var(--fnd-shadow-menu)]',
         className,
       )}
       {...props}

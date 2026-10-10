@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils.js';
 const badgeVariants = cva(
   [
     'inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden whitespace-nowrap',
-    'rounded-[var(--fnd-radius-chip)] border px-2.5 py-1',
+    'rounded-[var(--fnd-radius-pill)] border px-2.5 py-1',
     'text-[length:var(--fnd-size-label)] leading-none',
   ].join(' '),
   {
