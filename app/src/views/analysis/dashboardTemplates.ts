@@ -9,6 +9,7 @@ import { headlineRows, kpiFor } from './BusinessResultView.js';
 import { displayColumns, isSuccessfulRun } from './businessResults.js';
 import { figureDraft, type CardDraft, type DashboardCard, type TemplateId } from './dashboardModel.js';
 import { scenarioBase } from './dashboardScenario.js';
+import { whatIfView } from './dashboardWhatIf.js';
 
 export type Template = {
   id: TemplateId;
@@ -81,13 +82,25 @@ function groupScenario(run: AnalysisRun | undefined, template: TemplateId): Card
   return [{ kind: 'scenario', title: '回款情景：收缴率变了会怎样', state: 'pinned', run_id: run.id, template, select: { match } }];
 }
 
+/** 倒推 and 敏感性表 over the group's lines, each when the run carries what it reads; never accepted. */
+function groupWhatIf(run: AnalysisRun | undefined, template: TemplateId, drafts: Pick<CardDraft, 'kind' | 'title' | 'select'>[]): CardDraft[] {
+  if (!run) return [];
+  const entity = groupEntity(run);
+  if (!entity) return [];
+  const match = { entity, scenario: '本期' };
+  return drafts.flatMap((draft) => {
+    const select = { ...draft.select, match };
+    return whatIfView(draft.kind as 'goal' | 'sensitivity', run, select) ? [{ ...draft, select, state: 'pinned' as const, run_id: run.id, template }] : [];
+  });
+}
+
 const BREAK_EVEN = { value: '0', label: '生死线' };
 
 export const TEMPLATES: Template[] = [
   {
     id: 'operating',
     title: '月度经营',
-    summary: '收入和利润对预算、毛利率、费用率、全年预计，和预算到实际的利润桥。',
+    summary: '收入和利润对预算、毛利率、费用率、全年预计，全年收入预算还差多少，和预算到实际的利润桥。',
     needs: '先算一次预算差异、利润达成或回款健康分析。',
     cards(runs) {
       const business = latest(runs, 'business');
@@ -102,13 +115,15 @@ export const TEMPLATES: Template[] = [
       })) : [];
       const health = groupFigures(latest(runs, 'health'),
         ['gross_margin', 'expense_ratio', 'ttm_revenue', 'revenue_full_year_seasonal', 'net_profit_full_year_seasonal', 'revenue_le_gap'], 'operating');
-      return [...kpis, ...health, ...bridges];
+      const budget = groupWhatIf(latest(runs, 'health'), 'operating',
+        [{ kind: 'goal', title: '倒推：全年收入预算还差多少', select: { match: {}, goal: 'budget' } }]);
+      return [...kpis, ...health, ...budget, ...bridges];
     },
   },
   {
     id: 'collection',
     title: '回款健康',
-    summary: '距生死线、应收天数、应收蓄水和现金回收，各主体距生死线的排名，和一张拖收缴率看后果的情景卡。',
+    summary: '距生死线、应收天数、应收蓄水和现金回收，各主体距生死线的排名，拖收缴率看后果的情景卡，回到生死线要多收多少，和毛利率、收缴率一起变的敏感性表。',
     needs: '先算一次回款健康分析。',
     cards(runs) {
       const run = latest(runs, 'health');
@@ -116,6 +131,10 @@ export const TEMPLATES: Template[] = [
         ...groupFigures(run, ['collection_gap', 'collection_gap_total', 'break_even_collection', 'dso', 'ar_buildup', 'cash_collection_ratio'], 'collection'),
         ...tableRank(run, 'collection_gap', '各主体距生死线（从低到高）', 'asc', 'collection', BREAK_EVEN),
         ...groupScenario(run, 'collection'),
+        ...groupWhatIf(run, 'collection', [
+          { kind: 'goal', title: '倒推：收缴率回到生死线要多收多少', select: { match: {}, goal: 'collection' } },
+          { kind: 'sensitivity', title: '敏感性：毛利率和收缴率一起变', select: { match: {} } },
+        ]),
       ];
     },
   },

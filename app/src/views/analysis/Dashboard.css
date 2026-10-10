@@ -90,6 +90,11 @@
 .dashboard-scenario__base dt { font-size: var(--fnd-size-label); color: var(--fnd-muted); }
 .dashboard-scenario__base dd { margin: 0; font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .dashboard-scenario > .fnd-chart__caption { margin: 0; }
+/* 倒推 leads with its answer; 敏感性表 keeps the result page's tones, sized to the card. */
+.dashboard-goal__part { margin: 0; font-size: var(--fnd-size-small); color: var(--fnd-ink); }
+.dashboard-goal > .dashboard-card__value { margin-top: -4px; }
+.dashboard-sensitivity__grid { font-size: var(--fnd-size-small); }
+.dashboard-sensitivity__grid th, .dashboard-sensitivity__grid td { padding: 4px 8px; white-space: nowrap; }
 .dashboard__asks { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0; }
 /* The export menu sits in a portal, outside .dashboard. */
 .dashboard__export-note { margin: 0; padding: 0 8px 6px; max-width: 248px; font-size: var(--fnd-size-label); line-height: 18px; color: var(--fnd-muted); }

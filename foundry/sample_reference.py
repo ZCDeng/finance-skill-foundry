@@ -157,7 +157,8 @@ class Reference:
                             "ar_end": "col_L_应收账款", "collection_rate_current": "col_M_本年收缴率"}}
         scenario = self.manager.save_scenario({
             "context_id": context["id"], "kind": "collection_health", "label": "回款健康（集团与城市公司）",
-            "inputs": {"entities": [{"name": COMPANY, "values": group}], "entity_tables": [city]},
+            # The group's 敏感性表 (毛利率 × 收缴率 → 距生死线) is on its board.
+            "inputs": {"entities": [{"name": COMPANY, "values": group, "sensitivity": True}], "entity_tables": [city]},
         })
         return self.manager.run_scenario({"scenario_id": scenario["id"]})
 
@@ -222,6 +223,10 @@ class Reference:
                                  "label": "entity", "column": "value", "order": "asc", "limit": 10,
                                  "reference": {"value": "0", "label": "生死线"}}})
         cards.append({"kind": "scenario", "title": "回款情景：收缴率变了会怎样", "state": "pinned", "run_id": run["id"],
+                      "template": "collection", "select": {"match": {"entity": COMPANY, "scenario": "本期"}}})
+        cards.append({"kind": "goal", "title": "倒推：收缴率回到生死线要多收多少", "state": "pinned", "run_id": run["id"],
+                      "template": "collection", "select": {"match": {"entity": COMPANY, "scenario": "本期"}, "goal": "collection"}})
+        cards.append({"kind": "sensitivity", "title": "敏感性：毛利率和收缴率一起变", "state": "pinned", "run_id": run["id"],
                       "template": "collection", "select": {"match": {"entity": COMPANY, "scenario": "本期"}}})
         return self.manager.dashboard_save({"parent_id": None, "cards": cards})
 

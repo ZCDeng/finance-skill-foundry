@@ -107,6 +107,19 @@ def test_a_collection_figure_carries_the_workbook_s_rate_and_the_difference_the_
             {"kind": "rank", "title": "x", "collection_run_id": run["id"], "figure": "collection_rate_current"}]})
 
 
+
+def test_a_collection_goal_says_how_much_more_the_bills_need_and_when_the_target_is_reached(pack):  # noqa: F811
+    task, billing, ids = pack
+    grouped = billing.collection_run({**ids, "as_of": "2026-08-31", "group_by": ["type"]})
+    goal = lambda target, **more: {"kind": "goal", "title": "到目标", "collection_run_id": grouped["id"],  # noqa: E731
+                                   "target": target, **more}
+    whole, past, reached = FinanceStore(task, actor="assistant").answer_cards({"cards": [
+        goal("50%"), goal("40%", group={"type": "洋房"}), goal("80%", group={"type": "洋房"})]})["cards"]
+    assert (whole["part"], whole["value"]["text"]) == ("还要收", "10.00")
+    assert (past["part"], reached["part"]) == ("已超过目标，多收了", "已达到目标")
+    # 洋房 stands at 80.00% to the cent: it is at the target, not past it by 0.00.
+    assert reached["value"]["text"] == "80.00%"
+
 def test_a_bridge_closes_on_the_variance_run_and_a_trend_runs_oldest_first(service):  # noqa: F811
     store, context = service
     run = store.explain_variance({"context_id": context["id"]})

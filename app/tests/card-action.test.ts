@@ -15,6 +15,9 @@ describe('a click on a card in the conversation', () => {
     expect(readCardAction(line({nonce, action: 'open', task_id: task, kind: 'collection', run_id: run}), nonce))
       .toEqual({action: 'open', taskId: task, kind: 'collection', runId: run});
     expect(readCardAction(line({nonce, action: 'pin', task_id: task, card: pin}), nonce)).toEqual({action: 'pin', taskId: task, card: pin});
+    // A 倒推 or 敏感性 card pins as the what-if it is; the board's own save checks what it works back to.
+    const goal = {kind: 'goal', title: '回到生死线', run_id: run, select: {match: {entity: '集团', scenario: '本期'}, goal: 'collection', target: '92%'}};
+    expect(readCardAction(line({nonce, action: 'pin', task_id: task, card: goal}), nonce)).toEqual({action: 'pin', taskId: task, card: goal});
     expect(readCardAction(line({nonce, action: 'open', task_id: task, kind: 'analysis', run_id: run, analysis_id: '../x'}), nonce))
       .toMatchObject({analysisId: null});
   });

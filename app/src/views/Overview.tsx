@@ -7,6 +7,7 @@ import { NativeSelect } from '../components/ui/native-select.js';
 import { DisclosureSummary } from '../components/Disclosure.js';
 import { Loading, SkeletonRows } from '../components/Loading.js';
 import { formatPeriod } from '../lib/period.js';
+import { isWhatIf } from './analysis/dashboardModel.js';
 import './overview.css';
 
 /** Where a to-do is handled, as the workspace names its places. */
@@ -133,7 +134,7 @@ function Recomputed({ rows, onOpen, now = new Date() }: { rows: OverviewTask[]; 
           <span>{`「${item.title}」：${item.change || '已重算'}`}</span>
         </div>
         <Button type="button" size="sm" variant="outline" onClick={() => onOpen(task, 'dashboard')}>
-          {item.changed || item.kind === 'scenario' ? '去看看' : '去认可'}<ArrowRight size={13} strokeWidth={1.5} aria-hidden />
+          {item.changed || isWhatIf(item.kind) ? '去看看' : '去认可'}<ArrowRight size={13} strokeWidth={1.5} aria-hidden />
           <span className="sr-only">：{task.title}，{item.title}</span>
         </Button>
       </li>)}

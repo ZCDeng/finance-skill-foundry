@@ -651,6 +651,9 @@ def test_analysis_preset_installs_with_harness_and_wheel_resource():
     assert {"@deepseek-ai/dsh-tool-skill", "@deepseek-ai/dsh-tool-web",
             "@deepseek-ai/dsh-tool-ask-user"} <= names
     assert not {"finance-skill-foundry-dsh/period-scope", "finance-skill-foundry-dsh/f3-scope"} & names
+    persona = (PLUGIN / "presets" / "analysis" / "agent.cordis.yml").read_text(encoding="utf-8")
+    # 倒推 and 敏感性 answer "what would it take" questions, and are never written up as fact.
+    assert "kind=goal 或 sensitivity" in persona and "倒推和敏感性都是情景，不是实际数" in persona
     mirror = ROOT / "foundry" / "resources" / "dsh-plugin"
     for relative in ("analysis.js", "analysis-runtime.js", "finance-tools.js", "index.js", "package.json", "presets/analysis/agent.cordis.yml",
                      "presets/analysis/preset.yml"):

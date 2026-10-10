@@ -467,3 +467,34 @@ def test_a_ranking_changes_when_its_leaders_or_the_side_of_its_line_change_not_i
     assert change(gap, before, shown(gap, run([("海口", -2), ("三亚", -1), ("儋州", 3)]))) == (True, "低于生死线的：1 个 → 2 个")
     # One across each way: still one below the line.
     assert change(gap, before, shown(gap, run([("海口", 1), ("三亚", -1), ("儋州", 3)]))) == (False, "前三名没有变化")
+
+
+def test_a_goal_card_is_judged_by_the_answer_it_shows_not_the_line_it_works_from():
+    import copy
+
+    from foundry.dashboard_recompute import change, shown
+
+    cases = json.loads((Path(__file__).resolve().parents[1] / "app/tests/fixtures/what-if-cases.json").read_text(encoding="utf-8"))
+    rows = cases["goals"][0]["rows"]
+    run = lambda rows: {"result": {"rows": rows, "params": {}}}  # noqa: E731
+
+    def moved(**values):
+        out = copy.deepcopy(rows)
+        for row in out:
+            if row["metric_key"] in values:
+                row["value"] = values[row["metric_key"]]
+        return out
+
+    line = {"kind": "goal", "select": {"match": {"entity": "华宸物业", "scenario": "本期"}, "goal": "collection"}}
+    august = shown(line, run(rows))
+    assert (august["display"], august["part"], august["unit"]) == ("19,276 万元", "一年还要多收", "万元")
+    # A year's revenue 12% higher and the line where it was: the same gap is that much more money to collect.
+    assert change(line, august, shown(line, run(moved(ttm_revenue="631714.68")))) == (True, "变动 +12.0%")
+    target = {**line, "select": {**line["select"], "target": "92%"}}
+    before = shown(target, run(rows))
+    # The line moved, the collection rate did not: what 92% takes is what it was.
+    assert change(target, before, shown(target, run(moved(break_even_collection="92.14262814607362800",
+                                                           collection_gap="-4.22412814607362800"))))[0] is False
+    reached = shown(target, run(moved(collection_gap="0.85737185392637200")))
+    assert (reached["display"], reached["part"]) == ("92.00%", "已达到目标")
+    assert change(target, before, reached) == (True, "一年还要多收 → 已达到目标")

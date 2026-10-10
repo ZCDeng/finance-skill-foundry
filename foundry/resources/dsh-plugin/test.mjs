@@ -544,7 +544,9 @@ for (const toolName of ROSTER) {
   assert.equal(all.length, rows.length);
   assert.ok(all.every((candidate) => candidate.section && candidate.value && candidate.description));
   const collection = await shortcuts.candidates({ sessionId: "s" }, { query: "收缴率", position: "leading", signal });
-  assert.deepEqual(collection.map((candidate) => candidate.value), ["collection-health"]);
+  assert.deepEqual(collection.map((candidate) => candidate.value), ["collection-health", "sensitivity-grid"]);
+  const backward = await shortcuts.candidates({ sessionId: "s" }, { query: "倒推", position: "leading", signal });
+  assert.deepEqual(backward.map((candidate) => candidate.value), ["backsolve"]);
   const closing = await shortcuts.candidates({ sessionId: "s" }, { query: "关账", position: "leading", signal });
   assert.deepEqual(closing.map((candidate) => candidate.value), ["close-walk"]);
   assert.deepEqual(await shortcuts.candidates({ sessionId: "s" }, { query: "不存在", position: "leading", signal }), []);
@@ -729,6 +731,33 @@ for (const toolName of ROSTER) {
   assert.match(flatten(CardsRow(settledCards({ filed: [], presented: { task_id: "task-1", cards: [{ ...presented.cards[0], source: { ...source, kind: "collection", trial: true } }] } }))),
     /试算.*打开收缴率结果/, "a trial collection figure says so");
 
+  // 倒推 and 敏感性 are what-ifs: each says so before anything else, and frames where the entity stands.
+  const whatIfs = { task_id: "task-1", cards: [
+    { kind: "goal", title: "回到生死线", flag: "情景，不是实际数", goal: "collection", subject: "华宸物业 · 收缴率回到生死线",
+      part: "一年还要多收", value: { text: "19,276 万元", negative: false }, beside: [["这次计算的收缴率", "87.92%"], ["还差", "3.22 个百分点"]],
+      basis: [["生死线收缴率", "91.14%"]], groups: null, caption: "一年回款差 = 收缴率差 × 近 12 个月营业收入 × 1.06（回款含增值税），是估算。",
+      source, pin: { kind: "goal", title: "回到生死线", run_id: runId, select: { match: { entity: "华宸物业", scenario: "本期" }, goal: "collection" } } },
+    { kind: "goal", title: "收到 92%", flag: "情景，不是实际数", subject: "洋房 · 当期收缴率到 92.00%", part: "还要收",
+      value: { text: "88.00", negative: false }, beside: [["目标当期收缴率", "92.00%"]], basis: [],
+      groups: { title: "按房产性质，还要收得最多的 1 个", lines: [["洋房", "88.00"]] }, caption: "还要收 = 本年应收 × 目标当期收缴率 − 当期已收",
+      source: { ...source, kind: "collection" }, pin: null },
+    { kind: "sensitivity", title: "敏感性", flag: "情景，不是实际数", subject: "华宸物业 · 期间费用率 9.20%", corner: "毛利率 \\ 收缴率",
+      columns: ["85.0%", "87.5%"], rows: [{ label: "18%", cells: [{ text: "(6.2)", negative: true, tone: "loss", current: false },
+        { text: "(3.7)", negative: true, tone: "loss", current: true }] }, { label: "20%", cells: [{ text: "(4.2)", negative: true, tone: "loss", current: false },
+        { text: "1.3", negative: false, tone: "edge", current: false }] }],
+      basis: [["距生死线（本年账单收缴率）", "-3.22 个百分点"]], caption: "框出的格最接近现在的位置。", source,
+      pin: { kind: "sensitivity", title: "敏感性", run_id: runId, select: { match: { entity: "华宸物业", scenario: "本期" } } } },
+  ] };
+  const whatIfTree = CardsRow(settledCards({ filed: [], presented: whatIfs }));
+  const drawnWhatIfs = flatten(whatIfTree);
+  for (const text of ["情景，不是实际数", "一年还要多收", "19,276 万元", "还差", "读自这次计算", "生死线收缴率", "一年回款差", "还要收", "88.00",
+    "按房产性质，还要收得最多的 1 个", "毛利率 \\ 收缴率", "87.5%", "(3.7)", "1.3", "距生死线（本年账单收缴率）", "打开收缴率结果"]) {
+    assert.ok(drawnWhatIfs.includes(text), `the what-if cards do not show ${text}`);
+  }
+  assert.equal(find(whatIfTree, (node) => node.type === "td" && node.props["aria-current"] === "true").length, 1, "one cell is framed as where the entity stands");
+  assert.equal(find(whatIfTree, (node) => node.type === "button" && flatten(node.props.children) === "钉到看板").length, 2,
+    "a what-if over an analysis run can be pinned; one over a collection run cannot");
+
   // While the assistant is still writing the call: the titles it has written so far, and nothing else.
   assert.match(flatten(CardsRow({ callId: "c", toolName: "answer_cards", block: { argsRaw: '{"spec":{"cards":[{"kind":"figure","title":"当期收' } })), /正在从计算结果取数/);
   const streaming = flatten(CardsRow({ callId: "c", toolName: "answer_cards", block: { argsRaw: '{"spec":{"cards":[{"kind":"figure","title":"当期收缴率"},{"title":"清' } }));
@@ -738,7 +767,8 @@ for (const toolName of ROSTER) {
   for (const props of [{}, { block: null }, settledCards(undefined), settledCards({ presented: null }), settledCards({ presented: [] }),
     settledCards({ presented: { cards: "x" } }),
     settledCards({ presented: { task_id: "t", cards: [null, 3, { kind: "chart" }, { kind: "rank", items: "no" }, { kind: "rank", items: [{ value: "x" }] },
-      { kind: "trend", points: [{ value: 1 }] }, { kind: "bridge", steps: [{}] }, { kind: "compare", items: [null] }, { kind: "figure", value: null, beside: [[1]] }] } }),
+      { kind: "trend", points: [{ value: 1 }] }, { kind: "bridge", steps: [{}] }, { kind: "compare", items: [null] }, { kind: "figure", value: null, beside: [[1]] },
+      { kind: "goal", value: null, groups: "x", basis: [[1]] }, { kind: "sensitivity", columns: ["a"], rows: [{ cells: [null] }, null, { cells: "x" }] }] } }),
     settledCards({ filed: [], presented }, { isError: true, error: { code: "refused" } })]) {
     assert.equal(typeof flatten(CardsRow(props)), "string");
   }

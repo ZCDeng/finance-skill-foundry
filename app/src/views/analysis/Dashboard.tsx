@@ -16,11 +16,13 @@ import { formatPeriod } from '../../lib/period.js';
 import { AskLink } from '../guide/GuideHub.js';
 import { ScenarioCard } from './ScenarioCard.js';
 import { scenarioBase } from './dashboardScenario.js';
+import { GoalCard, SensitivityCard } from './WhatIfCards.js';
+import { whatIfView, type GoalView, type SensitivityView } from './dashboardWhatIf.js';
 import { FigureSource } from './FigureSource.js';
 import { figureSource, runIsStale, type FigureSourceContext } from './figureSourceInfo.js';
 import { LevelMark } from './CollectionHealthView.js';
 import { profitBridges } from './RunPanel.js';
-import { cardSignature, type CardDraft, type CarryOffer, type Dashboard, type DashboardCard, type PinBoard } from './dashboardModel.js';
+import { cardSignature, isWhatIf, type CardDraft, type CarryOffer, type Dashboard, type DashboardCard, type PinBoard } from './dashboardModel.js';
 import { newerRun, TEMPLATES, type Template } from './dashboardTemplates.js';
 import { drawsOn, figureView, rankItems, sameMatch } from './dashboardViews.js';
 import { acceptedCard, buildSnapshot, type SnapshotTask } from './dashboardSnapshot.js';
@@ -145,8 +147,8 @@ export function useDashboard(taskId: string | undefined, { canRecompute = false,
 export type DashboardState = ReturnType<typeof useDashboard>;
 
 const STATE_WORDS: Record<DashboardCard['state'], string> = { explore: '助手提议', pinned: '待认可', accepted: '已认可' };
-/** A scenario card on the board is a what-if, never waiting to be accepted. */
-const stateWord = (card: DashboardCard) => (card.kind === 'scenario' && card.state !== 'explore' ? '情景' : STATE_WORDS[card.state]);
+/** A what-if on the board (情景、倒推、敏感性) is never waiting to be accepted. */
+const stateWord = (card: DashboardCard) => (isWhatIf(card.kind) && card.state !== 'explore' ? '情景' : STATE_WORDS[card.state]);
 
 /** A template's cards not on the board yet. */
 function freshCards(template: Template, runs: AnalysisRun[], cards: DashboardCard[]): CardDraft[] {
@@ -186,9 +188,9 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
   const cards = dashboard?.cards ?? [];
   const board = cards.filter((card) => card.state !== 'explore');
   const proposed = cards.filter((card) => card.state === 'explore');
-  // A scenario card is never accepted, so it never waits for it.
-  const waiting = board.filter((card) => card.state === 'pinned' && card.kind !== 'scenario');
-  const scenarios = board.filter((card) => card.kind === 'scenario').length;
+  // A what-if is never accepted, so it never waits for it.
+  const waiting = board.filter((card) => card.state === 'pinned' && !isWhatIf(card.kind));
+  const scenarios = board.filter((card) => isWhatIf(card.kind)).length;
   const runOf = (card: DashboardCard) => runs.find((run) => run.id === card.run_id);
   const contextOf = (run: AnalysisRun): FigureSourceContext => ({ run, analysis: analyses.find((row) => row.id === run.analysis_id), datasets, superseded: replaced });
   const stale = board.filter((card) => { const run = runOf(card); return run ? runIsStale(contextOf(run)) : false; });
@@ -225,7 +227,7 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
   };
   const acceptAll = () => {
     setConfirmAll(false);
-    act(`已认可 ${waiting.length} 张卡。`, (now) => now.map((card) => (card.state === 'pinned' && card.kind !== 'scenario' ? { ...card, state: 'accepted' } : card)));
+    act(`已认可 ${waiting.length} 张卡。`, (now) => now.map((card) => (card.state === 'pinned' && !isWhatIf(card.kind) ? { ...card, state: 'accepted' } : card)));
   };
   const moveAll = () => {
     const moves = new Map(movable.map(({ card, next }) => [card.id, next.id]));
@@ -320,6 +322,8 @@ function BoardAsks({ busy }: { busy: boolean }) {
     <AskLink ask="dashboard-cards" label="提议几张卡" disabled={busy} />
     <AskLink ask="dashboard-by-city" label="按城市公司排一排" disabled={busy} />
     <AskLink ask="collection-scenario" label="加一张回款情景卡" disabled={busy} />
+    <AskLink ask="collection-goal" label="倒推还要收多少" disabled={busy} />
+    <AskLink ask="collection-sensitivity" label="加一张敏感性表" disabled={busy} />
     <span>只填进对话框，改好再发送。</span></p>;
 }
 
@@ -385,7 +389,7 @@ function RecomputedLine({ card }: { card: DashboardCard }) {
   if (!said || card.state === 'accepted') return null;
   // Where it came from is said once at the top and on 总览; the card says what it was and how it moved.
   const month = said.months ? `按 ${formatPeriod(said.months[1])}的资料重算` : '按新资料重算';
-  const before = card.kind === 'figure' || card.kind === 'scenario' ? said.before?.display
+  const before = card.kind === 'figure' || isWhatIf(card.kind) ? said.before?.display
     : card.kind === 'rank' ? (said.before?.labels ?? []).slice(0, 3).join('、') : '';
   const what = card.kind === 'rank' && before ? `上次前三 ${before}` : before ? `上次 ${before}` : '';
   return <div className="dashboard-card__recompute" data-changed={said.changed ? '' : undefined}>
@@ -447,6 +451,15 @@ function BoardCard({ card, run, contextOf, actions, newer }: {
     const base = scenarioBase(run, card.select.match);
     body = base ? <ScenarioCard base={base} context={contextOf(run)} />
       : <p className="analysis-note">这次结果里凑不齐这个主体的毛利率、期间费用率和距生死线，可以移除。</p>;
+  } else if (card.kind === 'goal') {
+    const view = whatIfView('goal', run, card.select) as GoalView | null;
+    body = view ? <GoalCard view={view} context={contextOf(run)} />
+      : <p className="analysis-note">{card.select.goal === 'budget' ? '这次结果里没有这个主体的全年收入预算和已过月数，可以移除。'
+        : '这次结果里凑不齐这个主体的生死线和距生死线，可以移除。'}</p>;
+  } else if (card.kind === 'sensitivity') {
+    const view = whatIfView('sensitivity', run, card.select) as SensitivityView | null;
+    body = view ? <SensitivityCard view={view} context={contextOf(run)} />
+      : <p className="analysis-note">这次结果里没有这个主体的敏感性表，可以移除。</p>;
   } else {
     const found = profitBridges(run).find((bridge) => sameMatch(bridge.match, card.select.match));
     body = found ? <Waterfall title={card.title} steps={found.steps} unit={found.unit || undefined} />
@@ -456,7 +469,7 @@ function BoardCard({ card, run, contextOf, actions, newer }: {
   return <article className={`dashboard-card dashboard-card--${card.kind}`} data-state={card.state} aria-label={card.title}>
     <header className="dashboard-card__head">
       <h4 className="dashboard-card__title" title={card.title}>{card.title}</h4>
-      <span className="dashboard-card__state" data-state={card.kind === 'scenario' && card.state !== 'explore' ? 'scenario' : card.state}>{stateWord(card)}</span>
+      <span className="dashboard-card__state" data-state={isWhatIf(card.kind) && card.state !== 'explore' ? 'scenario' : card.state}>{stateWord(card)}</span>
     </header>
     {card.note ? <p className="dashboard-card__note">{card.note}</p> : null}
     {body}
@@ -479,7 +492,7 @@ function Actions({ card, run, actions, newer }: { card: DashboardCard; run?: Ana
       <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => set('pinned', `已钉住「${card.title}」，等你认可。`)}><Pin size={14} strokeWidth={1.5} aria-hidden />钉住</Button>
       <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => remove(`已不要「${card.title}」。`)}><X size={14} strokeWidth={1.5} aria-hidden />不要</Button>
     </>}
-    {!readOnly && card.state === 'pinned' && card.kind !== 'scenario' && run && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => set('accepted', `已认可「${card.title}」。`)}>
+    {!readOnly && card.state === 'pinned' && !isWhatIf(card.kind) && run && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => set('accepted', `已认可「${card.title}」。`)}>
       <Check size={14} strokeWidth={1.5} aria-hidden />认可</Button>}
     {!readOnly && card.state === 'accepted' && <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => set('pinned', `已取消认可「${card.title}」。`)}>取消认可</Button>}
     {!readOnly && newer && <Button type="button" size="sm" variant="ghost" disabled={busy}

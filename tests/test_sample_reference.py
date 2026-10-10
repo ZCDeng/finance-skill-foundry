@@ -110,11 +110,11 @@ def test_the_figures_the_guide_quotes_are_the_ones_the_reference_computes(built)
 
 
 def test_the_reference_board_is_the_one_the_guide_describes_and_it_exports(built):
-    """Step 11: the 回款健康 template on the example's run, accepted but its 回款情景; a snapshot of it files."""
+    """Step 11: the 回款健康 template on the example's run, accepted but its what-ifs; a snapshot of it files."""
     import json
 
     from foundry.dashboard_snapshot import accepted, ranked, save
-    from foundry.dashboards import matching_rows
+    from foundry.dashboards import WHAT_IF, matching_rows
     from foundry.sample_reference import BOARD_NOTE
     from foundry.sample_task import pack_dir
 
@@ -124,7 +124,7 @@ def test_the_reference_board_is_the_one_the_guide_describes_and_it_exports(built
     cards = board["cards"]
     assert {"cards": len(cards), "figures": sum(card["kind"] == "figure" for card in cards),
             "accepted": sum(accepted(card) for card in cards)} == expected
-    assert [card["kind"] for card in cards if not accepted(card)] == ["scenario"]
+    assert [card["kind"] for card in cards if not accepted(card)] == ["scenario", "goal", "sensitivity"]
     assert all(card["note"] == BOARD_NOTE for card in cards if accepted(card))
 
     run = next(row for row in AnalysisStore(task).state()["runs"] if row["id"] == cards[0]["run_id"])
@@ -145,9 +145,10 @@ def test_the_reference_board_is_the_one_the_guide_describes_and_it_exports(built
     model = {"version": 1, "board_id": board["id"], "task": task.meta()["title"], "period": "2026 年 8 月", "figures": figures, "charts": charts,
              "sources": [{"n": number, "card_id": card["id"], "title": card["title"], "run": "A", "lines": []} for number, card in enumerate(taken, start=1)],
              "runs": [{"key": "A", "run_id": run["id"], "label": "回款健康", "computed": "", "files": []}], "beyond": [],
-             "left_out": {"pinned": [], "scenario": [{"card_id": card["id"], "title": card["title"]} for card in cards if card["kind"] == "scenario"]}}
+             "left_out": {"pinned": [], "scenario": [{"card_id": card["id"], "title": card["title"]} for card in cards if card["kind"] in WHAT_IF]}}
     record = save(task, {"format": "xlsx", "model": model}, actor="manager")["snapshot"]
-    assert len(record["cards"]) == expected["accepted"] and record["left_out"] == {"pinned": [], "scenario": ["回款情景：收缴率变了会怎样"]}
+    assert len(record["cards"]) == expected["accepted"] and record["left_out"] == {"pinned": [], "scenario": [
+        "回款情景：收缴率变了会怎样", "倒推：收缴率回到生死线要多收多少", "敏感性：毛利率和收缴率一起变"]}
 
 
 def test_the_next_month_route_adopts_what_the_practice_task_confirmed(tmp_path):

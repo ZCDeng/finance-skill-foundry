@@ -697,6 +697,21 @@ def _le_gap(base: str) -> Callable[[dict, dict], Computed]:
     return compute
 
 
+def _m_budget_remaining(v, p) -> Computed:
+    """What the full-year revenue budget still needs: negative once the year to date has passed it."""
+    if not _need(v, "revenue", "revenue_budget_full"):
+        return None
+    return v["revenue_budget_full"] - v["revenue"], ["revenue_budget_full", "revenue"], False
+
+
+def _m_budget_monthly(v, p) -> Computed:
+    """The revenue each month left has to bring in for the year to meet its budget; nothing once it is met."""
+    if not _need(v, "revenue", "revenue_budget_full", "months_elapsed") or v["months_elapsed"] >= 12:
+        return None
+    remaining = max(v["revenue_budget_full"] - v["revenue"], Decimal(0))
+    return remaining / (12 - v["months_elapsed"]), ["revenue_budget_full", "revenue", "months_elapsed"], False
+
+
 def _m_impairment_progress(v, p) -> Computed:
     if not _need(v, "impairment_py", "impairment_py_full") or v["impairment_py_full"] == 0:
         return None
@@ -769,6 +784,10 @@ METRICS: list[dict[str, Any]] = [
      "fn": _linear("revenue"), "formula": "本年累计 × 12 ÷ 已过月数"},
     {"key": "revenue_le_gap", "label": "收入 LE 与按去年节奏之差", "kind": "ratio", "fn": _le_gap("revenue"),
      "formula": "（LE − 按去年节奏的全年数）÷ 按去年节奏的全年数"},
+    {"key": "revenue_budget_remaining", "label": "全年收入预算还差", "kind": "amount", "fn": _m_budget_remaining,
+     "formula": "全年收入预算 − 本年累计营业收入"},
+    {"key": "revenue_budget_monthly", "label": "剩余月份每月需完成收入", "kind": "amount", "fn": _m_budget_monthly,
+     "formula": "（全年收入预算 − 本年累计营业收入，已完成记 0）÷（12 − 已过月数）"},
     {"key": "net_profit_full_year_seasonal", "label": "全年净利润（按去年节奏）", "kind": "amount",
      "fn": _seasonal("net_profit"), "formula": "本年累计 ÷（上年同期累计 ÷ 上年全年）"},
     {"key": "net_profit_full_year_linear", "label": "全年净利润（线性外推，仅对照）", "kind": "amount",
@@ -820,6 +839,8 @@ _METRIC_INPUTS = {
     "revenue_full_year_seasonal": ("revenue", "revenue_py", "revenue_py_full"),
     "revenue_full_year_linear": ("revenue", "months_elapsed"),
     "revenue_le_gap": ("revenue", "revenue_py", "revenue_py_full", "revenue_le"),
+    "revenue_budget_remaining": ("revenue", "revenue_budget_full"),
+    "revenue_budget_monthly": ("revenue", "revenue_budget_full", "months_elapsed"),
     "net_profit_full_year_seasonal": ("net_profit", "net_profit_py", "net_profit_py_full"),
     "net_profit_full_year_linear": ("net_profit", "months_elapsed"),
     "net_profit_le_gap": ("net_profit", "net_profit_py", "net_profit_py_full", "net_profit_le"),

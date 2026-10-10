@@ -11,6 +11,7 @@ import { profitBridges } from './RunPanel.js';
 import { columnSemantics, displayColumns, formatBusinessCell, businessColumnLabel } from './businessResults.js';
 import { matchingRows, splitDisplay, type DashboardCard } from './dashboardModel.js';
 import { scenarioBase } from './dashboardScenario.js';
+import { whatIfView } from './dashboardWhatIf.js';
 
 /** What a figure card shows of its row. */
 export type FigureView = { subject: string; value: string; part: string; beside: [string, string][]; level: HealthRow['level']; levelLabel: string | null; row: Record<string, unknown>; facts: [string, string][] };
@@ -70,5 +71,6 @@ export function drawsOn(card: DashboardCard, run: AnalysisRun): boolean {
   if (card.kind === 'figure') return figureView(card, run) !== null;
   if (card.kind === 'rank') return rankItems(card, run).items.length >= 2;
   if (card.kind === 'scenario') return scenarioBase(run, card.select.match) !== null;
+  if (card.kind === 'goal' || card.kind === 'sensitivity') return whatIfView(card.kind, run, card.select) !== null;
   return profitBridges(run).some((bridge) => sameMatch(bridge.match, card.select.match));
 }
