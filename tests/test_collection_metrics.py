@@ -222,6 +222,26 @@ def test_manual_inputs_are_named_on_the_rows_that_read_them():
     assert "营业收入（本期）" in rows["gross_margin"]["note"]
 
 
+def test_the_full_year_revenue_budget_is_worked_back_over_the_months_left():
+    from foundry.what_if import goal_budget, lines_of
+
+    rows, result = _rows({**GROUP, "revenue_budget_full": "1600", "months_elapsed": "8"})
+    assert Decimal(rows["revenue_budget_remaining"]["value"]) == Decimal("600")
+    assert Decimal(rows["revenue_budget_monthly"]["value"]) == Decimal("150")
+    assert rows["revenue_budget_monthly"]["inputs"] == {"revenue_budget_full": "1600", "revenue": "1000", "months_elapsed": "8"}
+    # A budget given as a bare number is the manager's, and the card says so.
+    assert "全年收入预算" in rows["revenue_budget_remaining"]["note"]
+    view = goal_budget(lines_of(result["rows"], "集团"), "集团")
+    assert (view["part"], view["beside"][0][0]) == ("剩余 4 个月每月要做到", "全年收入预算（手填）")
+    assert ["每月要比月均多", "+20.0%"] in view["beside"]
+    # Met already: what is left is negative and each month needs nothing more; at month 12 there is no month left.
+    met, _ = _rows({**GROUP, "revenue_budget_full": "900", "months_elapsed": "8"})
+    assert (Decimal(met["revenue_budget_remaining"]["value"]), Decimal(met["revenue_budget_monthly"]["value"])) == (Decimal("-100"), 0)
+    december, _ = _rows({**GROUP, "revenue_budget_full": "1600", "months_elapsed": "12"})
+    assert "revenue_budget_remaining" in december and "revenue_budget_monthly" not in december
+    assert "revenue_budget_remaining" not in _rows(GROUP)[0]
+
+
 def test_break_even_matrix_uses_the_entity_expense_ratio():
     entities = resolve_entities({"entities": [_entity(GROUP, sensitivity=True)]}, {})
     params = resolve_params({})

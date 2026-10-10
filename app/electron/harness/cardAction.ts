@@ -13,8 +13,8 @@
 /** What the page writes before the action, as dsh-plugin/client.js writes it. */
 export const CARD_ACTION_MARKER = '__foundry_card_action__';
 
-/** The board cards a conversation card can be pinned as (foundry/answer_cards.py `draw`). */
-export const PINNABLE_KINDS = ['figure', 'rank', 'bridge'] as const;
+/** The board cards a conversation card can be pinned as (foundry/answer_cards.py `draw`); goal and sensitivity pin as what-ifs. */
+export const PINNABLE_KINDS = ['figure', 'rank', 'bridge', 'goal', 'sensitivity'] as const;
 
 export type PinnedCard = {
   kind: (typeof PINNABLE_KINDS)[number];

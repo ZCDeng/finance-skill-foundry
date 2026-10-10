@@ -3,7 +3,7 @@
 A card holds no figure of its own. It names one stored run and which of its rows it shows (``select``), so every
 number on the board is a number that run already holds, and opens to the same source as on the result page.
 
-Three kinds:
+The kinds:
 
 - ``figure``: one cell, the row ``select.match`` names in ``select.column``.
 - ``rank``: one column across the rows ``select.match`` names, each labelled by ``select.label``, sorted by
@@ -11,8 +11,14 @@ Three kinds:
 - ``bridge``: the profit bridge of the variance rows ``select.match`` names.
 - ``scenario`` (回款情景): one entity's 本期 lines of a collection-health run, which ``select.match`` names. The card
   moves the collection rate by hand and shows what follows (距生死线, cash operating profit, a year's collections).
-  What it shows past the run's own lines is a what-if, never a figure of the run, so the card is never accepted
-  and never goes into the close or a report.
+- ``goal`` (倒推): the same lines worked back from a target. ``select.goal`` ``collection``: what reaching
+  ``select.target`` (a collection rate written with its %, 生死线 when there is none) means against the line and in a
+  year's collections; ``budget``: what the full-year revenue budget still needs, each month left.
+- ``sensitivity`` (敏感性表): the entity's grid of the run (``result.sensitivity``): 距生死线 over gross margins and
+  collection rates, around where the entity stands.
+
+What a scenario, goal or sensitivity card shows past the run's own lines is a what-if, never a figure of the run, so
+such a card is never accepted and never goes into the close or a report.
 
 Three states (notes/claude-dashboards-borrowing-plan-20261010.md, 八):
 
@@ -27,13 +33,17 @@ The board is versioned like every other record here: each save is a new version 
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from typing import Any
 
 from foundry.errors import FoundryError
 from foundry.task import now_iso
 
-KINDS = frozenset({"figure", "rank", "bridge", "scenario"})
+KINDS = frozenset({"figure", "rank", "bridge", "scenario", "goal", "sensitivity"})
+# What-ifs over a run's lines: never accepted, never in the close or a report.
+WHAT_IF = frozenset({"scenario", "goal", "sensitivity"})
+GOALS = frozenset({"collection", "budget"})
 STATES = frozenset({"explore", "pinned", "accepted"})
 TEMPLATES = frozenset({"operating", "collection", "city"})
 ORDERS = frozenset({"asc", "desc"})
@@ -50,6 +60,11 @@ MAX_RANK = 50
 BRIDGE_METHOD = "revenue_minus_cost_minus_expense"
 # The lines a scenario card moves the collection rate against (foundry/collection_metrics.py).
 SCENARIO_LINES = ("gross_margin", "expense_ratio", "break_even_collection", "collection_gap")
+# The lines a goal card works back from (foundry/collection_metrics.py).
+GOAL_LINES = {"collection": ("break_even_collection", "collection_gap"),
+              "budget": ("revenue_budget_remaining", "revenue_budget_monthly")}
+# A collection-rate target, written as a rate with its % (92%, 87.5%).
+TARGET = re.compile(r"^(\d{1,3}(?:\.\d{1,4})?)%$")
 
 
 def _text(value: Any, label: str, *, maximum: int, required: bool = True) -> str | None:
@@ -138,23 +153,59 @@ def normalize_select(kind: str, select: Any, run: dict) -> dict:
             out["reference"] = {"value": str(reference["value"]),
                                 "label": _text(reference.get("label"), "reference label", maximum=MAX_TITLE)}
         return out
-    if kind == "scenario":
+    if kind in WHAT_IF:
         if result.get("scenario_kind") != "collection_health":
-            raise FoundryError("a scenario card reads a collection health result")
+            raise FoundryError(f"a {kind} card reads a collection health result")
         if len({row.get("entity") for _, row in found}) != 1:
-            raise FoundryError("a scenario card reads the lines of one entity")
-        for key in SCENARIO_LINES:
+            raise FoundryError(f"a {kind} card reads the lines of one entity")
+        out: dict = {"match": match}
+        lines = SCENARIO_LINES
+        if kind == "goal":
+            goal = select.get("goal")
+            if goal not in GOALS:
+                raise FoundryError("a goal card works back to a collection rate (goal collection) or the revenue budget (goal budget)")
+            lines, out["goal"] = GOAL_LINES[goal], goal
+            if goal == "collection" and select.get("target") is not None:
+                out["target"] = goal_target(select["target"])
+        elif kind == "sensitivity":
+            lines = ("collection_gap",)
+        for key in lines:
             if sum(1 for _, row in found if row.get("metric_key") == key) != 1:
-                raise FoundryError(f"a scenario card needs one {key} line of its entity; name the 本期 lines")
-        # The what-if moves this period's collection rate; last year's lines would be shown as this period's.
+                raise FoundryError(f"a {kind} card needs one {key} line of its entity; name the 本期 lines")
+        # The what-if moves this period's lines; last year's lines would be shown as this period's.
         if any(row.get("scenario") != "本期" for _, row in found):
-            raise FoundryError("a scenario card reads its entity's 本期 lines only; name scenario 本期")
-        return {"match": match}
+            raise FoundryError(f"a {kind} card reads its entity's 本期 lines only; name scenario 本期")
+        entity = found[0][1].get("entity")
+        if kind == "sensitivity" and sensitivity_grid(result, entity) is None:
+            raise FoundryError(f"this run has no sensitivity grid for {entity}; run it again with sensitivity on for {entity}")
+        return out
     if result.get("method") != BRIDGE_METHOD:
         raise FoundryError("a bridge card reads a budget or prior-period variance result")
     if not any(row.get("metric") == "profit" for _, row in found):
         raise FoundryError("a bridge card must name rows with a profit line")
     return {"match": match}
+
+
+def goal_target(value: Any) -> str:
+    """A collection-rate target as stored: the rate with its %, above 0 and at most 100%."""
+    found = TARGET.match(value.strip()) if isinstance(value, str) else None
+    if not found or not 0 < float(found.group(1)) <= 100:
+        raise FoundryError("a goal card's target is a collection rate written with its %, such as 92%")
+    return f"{found.group(1)}%"
+
+
+def sensitivity_grid(result: dict, entity: Any) -> dict | None:
+    """The run's sensitivity grid for ``entity`` (collection_metrics.break_even_matrix), when it holds one to draw."""
+    grids = result.get("sensitivity") if isinstance(result.get("sensitivity"), list) else []
+    grid = next((grid for grid in grids if isinstance(grid, dict) and grid.get("entity") == entity), None)
+    if grid is None:
+        return None
+    margins, rates, cells = grid.get("gross_margins"), grid.get("collection_rates"), grid.get("cells")
+    if not isinstance(margins, list) or not isinstance(rates, list) or len(margins) < 2 or len(rates) < 2:
+        return None
+    if not isinstance(cells, list) or len(cells) != len(margins) or any(not isinstance(row, list) or len(row) != len(rates) for row in cells):
+        return None
+    return grid
 
 
 def signature(card: dict) -> str:
@@ -168,12 +219,12 @@ def normalize_card(card: Any, *, run_of, previous: dict | None, proposer: str, s
         raise FoundryError("dashboard card must be an object")
     kind = card.get("kind")
     if kind not in KINDS:
-        raise FoundryError("dashboard card kind must be figure, rank, bridge or scenario")
+        raise FoundryError("dashboard card kind must be figure, rank, bridge, scenario, goal or sensitivity")
     state = state or card.get("state", "pinned")
     if state not in STATES:
         raise FoundryError("dashboard card state must be explore, pinned or accepted")
-    if kind == "scenario" and state == "accepted":
-        raise FoundryError("a scenario card is never accepted; what it shows is a what-if, not a figure of the run")
+    if kind in WHAT_IF and state == "accepted":
+        raise FoundryError(f"a {kind} card is never accepted; what it shows is a what-if, not a figure of the run")
     run = run_of(card.get("run_id"))
     if run.get("execution_status") not in {"succeeded", "success"}:
         raise FoundryError("a dashboard card reads a run that succeeded")

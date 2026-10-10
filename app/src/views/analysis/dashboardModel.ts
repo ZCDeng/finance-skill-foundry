@@ -6,8 +6,14 @@
 import { createContext } from 'react';
 import type { AnalysisRun } from '../../bridge.js';
 
-/** scenario: 回款情景, a what-if over one entity's collection-health lines; never accepted. */
-export type CardKind = 'figure' | 'rank' | 'bridge' | 'scenario';
+/**
+ * scenario: 回款情景, goal: 倒推, sensitivity: 敏感性表 -- what-ifs over one entity's collection-health lines, never
+ * accepted.
+ */
+export type CardKind = 'figure' | 'rank' | 'bridge' | 'scenario' | 'goal' | 'sensitivity';
+export const WHAT_IF_KINDS: readonly CardKind[] = ['scenario', 'goal', 'sensitivity'];
+/** A what-if card: never accepted, never in the close, a report or a snapshot (foundry/dashboards.py WHAT_IF). */
+export const isWhatIf = (kind: string | undefined) => (WHAT_IF_KINDS as readonly string[]).includes(kind ?? '');
 /** explore: the assistant proposed it, not on the board yet; pinned: waits for the manager; accepted: the manager's. */
 export type CardState = 'explore' | 'pinned' | 'accepted';
 export type TemplateId = 'operating' | 'collection' | 'city';
@@ -22,6 +28,10 @@ export type CardSelect = {
   order?: 'asc' | 'desc';
   limit?: number;
   reference?: { value: string; label: string };
+  /** goal: what it works back to, the collection rate or the full-year revenue budget. */
+  goal?: 'collection' | 'budget';
+  /** goal collection: the target rate with its % (92%); without one, the 生死线. */
+  target?: string;
 };
 
 export type DashboardCard = {

@@ -145,11 +145,13 @@ describe('the board', () => {
     await view();
     expect(screen.getByRole('heading', { name: '还没有看板' })).toBeTruthy();
     const row = screen.getByText('回款健康').closest('li')!;
-    fireEvent.click(within(row).getByRole('button', { name: /添加 5 张卡/ }));
-    await waitFor(() => expect(backend.board()?.cards).toHaveLength(5));
+    fireEvent.click(within(row).getByRole('button', { name: /添加 7 张卡/ }));
+    await waitFor(() => expect(backend.board()?.cards).toHaveLength(7));
     expect(backend.board()!.cards.every((row) => row.state === 'pinned')).toBe(true);
-    // The 回款情景 card is a what-if: on the board, never waiting to be accepted.
-    expect(await screen.findByText('共 5 张 · 已认可 0 张 · 待认可 4 张 · 情景 1 张')).toBeTruthy();
+    // 回款情景, 倒推 and the sensitivity grid are what-ifs: on the board, never waiting to be accepted.
+    expect(await screen.findByText('共 7 张 · 已认可 0 张 · 待认可 4 张 · 情景 3 张')).toBeTruthy();
+    expect(backend.board()!.cards.slice(-2).map((row) => [row.kind, row.select])).toEqual([
+      ['goal', { match: { entity: '集团', scenario: '本期' }, goal: 'collection' }], ['sensitivity', { match: { entity: '集团', scenario: '本期' } }]]);
     // A figure card opens its source like the result page does.
     const gap = screen.getByRole('article', { name: '距生死线（本年账单收缴率）' });
     expect(within(gap).getByRole('button', { name: /查看来源/ })).toBeTruthy();
@@ -354,6 +356,41 @@ describe('the 回款情景 card and asking the assistant for cards', () => {
     expect(within(article).getAllByRole('button', { name: /查看来源/ }).length).toBeGreaterThanOrEqual(3);
     fireEvent.click(within(article).getByRole('button', { name: '回到这次计算的收缴率' }));
     expect(within(article).getByText('低于生死线')).toBeTruthy();
+  });
+
+  it('works the collection rate back to a target and draws the grid around where the group stands, both as what-ifs', async () => {
+    boardBackend([
+      card({ id: 'g1', kind: 'goal', title: '倒推：收缴率到 92%', run_id: run.id, select: { match, goal: 'collection', target: '92%' } }),
+      card({ id: 'g2', kind: 'sensitivity', title: '敏感性：毛利率和收缴率一起变', run_id: run.id, select: { match } }),
+    ]);
+    function Board() {
+      const state = useDashboard('t');
+      return <DashboardView state={state} runs={[run]} analyses={[]} datasets={[]} readOnly={false} />;
+    }
+    render(<Board />);
+    const goal = await screen.findByRole('article', { name: '倒推：收缴率到 92%' });
+    expect(within(goal).getByText('情景，不是实际数')).toBeTruthy();
+    expect(within(goal).getByText('集团 · 收缴率到 92.00%')).toBeTruthy();
+    expect(within(goal).getByText('一年还要多收')).toBeTruthy();
+    // 4.08 points of 10,000 万元 a year, with VAT: the same 433 万元 the 回款情景 card shows at 92%.
+    expect(within(goal).getByText('433 万元')).toBeTruthy();
+    expect(within(goal).getByText('87.92%')).toBeTruthy();
+    expect(within(goal).getByText('+0.86 个百分点')).toBeTruthy();
+    expect(within(goal).queryByRole('button', { name: '认可' })).toBeNull();
+    expect(within(goal).getAllByRole('button', { name: /查看来源/ })).toHaveLength(3);
+
+    const grid = screen.getByRole('article', { name: '敏感性：毛利率和收缴率一起变' });
+    expect(within(grid).getByText('集团 · 期间费用率 9.20%')).toBeTruthy();
+    const table = within(grid).getByRole('table');
+    expect(within(table).getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual(['毛利率 \\ 收缴率', '82.5%', '85.0%', '87.5%', '90.0%', '92.5%']);
+    expect(within(table).getAllByRole('rowheader').map((cell) => cell.textContent)).toEqual(['14%', '16%', '18%', '20%', '22%']);
+    // 18% margin and 87.5% collected, less 82% of costs and 9.2% of expenses: 3.7 lost of every 100 collected.
+    const here = table.querySelector('[aria-current="true"]')!;
+    expect(here.textContent).toMatch(/3\.7/);
+    expect(here.className).toContain('analysis-health-cell--loss');
+    expect(within(grid).getByText(/框出的格最接近现在的位置。完整的表在结果页。/)).toBeTruthy();
+    expect(within(grid).queryByRole('button', { name: '认可' })).toBeNull();
+    expect(screen.getByText('共 2 张 · 已认可 0 张 · 待认可 0 张 · 情景 2 张')).toBeTruthy();
   });
 
   it('puts a question for the assistant into the conversation, unsent', async () => {

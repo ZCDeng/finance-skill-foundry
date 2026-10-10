@@ -32,7 +32,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
-from foundry.dashboards import matching_rows, normalize_select
+from foundry.dashboards import WHAT_IF, matching_rows, normalize_select
 from foundry.errors import FoundryError
 from foundry.task import now_iso
 
@@ -389,9 +389,11 @@ def shown(card: dict, run: dict) -> dict:
         rate = "fraction" if select.get("column") in FRACTION_COLUMNS else "points" if row.get("unit") in POINT_UNITS else None
         return {"value": None if value is None else str(value), "display": None if display is None else str(display),
                 "level": row.get("level"), "unit": row.get("unit"), "rate": rate}
-    if card["kind"] == "scenario":
-        # A scenario card is judged by where its entity stands against the line, the one line it moves.
-        row = next((row for row in found if row.get("metric_key") == "collection_gap"), {})
+    if card["kind"] in WHAT_IF:
+        # A what-if is judged by the line it works from: where its entity stands against the line, or, for the
+        # budget worked back, what each month left now has to bring in.
+        key = "revenue_budget_monthly" if select.get("goal") == "budget" else "collection_gap"
+        row = next((row for row in found if row.get("metric_key") == key), {})
         return {"value": None if row.get("value") is None else str(row["value"]),
                 "display": row.get("display_value"), "level": row.get("level"), "unit": row.get("unit")}
     if card["kind"] == "rank":
@@ -420,7 +422,7 @@ def _sign(value: Decimal | None) -> int:
 
 def change(card: dict, before: dict, after: dict) -> tuple[bool, str]:
     """Whether the card moved enough to look at, and the words for how it moved."""
-    if card["kind"] in {"figure", "scenario"}:
+    if card["kind"] == "figure" or card["kind"] in WHAT_IF:
         if before.get("level") and after.get("level") and before["level"] != after["level"]:
             return True, f"级别 {LEVEL_WORDS.get(before['level'], before['level'])} → {LEVEL_WORDS.get(after['level'], after['level'])}"
         old, new = _number(before.get("value")), _number(after.get("value"))

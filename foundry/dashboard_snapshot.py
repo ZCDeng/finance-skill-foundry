@@ -245,7 +245,9 @@ def _float(value: Any) -> float | None:
 
 def accepted(card: dict) -> bool:
     """A card the manager accepted on the run it reads now: the only kind a snapshot shows."""
-    return (card.get("state") == "accepted" and card.get("kind") != "scenario"
+    from foundry.dashboards import WHAT_IF
+
+    return (card.get("state") == "accepted" and card.get("kind") not in WHAT_IF
             and (card.get("accepted") or {}).get("run_id") == card.get("run_id"))
 
 
@@ -341,8 +343,11 @@ def check(model: dict, board: dict | None, run_of, *, whole: bool) -> dict[str, 
         raise FoundryError("no card on the dashboard is accepted yet; accept the ones to export first")
     if len(set(taken + beyond)) != len(taken + beyond) or sorted(taken + beyond) != sorted(wanted) or (whole and beyond):
         raise FoundryError("a snapshot shows the dashboard's accepted cards and no others; export again")
-    left = {"pinned": [card for card in cards if card["kind"] != "scenario" and not accepted(card)],
-            "scenario": [card for card in cards if card["kind"] == "scenario"]}
+    from foundry.dashboards import WHAT_IF
+
+    # What-ifs (情景、倒推、敏感性) are listed together under 情景.
+    left = {"pinned": [card for card in cards if card["kind"] not in WHAT_IF and not accepted(card)],
+            "scenario": [card for card in cards if card["kind"] in WHAT_IF]}
     for key, shown in model["left_out"].items():
         if [item["card_id"] for item in shown] != [card["id"] for card in left[key]]:
             raise FoundryError("a snapshot names the cards it leaves out as the dashboard has them; export again")

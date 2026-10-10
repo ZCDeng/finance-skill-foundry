@@ -850,6 +850,102 @@ window.__ModuleLoader__.load({
       });
     }
 
+    /** A what-if heads its card, so a figure it worked out is never read as the run's. */
+    function WhatIfFlag(props) {
+      if (!props.text) return null;
+      return jsx.jsx('span', {
+        style: { justifySelf: 'start', padding: '0 8px', borderRadius: 999, border: '1px dashed ' + RULE, fontSize: 12, lineHeight: '20px', color: INK },
+        children: words(props.text),
+      });
+    }
+
+    /** Lines under a heading of their own: the run's lines a what-if works from, or the groups that need the most. */
+    function Lines(props) {
+      if (!list(props.rows).length) return null;
+      return jsx.jsxs('div', {
+        style: { display: 'grid', gap: 2 },
+        children: [jsx.jsx('div', { style: SMALL, children: words(props.title) }), jsx.jsx(Beside, { rows: props.rows })],
+      });
+    }
+
+    /** 倒推: the answer first, what it was worked out from beside it, the run's own lines under them, and how. */
+    function GoalBody(props) {
+      const card = props.card || {};
+      const groups = card.groups && typeof card.groups === 'object' ? card.groups : null;
+      return jsx.jsxs('div', {
+        style: { display: 'grid', gap: 4, minWidth: 0 },
+        children: [
+          jsx.jsx(WhatIfFlag, { text: card.flag }),
+          jsx.jsx('div', { style: SMALL, children: words(card.subject) }),
+          jsx.jsxs('div', {
+            style: { display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: '0 8px' },
+            children: [jsx.jsx('span', { style: { fontSize: 12 }, children: words(card.part) }), jsx.jsx(Figure, { value: card.value })],
+          }),
+          jsx.jsx(Beside, { rows: card.beside }),
+          groups ? jsx.jsx(Lines, { title: groups.title, rows: groups.lines }) : null,
+          jsx.jsx(Lines, { title: '读自这次计算', rows: card.basis }),
+          card.caption ? jsx.jsx('div', { style: SMALL, children: words(card.caption) }) : null,
+        ],
+      });
+    }
+
+    const TONES = {
+      loss: 'color-mix(in srgb, ' + NEGATIVE + ' 14%, transparent)',
+      edge: 'color-mix(in srgb, ' + LEVELS.yellow[0] + ' 16%, transparent)',
+    };
+
+    /** 敏感性表: 距生死线 around where the entity stands, toned as the result page tones it, its cell framed. */
+    function SensitivityBody(props) {
+      const card = props.card || {};
+      const columns = list(card.columns);
+      const rows = list(card.rows).filter((row) => row && Array.isArray(row.cells) && row.cells.length === columns.length);
+      const cell = { padding: '2px 6px', textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 400 };
+      const head = Object.assign({}, cell, { color: MUTED });
+      return jsx.jsxs('div', {
+        style: { display: 'grid', gap: 4, minWidth: 0 },
+        children: [
+          jsx.jsx(WhatIfFlag, { text: card.flag }),
+          jsx.jsx('div', { style: SMALL, children: words(card.subject) }),
+          jsx.jsx('div', {
+            style: { overflowX: 'auto' },
+            children: jsx.jsxs('table', {
+              style: Object.assign({ borderCollapse: 'collapse', fontSize: 12 }, FIGURE_FACE),
+              'aria-label': words(card.subject) + '：各毛利率和收缴率下的距生死线（个百分点）',
+              children: [
+                jsx.jsx('thead', {
+                  children: jsx.jsxs('tr', {
+                    children: [
+                      jsx.jsx('th', { scope: 'col', style: Object.assign({}, head, { textAlign: 'left', fontFamily: 'inherit' }), children: words(card.corner) }),
+                      ...columns.map((text, index) => jsx.jsx('th', { scope: 'col', style: head, children: words(text) }, String(index))),
+                    ],
+                  }),
+                }),
+                jsx.jsx('tbody', {
+                  children: rows.map((row, r) => jsx.jsxs('tr', {
+                    children: [
+                      jsx.jsx('th', { scope: 'row', style: head, children: words(row.label) }),
+                      ...row.cells.map((one, c) => jsx.jsx('td', {
+                        'aria-current': one && one.current ? 'true' : undefined,
+                        style: Object.assign({}, cell, {
+                          background: TONES[one && one.tone] || 'transparent',
+                          color: one && one.negative ? NEGATIVE : INK,
+                          outline: one && one.current ? '2px solid ' + ACCENT : 'none',
+                          outlineOffset: -2,
+                        }),
+                        children: words(one && one.text),
+                      }, String(c))),
+                    ],
+                  }, String(r))),
+                }),
+              ],
+            }),
+          }),
+          jsx.jsx(Lines, { title: '读自这次计算', rows: card.basis }),
+          card.caption ? jsx.jsx('div', { style: SMALL, children: words(card.caption) }) : null,
+        ],
+      });
+    }
+
     /** Where a card's figures came from: as the result page's 来源 card says it, folded. */
     function SourceFold(props) {
       const source = props.source;
@@ -923,6 +1019,8 @@ window.__ModuleLoader__.load({
       } else if (card.kind === 'rank') body = jsx.jsx(RankBody, { card: card });
       else if (card.kind === 'bridge') body = jsx.jsx(BridgeBody, { card: card });
       else if (card.kind === 'trend') body = jsx.jsx(TrendBody, { card: card });
+      else if (card.kind === 'goal') body = jsx.jsx(GoalBody, { card: card });
+      else if (card.kind === 'sensitivity') body = jsx.jsx(SensitivityBody, { card: card });
       else if (card.kind === 'scenario') {
         body = jsx.jsxs('div', {
           style: { display: 'grid', gap: 4 },
@@ -1098,7 +1196,11 @@ window.__ModuleLoader__.load({
       { id: 'depreciation-je', section: '凭证草稿', label: '折旧摊销草稿', skill: 'journal-entry', keywords: ['折旧', '摊销', '待摊', '预付'],
         prompt: '起草本期的折旧和摊销凭证草稿，附计算表。只出草稿，不过账。' },
       { id: 'collection-health', section: '回款与现金', label: '回款健康分析', skill: 'cash', keywords: ['回款', '收缴率', '生死线', '应收天数', '风险雷达'],
-        prompt: '做一次回款健康分析：收缴率对生死线、应收天数和风险雷达。' },
+        prompt: '做一次回款健康分析：收缴率对生死线、应收天数和风险雷达，集团带上毛利率和收缴率的敏感性表。' },
+      { id: 'backsolve', section: '回款与现金', label: '倒推还要收多少', skill: 'cash', keywords: ['倒推', '目标', '还要收', '全年预算', '每月'],
+        prompt: '倒推一下：收缴率回到生死线，一年还要多收多少？全年收入预算还差多少，剩下几个月每月要做到多少？' },
+      { id: 'sensitivity-grid', section: '回款与现金', label: '毛利率和收缴率一起变', skill: 'cash', keywords: ['敏感性', '如果', '毛利率', '收缴率'],
+        prompt: '毛利率和收缴率一起变，距生死线会怎样？用敏感性表回答，框出现在的位置。' },
       { id: 'aging', section: '回款与现金', label: '应收账龄', skill: 'cash', keywords: ['账龄', '催收', '跟进', '客户'],
         prompt: '做应收账龄分析，列出需要优先跟进回款的客户。' },
       { id: 'cash-13-weeks', section: '回款与现金', label: '13 周现金', skill: 'cash', keywords: ['现金', '13 周', '资金', '延迟'],

@@ -7,7 +7,7 @@ board prints it, and a card that names the wrong rows is refused rather than dra
 stored: a card in the conversation is not a deliverable. 钉到看板 is the manager's own click, and it goes through the
 board's own save (notes/intelligent-ui-borrowing-plan-20261010.md, 五).
 
-Five kinds:
+Seven kinds:
 
 - ``figure``: one figure of an analysis run, named as a board figure card names it; or one rate or amount of a
   收费明细 collection run, for the whole or one group.
@@ -15,6 +15,12 @@ Five kinds:
 - ``rank``: an analysis run's rows ranked as a board rank card ranks them, or a collection run's groups by one figure.
 - ``bridge``: one group's profit bridge of a variance run, as a board bridge card draws it.
 - ``trend``: one figure of an analysis run across the periods its rows hold, oldest first.
+- ``goal`` (倒推): a collection-health run's lines worked back from a target collection rate or the revenue budget, as
+  the board's goal card works them (foundry/what_if.py); or a 收费明细 collection run's bills: how much more a rate
+  needs collected to reach a target.
+- ``sensitivity`` (敏感性表): the part of a collection-health run's grid around where its entity stands.
+
+Goal and sensitivity cards are what-ifs: each carries 情景，不是实际数.
 
 The 接着问 questions under the cards are text only: a click puts one in the composer for the manager to edit and send.
 """
@@ -25,7 +31,9 @@ import math
 import re
 from typing import Any
 
-from foundry import dashboards
+from decimal import Decimal, InvalidOperation
+
+from foundry import dashboards, what_if
 from foundry.dashboard_snapshot import BRIDGE_DELTAS, bridge_lines, ranked
 from foundry.errors import FoundryError
 from foundry.figure_text import (
@@ -41,7 +49,7 @@ from foundry.figure_text import (
     split_display,
 )
 
-KINDS = ("figure", "compare", "rank", "bridge", "trend")
+KINDS = ("figure", "compare", "rank", "bridge", "trend", "goal", "sensitivity")
 MAX_CARDS = 3
 MAX_FOLLOW_UPS = 3
 MAX_FOLLOW_UP = 40
@@ -79,6 +87,13 @@ COLLECTION_FIGURES: dict[str, tuple[str, str, tuple[tuple[str, str], ...]]] = {
     "advance_balance": ("预收余额", "amount", ()),
     "waiver": ("减免额", "amount", ()),
 }
+# The rates a goal card can work back on a collection run: the rate, its base and what has come in against it.
+GOAL_FIGURES: dict[str, tuple[str, tuple[str, str], tuple[str, str]]] = {
+    "collection_rate_current": ("当期收缴率", ("receivable", "本年应收"), ("collected", "当期已收")),
+    "collection_rate_month": ("本月收缴率", ("month_receivable", "本月应收"), ("month_collected", "本月已收")),
+    "arrears_recovery_rate": ("清欠率", ("arrears_opening", "年初往年欠费"), ("arrears_collected", "本年收回往年欠费")),
+}
+MAX_GOAL_GROUPS = 5
 GROUP_LABELS = {"nature": "房产性质", "project": "项目", "fee_item": "收费项目", "customer_type": "客户性质",
                 "type": "房产类型", "owner": "产权归属", "city": "城市公司"}
 CALIBER_STATUS = {"confirmed": "已确认口径", "default": "默认口径（未确认）", "trial": "试算"}
@@ -374,27 +389,31 @@ def _group_words(key: dict) -> str:
     return " · ".join("（空）" if value is None else js_text(value) for value in key.values())
 
 
+def _collection_figures(run: dict, group: Any) -> tuple[dict, str]:
+    """The figures of the whole run, or of the one group ``group`` names, and the words for which."""
+    result = run.get("result") or {}
+    if group is None:
+        return result.get("figures") or {}, "全部"
+    if not isinstance(group, dict) or not group:
+        raise Card("group names a group of the run: {column: text}, as its groups are keyed")
+    groups = [row for row in result.get("groups") or []
+              if set(row.get("key") or {}) == set(group)
+              and all(("" if row["key"][name] is None else js_text(row["key"][name])) == js_text(text).strip()
+                      for name, text in group.items())]
+    if not result.get("groups"):
+        raise Card("this collection run has no groups; run it again grouped (group_by) to show one group")
+    if len(groups) != 1:
+        names = "、".join(GROUP_LABELS.get(name, name) for name in (result["groups"][0].get("key") or {}))
+        some = "；".join(json.dumps(row.get("key"), ensure_ascii=False) for row in result["groups"][:8])
+        raise Card(f"group names {len(groups)} of the run's groups; they are keyed by {names}: {some}"
+                   + ("…" if len(result["groups"]) > 8 else ""))
+    return groups[0].get("figures") or {}, _group_words(groups[0]["key"])
+
+
 def collection_figure(run: dict, figure: Any, group: Any) -> dict:
     key = _figure_key(figure)
     label, kind, parts = COLLECTION_FIGURES[key]
-    result = run.get("result") or {}
-    if group is None:
-        figures, subject = result.get("figures") or {}, "全部"
-    else:
-        if not isinstance(group, dict) or not group:
-            raise Card("group names a group of the run: {column: text}, as its groups are keyed")
-        groups = [row for row in result.get("groups") or []
-                  if set(row.get("key") or {}) == set(group)
-                  and all(("" if row["key"][name] is None else js_text(row["key"][name])) == js_text(text).strip()
-                          for name, text in group.items())]
-        if not result.get("groups"):
-            raise Card("this collection run has no groups; run it again grouped (group_by) to show one group")
-        if len(groups) != 1:
-            names = "、".join(GROUP_LABELS.get(name, name) for name in (result["groups"][0].get("key") or {}))
-            some = "；".join(json.dumps(row.get("key"), ensure_ascii=False) for row in result["groups"][:8])
-            raise Card(f"group names {len(groups)} of the run's groups; they are keyed by {names}: {some}"
-                       + ("…" if len(result["groups"]) > 8 else ""))
-        figures, subject = groups[0].get("figures") or {}, _group_words(groups[0]["key"])
+    figures, subject = _collection_figures(run, group)
     value = figures.get(key)
     if value is None:
         raise Card(f"{label} has no figure here (its base is zero)")
@@ -441,6 +460,61 @@ def collection_rank(run: dict, spec: dict) -> dict:
     by = "、".join(GROUP_LABELS.get(name, name) for name in (groups[0].get("key") or {}))
     return {"items": items, "unit": "%" if kind == "rate" else "", "reference": reference, "order": order,
             "part": label, "subject": f"按{by}"}
+
+
+def _decimal(value: Any) -> Decimal | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = Decimal(js_text(value).strip().replace(",", ""))
+    except InvalidOperation:
+        return None
+    return number if number.is_finite() else None
+
+
+def _still_needed(figures: dict, base: str, done: str, rate: Decimal) -> Decimal | None:
+    """What the bills still need collected for the rate to reach ``rate``: base × rate − what has come in."""
+    whole, came = _decimal(figures.get(base)), _decimal(figures.get(done))
+    if whole is None or came is None or whole <= 0:
+        return None
+    return whole * rate - came
+
+
+def collection_goal(run: dict, spec: dict) -> dict:
+    """How much more a collection rate needs collected to reach the target, from the run's own bills."""
+    key = spec.get("figure", "collection_rate_current")
+    if key not in GOAL_FIGURES:
+        raise Card("a goal card on a collection run works back " + ", ".join(GOAL_FIGURES))
+    label, (base, base_words), (done, done_words) = GOAL_FIGURES[key]
+    if spec.get("target") is None:
+        raise Card("a goal card on a collection run names its target, a rate with its %, such as 92%")
+    try:
+        target = dashboards.goal_target(spec["target"])
+    except FoundryError as exc:
+        raise Card(str(exc)) from None
+    rate = Decimal(target[:-1]) / 100
+    figures, subject = _collection_figures(run, spec.get("group"))
+    need = _still_needed(figures, base, done, rate)
+    if need is None:
+        raise Card(f"{label} has no {base_words} here to work back from")
+    shown = f"{decimal_to_fixed(target[:-1], 2)}%"
+    beside = [[f"目标{label}", shown], [f"{label}（这次计算）", _percent(figures.get(key))],
+              [base_words, decimal_to_fixed(figures.get(base), 2)], [done_words, decimal_to_fixed(figures.get(done), 2)]]
+    groups = None
+    every = (run.get("result") or {}).get("groups") or []
+    if spec.get("group") is None and every:
+        short = [(row, _still_needed(row.get("figures") or {}, base, done, rate)) for row in every]
+        short = sorted(((row, amount) for row, amount in short if amount is not None and amount > 0),
+                       key=lambda pair: pair[1], reverse=True)[:MAX_GOAL_GROUPS]
+        by = "、".join(GROUP_LABELS.get(name, name) for name in (every[0].get("key") or {}))
+        if short:
+            groups = {"title": f"按{by}，还要收得最多的 {len(short)} 个",
+                      "lines": [[_group_words(row["key"]), decimal_to_fixed(format(amount, "f"), 2)] for row, amount in short]}
+    return {"subject": f"{subject} · {label}到 {shown}",
+            "part": "还要收" if need > 0 else "已超过目标，多收了",
+            "value": {"text": decimal_to_fixed(format(abs(need), "f"), 2), "negative": False},
+            "beside": beside, "groups": groups, "basis": [],
+            "caption": f"还要收 = {base_words} × 目标{label} − {done_words}，按这次计算的口径和截止日算；之后新出的账单不在里面。"}
 
 
 def collection_source(run: dict) -> dict:
@@ -514,6 +588,36 @@ def _figure(reader: Reader, spec: dict) -> dict:
     return {**view, "source": analysis_source(reader.store, run, row), "pin": {"kind": "figure", "run_id": run["id"], "select": select}}
 
 
+def analysis_what_if(kind: str, run: dict, select: Any) -> tuple[dict, dict, dict]:
+    """A goal or sensitivity card on a collection-health run, as the board's card says it; its selector; its first line."""
+    if not _health(run):
+        raise Card(f"a {kind} card reads a collection health run (finance_scenario_run kind=collection_health)")
+    try:
+        normalized = dashboards.normalize_select(kind, select, run)
+    except FoundryError as exc:
+        raise Card(str(exc)) from None
+    rows = _rows(run)
+    entity = next(row for _, row in dashboards.matching_rows(rows, normalized["match"]))["entity"]
+    lines = what_if.lines_of(rows, entity)
+    if kind == "sensitivity":
+        view = what_if.sensitivity(dashboards.sensitivity_grid(run["result"], entity), lines["collection_gap"])
+    elif normalized["goal"] == "budget":
+        view = what_if.goal_budget(lines, js_text(entity))
+    else:
+        view = what_if.goal_collection(lines, js_text(entity), normalized.get("target"), (run.get("result") or {}).get("params") or {})
+    basis = view.pop("basis")
+    view["basis"] = [[js_text(row.get("metric_label") or row.get("metric_key")), js_text(row.get("display_value"))] for row in basis]
+    if kind == "goal":
+        view["value"] = {"text": view["value"], "negative": False}
+        view["groups"] = None
+    else:
+        # A cell in accounting form, as the board's Figure prints it: (3.7) in the muted red below the line.
+        for row in view["rows"]:
+            for cell in row["cells"]:
+                cell.update(_shown(cell["text"]))
+    return view, normalized, basis[0]
+
+
 def draw(reader: Reader, card: Any) -> dict:
     if not isinstance(card, dict):
         raise Card("a card is an object")
@@ -548,7 +652,17 @@ def draw(reader: Reader, card: Any) -> dict:
         view, select = analysis_rank(run, card.get("select"))
         return {"kind": kind, "title": title, **view, "source": analysis_source(reader.store, run, None),
                 "pin": {"kind": "rank", "title": title, "run_id": run["id"], "select": select}}
+    if kind == "goal" and card.get("collection_run_id") is not None:
+        if card.get("run_id") is not None:
+            raise Card("a goal card reads run_id or collection_run_id, not both")
+        run = reader.collection_run(card["collection_run_id"])
+        return {"kind": kind, "title": title, "flag": what_if.FLAG, **collection_goal(run, card),
+                "source": collection_source(run), "pin": None}
     run = reader.run(card.get("run_id"))
+    if kind in ("goal", "sensitivity"):
+        view, select, first = analysis_what_if(kind, run, card.get("select"))
+        return {"kind": kind, "title": title, "flag": what_if.FLAG, **view, "source": analysis_source(reader.store, run, first),
+                "pin": {"kind": kind, "title": title, "run_id": run["id"], "select": select}}
     if kind == "bridge":
         view, select = analysis_bridge(run, card.get("select"))
         return {"kind": kind, "title": title, **view, "source": analysis_source(reader.store, run, None),
@@ -598,6 +712,12 @@ def _summary(card: dict) -> str:
     if card["kind"] == "bridge":
         return f"利润桥「{card['title']}」：" + "，".join(f"{step['label']} {step['text']}" for step in card["steps"]) \
             + (f"（{card['unit']}）" if card["unit"] else "")
+    if card["kind"] == "goal":
+        return f"倒推卡「{card['title']}」（情景）：{card['subject']}，{card['part']} {card['value']['text']}"
+    if card["kind"] == "sensitivity":
+        here = next((cell["text"] for row in card["rows"] for cell in row["cells"] if cell["current"]), None)
+        return (f"敏感性表「{card['title']}」（情景）：{card['subject']}，{len(card['rows'])} 行 × {len(card['columns'])} 列"
+                + (f"，现在的位置 {here}" if here else "，现在的位置不在表内"))
     points = card["points"]
     return (f"趋势卡「{card['title']}」：{len(points)} 期，{points[0]['label']} {points[0]['text']} 到 "
             f"{points[-1]['label']} {points[-1]['text']}")
@@ -623,7 +743,8 @@ def answer_cards(store, spec: Any) -> dict:
     lines += [f"{index}. {_summary(card)}" for index, card in enumerate(drawn, 1)]
     if follow_ups:
         lines.append("接着问：" + "；".join(follow_ups))
-    lines.append("卡上的数由运行直接取出，经理可以看来源、打开结果；数字卡、排名卡和利润桥可以由经理钉到看板。"
+    lines.append("卡上的数由运行直接取出，经理可以看来源、打开结果；读分析运行的数字卡、排名卡、利润桥、倒推卡和敏感性表"
+                 "可以由经理钉到看板。倒推卡和敏感性表是情景，不是实际数。"
                  "回答已经结束：不要再写一遍卡上的内容，不要说卡已经放上看板。")
     return {"task_id": store.task.id, "cards": drawn, "follow_ups": follow_ups, "text": "\n".join(lines)}
 

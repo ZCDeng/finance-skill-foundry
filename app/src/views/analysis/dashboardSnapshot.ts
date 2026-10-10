@@ -3,7 +3,7 @@
  * dashboard-snapshot.ts) and the backend holds to the board before filing it (foundry/dashboard_snapshot.py).
  *
  * Every figure, bar and step is read from the run the card reads, through the same views the board draws, so a page
- * and the board never differ. Only accepted cards go in; 待认可 cards and 回款情景 what-ifs are named as left out.
+ * and the board never differ. Only accepted cards go in; 待认可 cards and what-ifs (情景、倒推、敏感性) are named as left out.
  */
 import type { AnalysisRevision, AnalysisRun } from '../../bridge.js';
 import { accountingFigure } from '../../lib/figures.js';
@@ -12,13 +12,13 @@ import {
   type SnapshotRank, type SnapshotText,
 } from '../../../electron/reports/dashboard-snapshot.js';
 import { profitBridges } from './RunPanel.js';
-import { matchingRows, type Dashboard, type DashboardCard } from './dashboardModel.js';
+import { isWhatIf, matchingRows, type Dashboard, type DashboardCard } from './dashboardModel.js';
 import { figureView, rankItems, sameMatch } from './dashboardViews.js';
 import { figureSource, runFiles, type FigureSourceContext } from './figureSourceInfo.js';
 
 /** A card the manager accepted on the run it reads now: the only kind a snapshot shows (dashboard_snapshot.accepted). */
 export function acceptedCard(card: DashboardCard): boolean {
-  return card.state === 'accepted' && card.kind !== 'scenario' && card.accepted?.run_id === card.run_id;
+  return card.state === 'accepted' && !isWhatIf(card.kind) && card.accepted?.run_id === card.run_id;
 }
 
 const shown = (text: string): SnapshotText => { const figure = accountingFigure(text); return { text: figure.text, negative: figure.negative }; };
@@ -118,8 +118,8 @@ export function buildSnapshot({ board, runs, contextOf, task, format }: {
     }),
     beyond: beyond.map(named),
     left_out: {
-      pinned: cards.filter((card) => card.kind !== 'scenario' && !acceptedCard(card)).map(named),
-      scenario: cards.filter((card) => card.kind === 'scenario').map(named),
+      pinned: cards.filter((card) => !isWhatIf(card.kind) && !acceptedCard(card)).map(named),
+      scenario: cards.filter((card) => isWhatIf(card.kind)).map(named),
     },
   };
 }
