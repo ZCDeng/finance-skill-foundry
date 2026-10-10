@@ -21,7 +21,7 @@ export function FigureSource({ text, info, hang = false, exact = false }: { text
   return <Popover onOpenChange={(open) => { if (!open) setCopied(false); }}>
     <PopoverTrigger asChild>
       <button type="button" className="fnd-figure-source" data-stale={info.stale || undefined}
-        aria-label={`${info.metric}${info.part} ${info.value}，查看来源`}>
+        aria-label={`${info.metric}${info.part} ${info.value}${info.stale ? '（资料已更新，待重算）' : ''}，查看来源`}>
         <Figure text={text} hang={hang} exact={exact} />
       </button>
     </PopoverTrigger>
