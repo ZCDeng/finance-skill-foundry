@@ -2752,8 +2752,12 @@ class FinanceStore:
             run = run_of(run_id)
             try:
                 recipe = rc.recipe_of(self, run, elsewhere=False)
-                old, new = rc.recipe_month(recipe), rc.new_month(self, [value for alias, value in bindings.items() if value != run["bindings"][alias]])
-                move = (old, new) if old and new and old != new else None
+                new = rc.new_month(self, [value for alias, value in bindings.items() if value != run["bindings"][alias]])
+                # Only some files are next month's yet: run once the rest are too, not on two months at once.
+                behind = rc.other_months(self, [value for alias, value in bindings.items() if value == run["bindings"][alias]], new) if new else []
+                if behind:
+                    raise rc.NotRerun(f"还有资料不是 {new} 的：{'、'.join(behind)}，换成同一个月的再重算")
+                move = rc.month_move(recipe, new)
                 again, said = rc.run_again(self, recipe, bindings, move, elsewhere=False)
                 if again.get("execution_status") not in {"succeeded", "success"}:
                     raise rc.NotRerun(f"重算没有算完：{again.get('error') or '计算失败'}")
@@ -2853,10 +2857,10 @@ class FinanceStore:
                 if missing:
                     raise rc.NotRerun("这个任务里还没有：" + "、".join(missing))
                 recipe = rc.recipe_of(source, run, elsewhere=True)
-                old, new = rc.recipe_month(recipe), rc.new_month(self, list(bindings.values()), fallback)
-                if old and not new:
+                new = rc.new_month(self, list(bindings.values()), fallback)
+                if rc.recipe_month(recipe) and not new:
                     raise rc.NotRerun("看不出这个任务的资料是哪个月的，先在「分析范围」填上期间")
-                move = (old, new) if old and new and old != new else None
+                move = rc.month_move(recipe, new)
                 again, said = rc.run_again(self, recipe, bindings, move, elsewhere=True)
                 if again.get("execution_status") not in {"succeeded", "success"}:
                     raise rc.NotRerun(f"重算没有算完：{again.get('error') or '计算失败'}")

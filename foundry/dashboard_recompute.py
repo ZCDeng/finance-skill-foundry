@@ -43,6 +43,8 @@ QUERY_ENGINES = frozenset({"sql", "structured_aggregate"})
 CHANGE_SHARE = Decimal("0.10")
 CHANGE_POINTS = Decimal("1")
 POINT_UNITS = frozenset({"%", "百分点"})
+# A finance ratio metric keeps its rate as a fraction (0.8732) beside the money unit it was taken from.
+FRACTION_COLUMNS = frozenset({"ratio", "ratio_exact"})
 LEVEL_WORDS = {"red": "红", "orange": "橙", "yellow": "黄", "green": "绿", "unknown": "无法判断"}
 SUFFIX = re.compile(r"（按 [^）]* 重算）$")
 
@@ -102,6 +104,14 @@ def _scope_month(scopes: list[dict]) -> str | None:
     months = {month_of((scope or {}).get("period")) for scope in scopes if (scope or {}).get("period")}
     months.discard(None)
     return months.pop() if len(months) == 1 else None
+
+
+_DATED = re.compile(r"\d{4}\s*[-/.年]\s*\d{1,2}")
+
+
+def _ranged(period: Any) -> bool:
+    """A period that names months but not one month: 「2026-01:2026-08」, 「2026年1-8月」."""
+    return isinstance(period, str) and month_of(period) is None and bool(_DATED.search(period))
 
 
 def _moved_scope(scope: Any, move: tuple[str, str] | None) -> Any:
@@ -185,6 +195,22 @@ def rebind(bindings: dict[str, str], read_old, read_new, find: Callable[[dict], 
     return new, missing
 
 
+def other_months(store, ids: list[str], month: str) -> list[str]:
+    """The names of the files among ``ids`` that declare a month other than ``month``."""
+    from foundry.finance_readiness import _snapshot_period
+
+    names = []
+    for dataset_id in ids:
+        try:
+            dataset = store.analysis.read_dataset(dataset_id)
+        except FoundryError:
+            continue
+        declared = month_of(_snapshot_period(dataset))
+        if declared and declared != month:
+            names.append(str(dataset.get("name") or dataset_id))
+    return sorted(set(names))
+
+
 def new_month(store, ids: list[str], fallback: Any = None) -> str | None:
     """The month the new files declare, when they agree; else the fallback's (the task's period, from another task)."""
     from foundry.finance_readiness import _snapshot_period
@@ -238,6 +264,22 @@ def recipe_month(recipe: dict) -> str | None:
     if recipe["engine"] == "finance":
         return _scope_month(list(((recipe["context"].get("scopes")) or {}).values()))
     return month_of(((recipe["revision"].get("scope")) or {}).get("period"))
+
+
+def month_move(recipe: dict, new: str | None) -> tuple[str, str] | None:
+    """The calculation's month to the new files' month, or None when it stays. A period written as a range is not moved:
+    the manager sets it again (a calculation over 1–8 月 on September's files would say 1–8 月 of 1–9 月's figures)."""
+    old = recipe_month(recipe)
+    if not new or old == new:
+        return None
+    if old:
+        return old, new
+    periods = ([(scope or {}).get("period") for scope in ((recipe["context"].get("scopes")) or {}).values()]
+               if recipe["engine"] == "finance" else [((recipe["revision"].get("scope")) or {}).get("period")])
+    for period in periods:
+        if _ranged(period) and not _names_month(period, new):
+            raise NotRerun(f"期间写的是区间「{period}」，换到 {new} 要你重新设定期间")
+    return None
 
 
 def _months_elapsed(inputs: dict, move: tuple[str, str] | None) -> tuple[dict, list[str]]:
@@ -344,8 +386,9 @@ def shown(card: dict, run: dict) -> dict:
         row = found[0] if len(found) == 1 else {}
         value = row.get(select.get("column"))
         display = row.get("display_value") if select.get("column") == "value" and row.get("display_value") else value
+        rate = "fraction" if select.get("column") in FRACTION_COLUMNS else "points" if row.get("unit") in POINT_UNITS else None
         return {"value": None if value is None else str(value), "display": None if display is None else str(display),
-                "level": row.get("level"), "unit": row.get("unit")}
+                "level": row.get("level"), "unit": row.get("unit"), "rate": rate}
     if card["kind"] == "rank":
         column, label = select["column"], select["label"]
         ranked = [(str(row[label]), _number(row.get(column))) for row in found
@@ -381,9 +424,10 @@ def change(card: dict, before: dict, after: dict) -> tuple[bool, str]:
             return moved, "数变了" if moved else "没有变化"
         if _sign(old) and _sign(new) and _sign(old) != _sign(new):
             return True, "由正转负" if _sign(new) < 0 else "由负转正"
-        if after.get("unit") in POINT_UNITS:
-            # A rate moves in points: 82.1% to 83.0% is +0.9 个百分点, not +1.1%.
-            points = new - old
+        rate = after.get("rate") or ("points" if after.get("unit") in POINT_UNITS else None)
+        if rate:
+            # A rate moves in points: 82.1% to 83.0% is +0.9 个百分点, not +1.1%; a fraction 0.80 to 0.81 is +1.00.
+            points = (new - old) * (100 if rate == "fraction" else 1)
             return abs(points) >= CHANGE_POINTS, f"{'+' if points > 0 else ''}{points.quantize(Decimal('0.01'))} 个百分点"
         if old == 0:
             return new != 0, "由零变为非零" if new != 0 else "没有变化"
@@ -391,7 +435,8 @@ def change(card: dict, before: dict, after: dict) -> tuple[bool, str]:
         words = f"变动 {'+' if share > 0 else ''}{(share * 100).quantize(Decimal('0.1'))}%"
         return abs(share) >= CHANGE_SHARE, words
     if card["kind"] == "rank":
-        if before.get("beyond") is not None and before.get("beyond") != after.get("beyond"):
+        # How many are past the line, not who: one crossing each way leaves the line where it was.
+        if before.get("beyond") is not None and len(before["beyond"]) != len(after.get("beyond") or []):
             label = (card["select"].get("reference") or {}).get("label") or "参考线"
             side = "低于" if card["select"].get("order") == "asc" else "高于"
             return True, f"{side}{label}的：{len(before['beyond'])} 个 → {len(after['beyond'] or [])} 个"

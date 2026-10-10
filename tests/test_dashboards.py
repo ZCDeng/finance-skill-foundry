@@ -293,6 +293,52 @@ def test_a_query_without_the_month_in_it_moves_to_the_new_month(tmp_path):
     assert revision["scope"] == {"period": "2026-09"} and revision["parent_id"] == saved["id"]
 
 
+def test_a_calculation_waits_until_every_file_it_reads_is_the_new_month(tmp_path):
+    manager, _, _ = _board(tmp_path)
+    ledger = _readd(manager, tmp_path, "ledger", [{**row, "期间": "2026-08"} for row in KPI])
+    cities = _readd(manager, tmp_path, "cities", [{**row, "期间": "2026-08"} for row in CITY])
+    analysis = AnalysisStore(manager.task)
+    saved = analysis.save_analysis({"question": "收入", "bindings": {"ledger": ledger["id"], "cities": cities["id"]},
+                                    "scope": {"period": "2026-08"},
+                                    "sql": "select 指标, 本年累计 from ledger where 指标 = '营业收入' "
+                                           "union all select 城市, 收入 from cities where 城市 = '海口'"})
+    sql_run = analysis.run_analysis(saved["id"])
+    card = {"kind": "figure", "title": "收入", "run_id": sql_run["id"], "select": {"match": {"指标": "营业收入"}, "column": "本年累计"}}
+    board = manager.dashboard_save({"parent_id": None, "cards": [card]})
+    # September's ledger is in, the city sheet is still August's: not run on two months at once.
+    _readd(manager, tmp_path, "ledger", [{**row, "期间": "2026-09"} for row in KPI])
+    out = manager.dashboard_recompute({"parent_id": board["id"]})
+    assert out["recomputed"] == [] and out["failed"][0]["reason"] == "还有资料不是 2026-09 的：cities，换成同一个月的再重算"
+    # Once the city sheet is September's too, it runs on both.
+    _readd(manager, tmp_path, "cities", [{**row, "期间": "2026-09"} for row in CITY])
+    assert manager.dashboard_read({})["recompute"] == {"ready": 1}
+    out = manager.dashboard_recompute({})
+    assert out["failed"] == [] and out["dashboard"]["cards"][0]["recomputed"]["months"] == ["2026-08", "2026-09"]
+
+
+def test_a_calculation_over_a_range_of_months_is_not_moved_to_the_new_month(tmp_path):
+    manager, _, _ = _board(tmp_path)
+    ledger = _readd(manager, tmp_path, "ledger", [{**row, "期间": "2026-08"} for row in KPI])
+    analysis = AnalysisStore(manager.task)
+    saved = analysis.save_analysis({"question": "累计收入", "bindings": {"ledger": ledger["id"]}, "scope": {"period": "2026-01:2026-08"},
+                                    "sql": "select 指标, 本年累计 from ledger where 指标 = '营业收入'"})
+    sql_run = analysis.run_analysis(saved["id"])
+    card = {"kind": "figure", "title": "收入", "run_id": sql_run["id"], "select": {"match": {"指标": "营业收入"}, "column": "本年累计"}}
+    board = manager.dashboard_save({"parent_id": None, "cards": [card]})
+    _readd(manager, tmp_path, "ledger", [{**row, "期间": "2026-09"} for row in KPI])
+    out = manager.dashboard_recompute({"parent_id": board["id"]})
+    assert out["recomputed"] == [] and out["failed"][0]["reason"] == "期间写的是区间「2026-01:2026-08」，换到 2026-09 要你重新设定期间"
+
+
+def test_a_ratio_kept_as_a_fraction_moves_in_points():
+    from foundry.dashboard_recompute import change, shown
+
+    card = {"kind": "figure", "select": {"match": {"metric": "毛利率"}, "column": "ratio"}}
+    run = lambda ratio: {"result": {"rows": [{"metric": "毛利率", "ratio": ratio, "unit": "万元", "display_value": "-"}]}}  # noqa: E731
+    assert change(card, shown(card, run("0.80")), shown(card, run("0.81"))) == (True, "+1.00 个百分点")
+    assert change(card, shown(card, run("0.80")), shown(card, run("0.805"))) == (False, "+0.50 个百分点")
+
+
 def test_last_months_board_is_carried_onto_a_new_task_by_the_names_of_its_files(tmp_path):
     manager, run, _ = _board(tmp_path)
     manager.dashboard_save({"parent_id": None, "cards": [_gap(run, state="accepted"), _rank(run)]})
@@ -382,3 +428,5 @@ def test_a_ranking_changes_when_its_leaders_or_the_side_of_its_line_change_not_i
                                       "reference": {"value": "0", "label": "生死线"}}}
     before = shown(gap, run([("海口", -2), ("三亚", 1), ("儋州", 3)]))
     assert change(gap, before, shown(gap, run([("海口", -2), ("三亚", -1), ("儋州", 3)]))) == (True, "低于生死线的：1 个 → 2 个")
+    # One across each way: still one below the line.
+    assert change(gap, before, shown(gap, run([("海口", 1), ("三亚", -1), ("儋州", 3)]))) == (False, "前三名没有变化")
