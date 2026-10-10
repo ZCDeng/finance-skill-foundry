@@ -367,7 +367,12 @@
 .analysis-close-settled svg { flex: none; height: 1lh; }
 .analysis-close-settled > span { min-width: 0; overflow-wrap: anywhere; }
 .analysis-close-settled-detail { font-size: var(--fnd-size-small); }
-.analysis-scope-candidate-source { margin: 0 12px 0 6px; }
+.analysis-scope-candidates { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 8px; min-width: 0; max-width: 100%; }
+.analysis-scope-candidates > ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; min-width: 0; max-width: 100%; }
+/* One row per candidate: the button, then one line on how the files back it, cut short (the tooltip has it all). */
+.analysis-scope-candidates li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.analysis-scope-candidates li > [data-slot='button'] { flex: none; }
+.analysis-scope-candidate-source { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fnd-muted); font-size: var(--fnd-size-small); }
 
 /* Workbook formula health hints (公式体检, 2026-10-04). Hints never block: a
    warning reads in the brick-red warning tokens with a word and an icon, an

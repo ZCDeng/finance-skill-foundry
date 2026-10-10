@@ -135,11 +135,11 @@ export function AccountingPeriodInput({ label, value, onChange, placeholder = 'Y
     const date = new Date(value.year, value.month - 1 + delta, 1);
     return { year: date.getFullYear(), month: date.getMonth() + 1 };
   });
-  return <FieldShell label={label} htmlFor={id} help={help ?? '会计期间不会转换成某一天。'} error={error}>
+  return <FieldShell label={label} htmlFor={id} help={help} error={error}>
     <Popover open={open} onOpenChange={setOpen}>
       <div className="fnd-date-picker">
         <div className="fnd-period-field">
-          <PopoverAnchor asChild><div className="fnd-period-field__input"><Input ref={inputRef} id={id} aria-label={ariaLabel ?? label} aria-describedby={fieldDescribedBy(id, help ?? '会计期间不会转换成某一天。', error)} aria-invalid={error ? true : undefined} value={draft} placeholder={placeholder}
+          <PopoverAnchor asChild><div className="fnd-period-field__input"><Input ref={inputRef} id={id} aria-label={ariaLabel ?? label} aria-describedby={fieldDescribedBy(id, help, error)} aria-invalid={error ? true : undefined} value={draft} placeholder={placeholder}
             inputMode="numeric" disabled={disabled} onChange={(event) => {
               const next = event.target.value;
               setDraft(next);
