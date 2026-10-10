@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFil
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { REFUSED, apply, definitions, f3Denied, inject, invokeFoundry, readReceipt, registerTools } from "./index.js";
+import { REFUSED, apply, definitions, f3Denied, inject, invokeFoundry, readPresented, readReceipt, registerTools, toolDefinition } from "./index.js";
 
 const ROSTER = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).dsh.foundry.tools;
 
@@ -225,6 +225,41 @@ for (const toolName of ["emit-brief", "query-locked", "record-reference"]) {
   const tool = tools[toolName];
   const blocks = tool.output.render({}, { tool: toolName, stdout: "文字", filed: [{ seq: 9 }] });
   assert.deepEqual(blocks, [{ type: "text", text: "文字" }], `${toolName} leaked its receipt to the model`);
+}
+
+// -- cards under the answer -----------------------------------------------
+//
+// `answer_cards` prints its cards beside one line per card; the model reads
+// the line and the row draws the cards. `dashboard_propose` keeps printing the
+// board for the model, and the card it proposed is drawn for the conversation.
+{
+  const drawn = { task_id: "t1", cards: [{ kind: "figure", title: "当期收缴率" }], follow_ups: ["按城市公司拆开"] };
+  assert.deepEqual(readPresented("answer_cards", JSON.stringify({ ...drawn, text: "回答下方已画出 1 张卡" })),
+    { stdout: "回答下方已画出 1 张卡", presented: drawn });
+  const board = { id: "b1", cards: [] };
+  assert.deepEqual(readPresented("dashboard_propose", JSON.stringify({ ...board, presented: { task_id: "t1", proposed: null } })),
+    { stdout: JSON.stringify(board), presented: { task_id: "t1", proposed: null } });
+  // An older `foundry`, or any shape that is not this one, passes through as it came, with nothing to draw.
+  for (const raw of ["not json", "[]", "null", JSON.stringify({ text: 1, cards: [] }), JSON.stringify({ text: "x" })]) {
+    assert.deepEqual(readPresented("answer_cards", raw), { stdout: raw });
+  }
+  assert.deepEqual(readPresented("dashboard_propose", JSON.stringify(board)), { stdout: JSON.stringify(board) });
+  assert.deepEqual(readPresented("dashboard_propose", JSON.stringify({ ...board, presented: [] })),
+    { stdout: JSON.stringify({ ...board, presented: [] }) });
+  const other = JSON.stringify({ text: "x", cards: [] });
+  assert.deepEqual(readPresented("run_metric", other), { stdout: other }, "only the drawing verbs are reshaped");
+
+  const tool = toolDefinition("answer_cards", {
+    description: "x", parameters: { type: "object", required: [], properties: {} },
+    execute: async () => JSON.stringify({ ...drawn, text: "一行" }),
+  });
+  const value = await tool.execute({}, {});
+  assert.deepEqual(value, { tool: "answer_cards", stdout: "一行", filed: [], presented: drawn });
+  assert.deepEqual(tool.output.render({}, value), [{ type: "text", text: "一行" }], "the model reads the line, not the cards");
+  assert.deepEqual(tool.output.presentationMeta({}, value), { filed: [], presented: drawn });
+  for (const presented of [null, [], "x", 3]) {
+    assert.deepEqual(tool.output.presentationMeta({}, { ...value, presented }), { filed: [] });
+  }
 }
 
 // -- binding --------------------------------------------------------------
@@ -462,7 +497,8 @@ for (const toolName of ROSTER) {
 
   const priorWindow = globalThis.window;
   const priorDocument = globalThis.document;
-  globalThis.window = { __ModuleLoader__: loader };
+  const page = { __ModuleLoader__: loader };
+  globalThis.window = page;
   globalThis.document = { querySelector: () => null };
   try {
     new Function("window", "document", "globalThis", clientSource)(
@@ -633,4 +669,120 @@ for (const toolName of ROSTER) {
     block: { kind: "tool-result", isError: false, content: [{ type: "text", text: "ok" }] },
   });
   assert.match(flatten(scriptTree.props.children[0]), /计算指标 · 已完成/);
+
+  // -- cards under the answer ---------------------------------------------
+  //
+  // The figures arrive written; the row lays them out, never re-reads or
+  // re-formats them, and every shape short of a drawing falls back to the
+  // stage row rather than throwing.
+  const find = (node, test, found = []) => {
+    if (node === null || node === undefined || node === false || typeof node !== "object") return found;
+    if (Array.isArray(node)) { for (const child of node) find(child, test, found); return found; }
+    if (typeof node.type === "function") return find(node.type(node.props ?? {}), test, found);
+    if (test(node)) found.push(node);
+    return find(node.props?.children, test, found);
+  };
+  const CardsRow = registered.get("answer_cards");
+  assert.ok(CardsRow && registered.get("answer-cards") === CardsRow, "the answer card row was not registered");
+  const ProposedRow = registered.get("dashboard_propose");
+  assert.ok(ProposedRow && ProposedRow !== StageRow, "a proposed card is drawn, not listed as a stage");
+  const runId = "r".repeat(32);
+  const source = { kind: "analysis", run_id: runId, analysis_id: "a1", at: "2026-10-10T05:33:00+00:00", computed: "计算成功 · 财务引擎",
+    lines: [["公式", "1 − 毛利率 + 期间费用率"]], files: [{ name: "kpi", digest: "abcdef123456" }] };
+  const pinned = { kind: "figure", title: "集团距生死线", run_id: runId, select: { match: { entity: "集团" }, column: "value" } };
+  const presented = {
+    task_id: "task-1",
+    cards: [
+      { kind: "figure", title: "集团距生死线", subject: "集团", part: "本期", value: { text: "(3.10) 个百分点", negative: true },
+        beside: [["上年同期", "1.20 个百分点"]], level: "red", level_label: "低于生死线", source, pin: pinned },
+      { kind: "rank", title: "各城市距生死线", items: [{ label: "三亚", value: -3.1, text: "-3.10", note: null }, { label: "海口", value: 2, text: "2.00", note: "高于生死线" }],
+        unit: "个百分点", reference: { value: 0, label: "生死线" }, source, pin: null },
+      { kind: "bridge", title: "利润桥", steps: [{ label: "预算利润", kind: "total", value: 25, text: "25" }, { label: "收入", kind: "delta", value: 20, text: "20" },
+        { label: "成本", kind: "delta", value: -15, text: "-15" }, { label: "实际利润", kind: "total", value: 30, text: "30" }], unit: "万元", source, pin: null },
+    ],
+    follow_ups: ["按城市公司拆开"],
+  };
+  const settledCards = (meta, extra = {}) => ({ callId: "cards-1", toolName: "answer_cards",
+    block: { kind: "tool-result", isError: false, content: [{ type: "text", text: "回答下方已画出 3 张卡" }], ...(meta === undefined ? {} : { meta }), ...extra } });
+  const drawnCards = flatten(CardsRow(settledCards({ filed: [], presented })));
+  for (const text of ["集团距生死线", "(3.10) 个百分点", "低于生死线", "上年同期", "1.20 个百分点", "三亚", "虚线：生死线", "预算利润", "实际利润",
+    "单位：万元", "看来源", "1 − 毛利率 + 期间费用率", "摘要 abcdef123456", "计算编号 " + runId, "钉到看板", "打开结果", "接着问", "按城市公司拆开"]) {
+    assert.ok(drawnCards.includes(text), `the cards do not show ${text}`);
+  }
+  assert.ok(!drawnCards.includes("回答下方已画出"), "the line the model reads is not drawn on the cards");
+  assert.equal(find(CardsRow(settledCards({ filed: [], presented })), (node) => node.type === "button" && flatten(node.props.children) === "钉到看板").length, 1,
+    "only a card that names what it would pin offers 钉到看板");
+
+  const more = { task_id: "task-1", cards: [
+    { kind: "compare", title: "海口和三亚", items: [
+      { subject: "海口", part: "本期", value: { text: "2.00 个百分点", negative: false }, beside: [], source },
+      { subject: "三亚", part: "本期", value: { text: "(3.10) 个百分点", negative: true }, beside: [], source: { ...source, kind: "collection", trial: true } }], pin: null },
+    { kind: "trend", title: "收入走势", subject: "revenue", part: "实际", unit: "万元", points: [
+      { label: "2026 年 1 月", value: 100, text: "100.00" }, { label: "2026 年 2 月", value: -20.125, text: "-20.13" }, { label: "2026 年 3 月", value: 310.5, text: "310.50" }], source, pin: null },
+  ] };
+  const drawnMore = flatten(CardsRow(settledCards({ filed: [], presented: more })));
+  for (const text of ["海口", "三亚", "(3.10) 个百分点", "2026 年 1 月", "100.00", "2026 年 3 月", "310.50", "逐期 3 个数", "-20.13"]) {
+    assert.ok(drawnMore.includes(text), `the compare and trend cards do not show ${text}`);
+  }
+  assert.ok(!flatten(CardsRow(settledCards({ filed: [], presented: { task_id: "task-1", cards: [more.cards[0]] } }))).includes("打开结果"),
+    "a compare card shows each figure's source, and opens no one result");
+  assert.match(flatten(CardsRow(settledCards({ filed: [], presented: { task_id: "task-1", cards: [{ ...presented.cards[0], source: { ...source, kind: "collection", trial: true } }] } }))),
+    /试算.*打开收缴率结果/, "a trial collection figure says so");
+
+  // While the assistant is still writing the call: the titles it has written so far, and nothing else.
+  assert.match(flatten(CardsRow({ callId: "c", toolName: "answer_cards", block: { argsRaw: '{"spec":{"cards":[{"kind":"figure","title":"当期收' } })), /正在从计算结果取数/);
+  const streaming = flatten(CardsRow({ callId: "c", toolName: "answer_cards", block: { argsRaw: '{"spec":{"cards":[{"kind":"figure","title":"当期收缴率"},{"title":"清' } }));
+  assert.match(streaming, /当期收缴率/);
+  assert.ok(!streaming.includes("清"), "a title cut mid-way waits for the rest");
+
+  for (const props of [{}, { block: null }, settledCards(undefined), settledCards({ presented: null }), settledCards({ presented: [] }),
+    settledCards({ presented: { cards: "x" } }),
+    settledCards({ presented: { task_id: "t", cards: [null, 3, { kind: "chart" }, { kind: "rank", items: "no" }, { kind: "rank", items: [{ value: "x" }] },
+      { kind: "trend", points: [{ value: 1 }] }, { kind: "bridge", steps: [{}] }, { kind: "compare", items: [null] }, { kind: "figure", value: null, beside: [[1]] }] } }),
+    settledCards({ filed: [], presented }, { isError: true, error: { code: "refused" } })]) {
+    assert.equal(typeof flatten(CardsRow(props)), "string");
+  }
+  assert.match(flatten(CardsRow(settledCards({ filed: [], presented }, { isError: true, error: { code: "refused", message: "card 1: exactly one row" } }))),
+    /画卡片 · 需要处理/, "a refused call reads as one, not as cards");
+  assert.match(flatten(CardsRow(settledCards({ filed: [] }))), /画卡片 · 已完成/, "an older foundry with no drawing shows its text");
+
+  // The two clicks that leave the page go to the window only with its nonce; 接着问 only fills the composer.
+  {
+    const lines = [];
+    const info = console.info;
+    console.info = (line) => lines.push(line);
+    try {
+      const tree = CardsRow(settledCards({ filed: [], presented }));
+      const button = (label) => find(tree, (node) => node.type === "button" && flatten(node.props.children) === label)[0];
+      button("钉到看板").props.onClick();
+      assert.equal(lines.length, 0, "without the window's nonce a click goes nowhere");
+      page.__foundryCardNonce = "n".repeat(32);
+      button("钉到看板").props.onClick();
+      button("打开结果").props.onClick();
+      const asked = [];
+      page.__foundryEmbedded = { appendDraft: (text) => { asked.push(text); } };
+      button("按城市公司拆开").props.onClick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.deepEqual(asked, ["按城市公司拆开"]);
+    } finally {
+      console.info = info;
+      delete page.__foundryCardNonce;
+      delete page.__foundryEmbedded;
+    }
+    const marker = "__foundry_card_action__";
+    assert.ok(lines.every((line) => line.startsWith(marker)));
+    const [pin, open] = lines.map((line) => JSON.parse(line.slice(marker.length)));
+    assert.deepEqual(pin, { nonce: "n".repeat(32), action: "pin", task_id: "task-1", card: pinned });
+    assert.deepEqual(open, { nonce: "n".repeat(32), action: "open", task_id: "task-1", kind: "analysis", run_id: runId, analysis_id: "a1" });
+  }
+
+  // A proposal is drawn as the card it would be, and says where it went; it offers no pin of its own.
+  const proposal = (meta) => ({ callId: "p", toolName: "dashboard_propose",
+    block: { kind: "tool-result", isError: false, content: [{ type: "text", text: "{}" }], ...(meta ? { meta } : {}) } });
+  const drawnProposal = flatten(ProposedRow(proposal({ filed: [], presented: { task_id: "task-1", proposed: { ...presented.cards[0], pin: null } } })));
+  assert.match(drawnProposal, /助手提议/);
+  assert.match(drawnProposal, /点「钉住」才算/);
+  assert.ok(!drawnProposal.includes("钉到看板"));
+  assert.match(flatten(ProposedRow(proposal({ filed: [], presented: { task_id: "task-1", proposed: null } })).props.children[0]), /保存结果 · 已完成/);
+  assert.match(flatten(ProposedRow(proposal()).props.children[0]), /保存结果 · 已完成/);
 }

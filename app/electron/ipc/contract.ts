@@ -139,6 +139,11 @@ export const CHANNELS = {
    * and offered no way back short of switching tasks.
    */
   harnessExited: 'harness:exited',
+  /**
+   * 打开结果 or 钉到看板 on a card in the assistant's answer. The page has no channel of its own to this window;
+   * the host reads the click off the page's console, checked (`harness/cardAction.ts`), and passes it on.
+   */
+  harnessCardAction: 'harness:card-action',
 } as const;
 
 export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS];

@@ -80,6 +80,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   const [scopeRequest, setScopeRequest] = useState<ScopeRequest>({ count: 0 });
   const [scopeRefresh, setScopeRefresh] = useState({ version: 0, quiet: false });
   const [materialsRefresh, setMaterialsRefresh] = useState(0);
+  // The collection run a card in the conversation asked to open on the 收费明细 panel.
+  const [billingShow, setBillingShow] = useState<{ id: string; count: number } | undefined>(undefined);
   // One scope per task, edited from the 资料 page and the finance settings alike.
   const analysisScope = useAnalysisScope(task?.id, task?.title ?? '', state?.datasets ?? [], scopeRefresh.version, scopeRefresh.quiet);
   // Held here, not in the workbench: it unmounts when the tab changes, and a run
@@ -348,6 +350,37 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   const readOnly = Boolean(task?.lifecycle_status && task.lifecycle_status !== 'active');
   const canPin = Boolean(bridge()?.financeCall) && !readOnly;
   const pinBoard = useMemo(() => (canPin ? { pin: board.pin } : null), [canPin, board.pin]);
+  /*
+   * A click on a card in the assistant's answer beside this page (dsh-plugin/client.js), for the task on screen only.
+   * 打开结果 opens the run the card read; 钉到看板 is the manager's own pin, through the board's own save, so it lands
+   * pinned and waits for 认可 like any other.
+   */
+  useEffect(() => {
+    const api = bridge();
+    if (!api?.onHarnessCardAction) return;
+    return api.onHarnessCardAction((action) => {
+      const taskId = currentTask.current;
+      if (!taskId || action.taskId !== taskId) return;
+      setError(''); setNotice('');
+      if (action.action === 'pin') {
+        if (!canPin) { setNotice('这项任务现在只能查看，不能往看板上钉卡。'); return; }
+        void board.pin({ ...action.card, state: 'pinned' }).then(
+          (said) => { if (currentTask.current === taskId) setNotice(said); },
+          (failure: unknown) => { if (currentTask.current === taskId) setError(errorText(failure)); });
+        return;
+      }
+      if (action.kind === 'collection') {
+        setBillingShow({ id: action.runId, count: Date.now() });
+        chooseTab('datasets');
+        return;
+      }
+      writeCopy(`${taskId}:run`, action.runId);
+      if (action.analysisId) setSelectedAnalysis(action.analysisId);
+      chooseTab('results');
+      // The assistant may have calculated it after this page last read the task.
+      void refresh(taskId).catch(() => undefined);
+    });
+  }, [board.pin, canPin, chooseTab, refresh]);
   async function saveDraft(taskId: string, spec: Record<string, unknown>): Promise<AnalysisDraft> {
     const api = bridge();
     const recoveryRef = spec.recovery_ref as { operation_id: string; revision: number } | undefined;
@@ -442,7 +475,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           {bridge()?.financeCall && view.datasets.length > 0 && <ScopePanel scope={analysisScope} datasetCount={view.datasets.length}
             disabled={busy} onSaved={() => void refresh(task.id)} />}
           <WorkbookOverview taskId={task.id} datasets={view.datasets} />
-          {bridge()?.billingCall && <BillingPanel taskId={task.id} period={task.period} refreshKey={materialsRefresh}
+          {bridge()?.billingCall && <BillingPanel taskId={task.id} period={task.period} refreshKey={materialsRefresh} show={billingShow} onShown={() => setBillingShow(undefined)}
             practice={task.sample === 'practice' || task.sample === 'next_month'}
             readOnly={Boolean(task.lifecycle_status && task.lifecycle_status !== 'active')} />}
           <section className="analysis-more-actions" aria-labelledby="analysis-more-actions">

@@ -290,6 +290,10 @@ void app.whenReady().then(() => {
       formulatorBin: process.env.FOUNDRY_FORMULATOR_BIN,
       bundledSkillDir: bundledSkillDir ?? undefined,
       companionEnv: companionEnv(here),
+      figureFonts: async () => (await import('./reports/host.js')).figureFontData(),
+      onCardAction: (action) => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(CHANNELS.harnessCardAction, action);
+      },
       onExit: () => {
         console.warn('[harness] runtime exited unexpectedly');
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(CHANNELS.harnessExited);

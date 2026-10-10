@@ -1,16 +1,29 @@
 import type {BrowserWindow} from 'electron';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-const native = vi.hoisted(()=>({construct:vi.fn(),bounds:vi.fn(),visible:vi.fn(),focus:vi.fn(),mainFocus:vi.fn(),isFocused:vi.fn(()=>false),load:vi.fn(),add:vi.fn(),remove:vi.fn()}));
+const native = vi.hoisted(()=>({construct:vi.fn(),bounds:vi.fn(),visible:vi.fn(),focus:vi.fn(),mainFocus:vi.fn(),isFocused:vi.fn(()=>false),load:vi.fn(),add:vi.fn(),remove:vi.fn(),run:vi.fn(async()=>undefined)}));
 vi.mock('electron',()=>({WebContentsView:class {
-  constructor(){native.construct();}
   setBounds = native.bounds;
   setVisible = native.visible;
-  webContents = {isFocused:native.isFocused,focus:native.focus,loadURL:native.load,setWindowOpenHandler:vi.fn(),on:vi.fn()};
+  webContents = {isFocused:native.isFocused,focus:native.focus,loadURL:native.load,executeJavaScript:native.run,setWindowOpenHandler:vi.fn(),on:vi.fn()};
+  constructor(){native.construct(this);}
 }}));
 import {Pane} from '../electron/harness/pane.js';
 const window = {contentView:{addChildView:native.add,removeChildView:native.remove},webContents:{focus:native.mainFocus},getContentSize:()=>[1000,800]} as unknown as BrowserWindow;
 beforeEach(()=>{vi.clearAllMocks();native.isFocused.mockReturnValue(false);});
 describe('resident pane lifecycle',()=>{
+  it('runs its owner script after every load and passes on each line the page logs',async()=>{
+    const heard:string[] = [];
+    const pane = new Pane({script:()=>'window.__x = 1;',console:(message)=>heard.push(message)});
+    await pane.attach(window,'http://127.0.0.1:41000');
+    const view = native.construct.mock.calls.at(-1)![0] as {webContents:{on:ReturnType<typeof vi.fn>}};
+    const handler = (name:string) => view.webContents.on.mock.calls.find(([event])=>event===name)![1] as (...args:unknown[])=>void;
+    handler('did-finish-load')();
+    handler('did-finish-load')();
+    expect(native.run).toHaveBeenCalledTimes(2);
+    expect(native.run).toHaveBeenLastCalledWith('window.__x = 1;',true);
+    handler('console-message')({message:'hello'});
+    expect(heard).toEqual(['hello']);
+  });
   it('starts hidden before mounting and actually hides the native surface on overlays',async()=>{
     const pane = new Pane();
     await pane.attach(window,'http://127.0.0.1:41000');

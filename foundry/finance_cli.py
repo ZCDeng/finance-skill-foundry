@@ -41,6 +41,7 @@ OPERATIONS = {
     "dashboard-save": "dashboard_save",
     "dashboard-propose": "dashboard_propose",
     "dashboard-recompute": "dashboard_recompute",
+    "answer-cards": "answer_cards",
     "analysis-circle-select": "analysis_circle_select",
     "structure-proposal-list": "structure_proposal_list",
     "structure-proposal-confirm": "structure_proposal_confirm",

@@ -20,6 +20,12 @@ export const LIGHT_THEME = {
   selectionSurface: '#eef0f4',
   warning: '#a3372b',
   warningFill: '#c96a5c1f',
+  // The figures on a card the assistant draws in its answer: a negative, and the four lights of a screening.
+  negative: '#94463d',
+  warningLine: '#c96a5c',
+  levelWatch: '#a35f1f',
+  levelOk: '#4f7553',
+  markAbsent: '#6b6b6b',
 } as const;
 
 export const DARK_THEME = {
@@ -36,6 +42,11 @@ export const DARK_THEME = {
   selectionSurface: '#262a35',
   warning: '#eb9a8c',
   warningFill: '#eb9a8c1f',
+  negative: '#d9a097',
+  warningLine: '#eb9a8c',
+  levelWatch: '#e0a46a',
+  levelOk: '#9cc0a0',
+  markAbsent: '#9a9a9a',
 } as const;
 
 /** The body attribute written by the pinned DSH ThemePresenter for dark mode. */
@@ -71,6 +82,8 @@ export const HARNESS_SKIN = `
 :root {
   --ds-font-family-base:'Noto Sans SC',sans-serif;
   --ds-font-family-sans:'Noto Sans SC',sans-serif;
+  /* Figures on the assistant's cards: this window's own figure face, injected beside the text face (host.ts). */
+  --foundry-native-figure:'IBM Plex Mono','Noto Sans SC',ui-monospace,monospace;
 }
 
 body {
@@ -87,6 +100,11 @@ body {
   --foundry-native-selection-surface:${LIGHT_THEME.selectionSurface};
   --foundry-native-warning:${LIGHT_THEME.warning};
   --foundry-native-warning-fill:${LIGHT_THEME.warningFill};
+  --foundry-native-negative:${LIGHT_THEME.negative};
+  --foundry-native-warning-line:${LIGHT_THEME.warningLine};
+  --foundry-native-level-watch:${LIGHT_THEME.levelWatch};
+  --foundry-native-level-ok:${LIGHT_THEME.levelOk};
+  --foundry-native-mark-absent:${LIGHT_THEME.markAbsent};
 }
 
 body[${DSH_DARK_ATTRIBUTE}] {
@@ -103,6 +121,11 @@ body[${DSH_DARK_ATTRIBUTE}] {
   --foundry-native-selection-surface:${DARK_THEME.selectionSurface};
   --foundry-native-warning:${DARK_THEME.warning};
   --foundry-native-warning-fill:${DARK_THEME.warningFill};
+  --foundry-native-negative:${DARK_THEME.negative};
+  --foundry-native-warning-line:${DARK_THEME.warningLine};
+  --foundry-native-level-watch:${DARK_THEME.levelWatch};
+  --foundry-native-level-ok:${DARK_THEME.levelOk};
+  --foundry-native-mark-absent:${DARK_THEME.markAbsent};
 }
 
 body {

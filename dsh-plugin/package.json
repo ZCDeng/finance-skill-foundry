@@ -100,6 +100,7 @@
             "chart_deliverable_save",
             "dashboard_read",
             "dashboard_propose",
+            "answer_cards",
             "finance_context_save",
             "finance_map_save",
             "run_metric",

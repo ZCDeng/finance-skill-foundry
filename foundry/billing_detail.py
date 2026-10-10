@@ -474,6 +474,15 @@ class BillingDetailStore:
             write_json_atomic(runs / f"{run['id']}.json", run)
         return run
 
+    def read_run(self, run_id: Any) -> dict:
+        """One collection run of this task, as stored."""
+        if not re.fullmatch(r"[0-9a-f]{32}", str(run_id)):
+            raise FoundryError("run id must be 32 hex characters")
+        path = self.root / "runs" / f"{run_id}.json"
+        if not path.is_file():
+            raise FoundryError(f"no collection run {run_id}")
+        return json.loads(path.read_text(encoding="utf-8"))
+
     def runs(self) -> list[dict]:
         """Every collection run of this task, oldest first, as the lines a list shows."""
         folder = self.root / "runs"
@@ -863,12 +872,7 @@ def dispatch(args) -> bool:
     elif args.cmd == "collection-caliber-confirm":
         result = store.caliber_confirm(args.version, None if args.params is None else _object(args.params, "caliber"))
     else:
-        if not re.fullmatch(r"[0-9a-f]{32}", str(args.run)):
-            raise FoundryError("run id must be 32 hex characters")
-        path = store.root / "runs" / f"{args.run}.json"
-        if not path.is_file():
-            raise FoundryError(f"no collection run {args.run}")
-        result = json.loads(path.read_text(encoding="utf-8"))
+        result = store.read_run(args.run)
     print(json.dumps(result, ensure_ascii=False))
     return True
 

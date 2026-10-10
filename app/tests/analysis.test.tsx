@@ -22,7 +22,7 @@ vi.mock('pdfjs-dist', () => ({
 import { Analysis } from '../src/views/Analysis.js';
 import { DraftBody } from '../src/views/analysis/DraftBody.js';
 import { documentFromMarkdown, documentToMarkdown } from '../electron/reports/format.js';
-import type { Answer, AnalysisDraft, AnalysisRevision, AnalysisRun, AnalysisState, Bridge, DatasetSnapshot, TaskRow } from '../src/bridge.js';
+import type { Answer, AnalysisDraft, AnalysisRevision, AnalysisRun, AnalysisState, Bridge, DatasetSnapshot, HarnessCardAction, TaskRow } from '../src/bridge.js';
 import { acrossElements } from './text-match.js';
 
 const task: TaskRow = { id: 'a'.repeat(32), title: '华东经营分析', period: null, skill_id: null, created_at: '2026-09-05T00:00:00Z', windows: 0 };
@@ -984,6 +984,32 @@ ${canonicalAppendix} 已改写`;
     expect(within(evidence).getByText('参数：overhead：30.00；legacy_rate：0.8500000000000001')).toBeTruthy();
     expect(within(evidence).getByText('假设说明：估计依据：经理提供的本次估计；note：未知结构保持原文')).toBeTruthy();
     expect(within(evidence).queryByText(/万元|回款比例/)).toBeNull();
+  });
+
+  it('acts on a card in the conversation only for its own task: opens the run it read, and pins it as the manager', async () => {
+    let tell: ((action: HarnessCardAction) => void) | undefined;
+    const saved: unknown[] = [];
+    const financeCall = vi.fn(async (_taskId: string, command: string, spec?: Record<string, unknown>) => {
+      if (command === 'dashboard-read') return success({ dashboard: null });
+      if (command === 'list-finance-context') return success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['metrics'] });
+      if (command === 'dashboard-save') {
+        saved.push(spec);
+        return success({ id: '5'.repeat(32), parent_id: null, created_at: task.created_at, cards: [] });
+      }
+      return success({});
+    });
+    mountBridge({ financeCall, onHarnessCardAction: (cb) => { tell = cb; return () => { tell = undefined; }; } });
+    render(<Analysis {...props} embedded section="drafts" />);
+    await waitFor(() => expect(tell).toBeDefined());
+    act(() => tell!({ action: 'open', taskId: 'f'.repeat(32), kind: 'analysis', runId: run.id, analysisId: analysis.id }));
+    expect(screen.getByRole('tab', { name: /文稿/ }).getAttribute('aria-selected')).toBe('true');
+    act(() => tell!({ action: 'open', taskId: task.id, kind: 'analysis', runId: run.id, analysisId: analysis.id }));
+    expect(await screen.findByText('900,719,925,474,099.99')).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /分析结果/ }).getAttribute('aria-selected')).toBe('true');
+    const card = { kind: 'figure' as const, title: '华东利润', run_id: run.id, select: { match: {}, column: 'profit' } };
+    act(() => tell!({ action: 'pin', taskId: task.id, card }));
+    await waitFor(() => expect(saved).toEqual([{ parent_id: null, cards: [{ ...card, state: 'pinned' }] }]));
+    expect(await screen.findByText('已钉到看板，等你在「看板」页认可。')).toBeTruthy();
   });
 
   it('keeps the user on drafts when a finance run refresh finishes after they leave results', async () => {

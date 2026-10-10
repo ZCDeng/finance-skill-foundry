@@ -2,6 +2,14 @@ import { type BrowserWindow, WebContentsView } from 'electron';
 
 import { HIDDEN, PaneGeometry, type Rect } from './bounds.js';
 
+/** What a pane's owner hears from, and says to, the page it embeds. */
+export interface PaneHooks {
+  /** A script to run in the page after every load, once the page's own bundle has run. */
+  script?: () => string;
+  /** Every console line the page writes. */
+  console?: (message: string) => void;
+}
+
 /**
  * One embedded page, positioned in window coordinates.
  *
@@ -32,6 +40,8 @@ export class Pane {
    */
   private css: string | null = null;
 
+  constructor(private readonly hooks: PaneHooks = {}) {}
+
   attached(): boolean {
     return this.view !== null;
   }
@@ -59,7 +69,12 @@ export class Pane {
     view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     view.webContents.on('did-finish-load', () => {
       if (this.css) void view.webContents.insertCSS(this.css);
+      // Like the stylesheet, a page's globals go with the document a reload replaces.
+      const script = this.hooks.script?.();
+      if (script) void view.webContents.executeJavaScript(script, true).catch(() => undefined);
     });
+    const heard = this.hooks.console;
+    if (heard) view.webContents.on('console-message', (event) => heard(event.message));
     view.webContents.on('will-navigate', (event, url) => {
       const pinned = this.origin;
       if (!pinned) return;
