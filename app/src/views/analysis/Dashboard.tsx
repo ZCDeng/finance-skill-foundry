@@ -12,6 +12,8 @@ import { Waterfall } from '../../components/charts/Waterfall.js';
 import { groupDigits } from '../../lib/figures.js';
 import { formatPeriod } from '../../lib/period.js';
 import { AskLink } from '../guide/GuideHub.js';
+import { ScenarioCard } from './ScenarioCard.js';
+import { scenarioBase } from './dashboardScenario.js';
 import { FigureSource } from './FigureSource.js';
 import { figureSource, runIsStale, type FigureSourceContext } from './figureSource.js';
 import { isCollectionHealthRun, LevelMark, type HealthRow } from './CollectionHealthView.js';
@@ -140,6 +142,8 @@ export function useDashboard(taskId: string | undefined, { canRecompute = false,
 export type DashboardState = ReturnType<typeof useDashboard>;
 
 const STATE_WORDS: Record<DashboardCard['state'], string> = { explore: '助手提议', pinned: '待认可', accepted: '已认可' };
+/** A scenario card on the board is a what-if, never waiting to be accepted. */
+const stateWord = (card: DashboardCard) => (card.kind === 'scenario' && card.state !== 'explore' ? '情景' : STATE_WORDS[card.state]);
 
 /** What a figure card shows of its row. */
 type FigureView = { subject: string; value: string; part: string; beside: [string, string][]; level: HealthRow['level']; levelLabel: string | null; row: Record<string, unknown>; facts: [string, string][] };
@@ -198,6 +202,7 @@ function sameMatch(left: Record<string, string>, right: Record<string, string>):
 function drawsOn(card: DashboardCard, run: AnalysisRun): boolean {
   if (card.kind === 'figure') return figureView(card, run) !== null;
   if (card.kind === 'rank') return rankItems(card, run).items.length >= 2;
+  if (card.kind === 'scenario') return scenarioBase(run, card.select.match) !== null;
   return profitBridges(run).some((bridge) => sameMatch(bridge.match, card.select.match));
 }
 
@@ -232,7 +237,9 @@ export function DashboardView({ state, runs, analyses, datasets, superseded = []
   const cards = dashboard?.cards ?? [];
   const board = cards.filter((card) => card.state !== 'explore');
   const proposed = cards.filter((card) => card.state === 'explore');
-  const waiting = board.filter((card) => card.state === 'pinned');
+  // A scenario card is never accepted, so it never waits for it.
+  const waiting = board.filter((card) => card.state === 'pinned' && card.kind !== 'scenario');
+  const scenarios = board.filter((card) => card.kind === 'scenario').length;
   const runOf = (card: DashboardCard) => runs.find((run) => run.id === card.run_id);
   const contextOf = (run: AnalysisRun): FigureSourceContext => ({ run, analysis: analyses.find((row) => row.id === run.analysis_id), datasets, superseded: replaced });
   const stale = board.filter((card) => { const run = runOf(card); return run ? runIsStale(contextOf(run)) : false; });
@@ -249,7 +256,7 @@ export function DashboardView({ state, runs, analyses, datasets, superseded = []
   };
   const acceptAll = () => {
     setConfirmAll(false);
-    act(`已认可 ${waiting.length} 张卡。`, (now) => now.map((card) => (card.state === 'pinned' ? { ...card, state: 'accepted' } : card)));
+    act(`已认可 ${waiting.length} 张卡。`, (now) => now.map((card) => (card.state === 'pinned' && card.kind !== 'scenario' ? { ...card, state: 'accepted' } : card)));
   };
   const moveAll = () => {
     const moves = new Map(movable.map(({ card, next }) => [card.id, next.id]));
@@ -271,7 +278,7 @@ export function DashboardView({ state, runs, analyses, datasets, superseded = []
       <TemplateChooser runs={runs} cards={cards} readOnly={readOnly} busy={busy} onAdd={addTemplate} />
     </> : <>
       <div className="dashboard__summary">
-        <p className="dashboard__counts">{`共 ${board.length} 张 · 已认可 ${board.length - waiting.length} 张 · 待认可 ${waiting.length} 张`}
+        <p className="dashboard__counts">{`共 ${board.length} 张 · 已认可 ${board.length - waiting.length - scenarios} 张 · 待认可 ${waiting.length} 张${scenarios ? ` · 情景 ${scenarios} 张` : ''}`}
           {stale.length ? <span className="dashboard__stale">{`资料已更新，${stale.length} 张待重算`}</span> : null}</p>
         {!readOnly && <div className="dashboard__tools">
           {waiting.length > 0 && <Button type="button" variant="outline" disabled={busy} onClick={() => setConfirmAll(true)}>
@@ -294,6 +301,7 @@ export function DashboardView({ state, runs, analyses, datasets, superseded = []
       {charts.length > 0 && <section aria-label="图" className="dashboard__charts">
         {charts.map((card) => <BoardCard key={card.id} card={card} run={runOf(card)} contextOf={contextOf} actions={actions} newer={movable.find((item) => item.card.id === card.id)?.next} />)}
       </section>}
+      {!readOnly && <BoardAsks busy={busy} />}
       {!readOnly && <details className="analysis-details"><DisclosureSummary>从模板添加</DisclosureSummary>
         <TemplateChooser runs={runs} cards={cards} readOnly={readOnly} busy={busy} onAdd={addTemplate} compact />
       </details>}
@@ -311,6 +319,18 @@ export function DashboardView({ state, runs, analyses, datasets, superseded = []
       </AlertDialogContent>
     </AlertDialog>
   </div>;
+}
+
+/**
+ * 问着加卡: questions for the assistant, put into the conversation unsent. It answers with explore cards under
+ * 助手提议, which go on the board only when pinned; a filter changes which rows a card reads, never the 口径.
+ */
+function BoardAsks({ busy }: { busy: boolean }) {
+  return <p className="analysis-note dashboard__asks"><span>让助手加卡：</span>
+    <AskLink ask="dashboard-cards" label="提议几张卡" disabled={busy} />
+    <AskLink ask="dashboard-by-city" label="按城市公司排一排" disabled={busy} />
+    <AskLink ask="collection-scenario" label="加一张回款情景卡" disabled={busy} />
+    <span>只填进对话框，改好再发送。</span></p>;
 }
 
 /** What the last recompute or carry did, said once; the cards themselves say what changed. */
@@ -375,7 +395,7 @@ function RecomputedLine({ card }: { card: DashboardCard }) {
   if (!said || card.state === 'accepted') return null;
   // Where it came from is said once at the top and on 总览; the card says what it was and how it moved.
   const month = said.months ? `按 ${formatPeriod(said.months[1])}的资料重算` : '按新资料重算';
-  const before = card.kind === 'figure' ? said.before?.display
+  const before = card.kind === 'figure' || card.kind === 'scenario' ? said.before?.display
     : card.kind === 'rank' ? (said.before?.labels ?? []).slice(0, 3).join('、') : '';
   const what = card.kind === 'rank' && before ? `上次前三 ${before}` : before ? `上次 ${before}` : '';
   return <div className="dashboard-card__recompute" data-changed={said.changed ? '' : undefined}>
@@ -433,6 +453,10 @@ function BoardCard({ card, run, contextOf, actions, newer }: {
       <RankBars title={card.title} items={items} reference={reference} keepOrder />
       {unit ? <p className="fnd-chart__caption">{`单位：${unit}`}</p> : null}
     </> : <p className="analysis-note">这次结果里能排名的不到两行，可以移除。</p>;
+  } else if (card.kind === 'scenario') {
+    const base = scenarioBase(run, card.select.match);
+    body = base ? <ScenarioCard base={base} context={contextOf(run)} />
+      : <p className="analysis-note">这次结果里凑不齐这个主体的毛利率、期间费用率和距生死线，可以移除。</p>;
   } else {
     const found = profitBridges(run).find((bridge) => sameMatch(bridge.match, card.select.match));
     body = found ? <Waterfall title={card.title} steps={found.steps} unit={found.unit || undefined} />
@@ -442,7 +466,7 @@ function BoardCard({ card, run, contextOf, actions, newer }: {
   return <article className={`dashboard-card dashboard-card--${card.kind}`} data-state={card.state} aria-label={card.title}>
     <header className="dashboard-card__head">
       <h4 className="dashboard-card__title" title={card.title}>{card.title}</h4>
-      <span className="dashboard-card__state" data-state={card.state}>{STATE_WORDS[card.state]}</span>
+      <span className="dashboard-card__state" data-state={card.kind === 'scenario' && card.state !== 'explore' ? 'scenario' : card.state}>{stateWord(card)}</span>
     </header>
     {card.note ? <p className="dashboard-card__note">{card.note}</p> : null}
     {body}
@@ -465,7 +489,7 @@ function Actions({ card, run, actions, newer }: { card: DashboardCard; run?: Ana
       <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => set('pinned', `已钉住「${card.title}」，等你认可。`)}><Pin size={14} strokeWidth={1.5} aria-hidden />钉住</Button>
       <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => remove(`已不要「${card.title}」。`)}><X size={14} strokeWidth={1.5} aria-hidden />不要</Button>
     </>}
-    {!readOnly && card.state === 'pinned' && run && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => set('accepted', `已认可「${card.title}」。`)}>
+    {!readOnly && card.state === 'pinned' && card.kind !== 'scenario' && run && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => set('accepted', `已认可「${card.title}」。`)}>
       <Check size={14} strokeWidth={1.5} aria-hidden />认可</Button>}
     {!readOnly && card.state === 'accepted' && <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => set('pinned', `已取消认可「${card.title}」。`)}>取消认可</Button>}
     {!readOnly && newer && <Button type="button" size="sm" variant="ghost" disabled={busy}

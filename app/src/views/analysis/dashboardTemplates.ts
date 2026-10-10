@@ -8,6 +8,7 @@ import { isFinanceVarianceRun, profitBridges, rendersBusinessView } from './RunP
 import { headlineRows, kpiFor } from './BusinessResultView.js';
 import { displayColumns, isSuccessfulRun } from './businessResults.js';
 import { figureDraft, type CardDraft, type DashboardCard, type TemplateId } from './dashboard.js';
+import { scenarioBase } from './dashboardScenario.js';
 
 export type Template = {
   id: TemplateId;
@@ -71,6 +72,15 @@ function tableRank(run: AnalysisRun | undefined, key: string, title: string, ord
   }];
 }
 
+/** 回款情景 over the group's lines: the collection rate moved by hand, never accepted. */
+function groupScenario(run: AnalysisRun | undefined, template: TemplateId): CardDraft[] {
+  if (!run) return [];
+  const entity = groupEntity(run);
+  const match = { entity: entity ?? '', scenario: '本期' };
+  if (!entity || !scenarioBase(run, match)) return [];
+  return [{ kind: 'scenario', title: '回款情景：收缴率变了会怎样', state: 'pinned', run_id: run.id, template, select: { match } }];
+}
+
 const BREAK_EVEN = { value: '0', label: '生死线' };
 
 export const TEMPLATES: Template[] = [
@@ -98,13 +108,14 @@ export const TEMPLATES: Template[] = [
   {
     id: 'collection',
     title: '回款健康',
-    summary: '距生死线、应收天数、应收蓄水和现金回收，和各主体距生死线的排名。',
+    summary: '距生死线、应收天数、应收蓄水和现金回收，各主体距生死线的排名，和一张拖收缴率看后果的情景卡。',
     needs: '先算一次回款健康分析。',
     cards(runs) {
       const run = latest(runs, 'health');
       return [
         ...groupFigures(run, ['collection_gap', 'collection_gap_total', 'break_even_collection', 'dso', 'ar_buildup', 'cash_collection_ratio'], 'collection'),
         ...tableRank(run, 'collection_gap', '各主体距生死线（从低到高）', 'asc', 'collection', BREAK_EVEN),
+        ...groupScenario(run, 'collection'),
       ];
     },
   },

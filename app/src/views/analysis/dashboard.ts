@@ -6,7 +6,8 @@
 import { createContext } from 'react';
 import type { AnalysisRun } from '../../bridge.js';
 
-export type CardKind = 'figure' | 'rank' | 'bridge';
+/** scenario: 回款情景, a what-if over one entity's collection-health lines; never accepted. */
+export type CardKind = 'figure' | 'rank' | 'bridge' | 'scenario';
 /** explore: the assistant proposed it, not on the board yet; pinned: waits for the manager; accepted: the manager's. */
 export type CardState = 'explore' | 'pinned' | 'accepted';
 export type TemplateId = 'operating' | 'collection' | 'city';

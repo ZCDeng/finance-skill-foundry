@@ -132,7 +132,7 @@ function Recomputed({ rows, onOpen, now = new Date() }: { rows: OverviewTask[]; 
           <span>{`「${item.title}」：${item.change || '已重算'}`}</span>
         </div>
         <Button type="button" size="sm" variant="outline" onClick={() => onOpen(task, 'dashboard')}>
-          {item.changed ? '去看看' : '去认可'}<ArrowRight size={13} strokeWidth={1.5} aria-hidden />
+          {item.changed || item.kind === 'scenario' ? '去看看' : '去认可'}<ArrowRight size={13} strokeWidth={1.5} aria-hidden />
           <span className="sr-only">：{task.title}，{item.title}</span>
         </Button>
       </li>)}

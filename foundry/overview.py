@@ -154,7 +154,7 @@ def _dashboard_overview(finance) -> dict:
         if card.get("state") == "explore" or not said:
             continue
         rows.append({"card_id": card["id"], "title": card["title"], "at": said["at"], "changed": bool(said.get("changed")),
-                     "change": said.get("change") or "", "state": card["state"],
+                     "change": said.get("change") or "", "state": card["state"], "kind": card["kind"],
                      "carried_from": (said.get("carried_from") or {}).get("title")})
     return {"recomputed": rows}
 
