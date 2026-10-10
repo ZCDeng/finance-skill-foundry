@@ -61,7 +61,14 @@ const assert = require('node:assert/strict');
   };
   try {
     const page = await app.firstWindow(); await page.waitForLoadState('domcontentloaded');
-    await page.locator('.workspace-header').waitFor();
+    // Since 0.11.0 the app opens on 总览; the workspace lives on the 工作区 tab.
+    const openWorkspace = async () => {
+      const tab = page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: '工作区', exact: true });
+      await tab.waitFor();
+      if (await tab.getAttribute('aria-current') !== 'page') await tab.click();
+      await page.locator('.workspace-header').waitFor();
+    };
+    await openWorkspace();
     const expand = page.getByRole('button', { name: '展开任务列表' });
     if (await expand.isVisible()) await expand.click();
     await page.locator('.workspace-task').filter({ hasText: '华东八月经营分析' }).click();
@@ -112,8 +119,15 @@ const assert = require('node:assert/strict');
       if (await expandTasks.isVisible()) await expandTasks.click();
       await page.locator('.workspace-task').filter({ hasText: title }).click();
     };
+    // Folds animate open: click the summary, then wait until the fold's first content is on screen before reading it.
+    const openFold = async (details) => {
+      await details.locator(':scope > summary').click();
+      await details.locator(':scope > :not(summary)').first().waitFor({ state: 'visible' });
+    };
     const fieldValue = async (label, rootLocator = page) => {
       const control = rootLocator.getByLabel(label, { exact: true });
+      // A disclosure such as 更多范围 animates open; read the control once it is on screen, not mid-expansion.
+      await control.waitFor({ state: 'visible' });
       const tag = await control.evaluate(node => node.tagName.toLowerCase());
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return control.inputValue();
       return control.locator('span').first().innerText();
@@ -133,7 +147,7 @@ const assert = require('node:assert/strict');
     const reloadWorkspace = async () => {
       await page.reload();
       await page.waitForLoadState('domcontentloaded');
-      await page.locator('.workspace-header').waitFor();
+      await openWorkspace();
       await page.waitForFunction(async () => { const result = await window.foundry.harnessStatus(); return result.ok && result.value.wiring.state === 'ready'; }, undefined, { timeout: 45000 });
       await page.waitForFunction(() => !document.querySelector('.workspace-connection'));
     };
@@ -184,7 +198,8 @@ const assert = require('node:assert/strict');
         }
         assert.deepEqual(seen.hits, [], name + ' visible text holds no ids, scenario codes or raw column names');
         if (kind !== 'finance') assert.ok(seen.cardNotes.length > 0, name + ' shows key-figure cards');
-        if (kind === 'legacy') assert.ok(seen.cardNotes.every(card => card.notes.includes('推断')), name + ' every card says 推断');
+        // Since 5f65c82 the 推断 note sits in the card meta without its own .analysis-kpi-notes span.
+        if (kind === 'legacy') assert.ok(seen.cardNotes.every(card => card.inferred), name + ' every card says 推断');
         if (kind === 'declared') assert.ok(seen.cardNotes.every(card => !card.inferred), name + ' no card says 推断');
       }
       checks.push(`first screen at 1280 × 800, light and dark: ${seeded.title} shows its ${kind === 'finance' ? 'conclusion bar' : 'key figures'} unscrolled, above any settings, with no technical names${kind === 'legacy' ? ', cards marked 推断' : kind === 'declared' ? ', no card marked 推断' : ''}`);
@@ -199,7 +214,8 @@ const assert = require('node:assert/strict');
         const savedRun = cli('analysis-state', [], seeded.task).runs.find(row => row.id === seeded.run);
         const exactActual = savedRun.result.rows[0].actual;
         assert.equal(typeof exactActual, 'string', 'finance amount remains a Decimal string');
-        assert.ok((await raw.innerText()).includes(exactActual), 'raw table retains the exact saved decimal');
+        // Since 76b3552 result figures are written in accounting form (grouped thousands); the digits stay unrounded.
+        assert.ok((await raw.innerText()).replace(/,/g, '').includes(exactActual), 'raw table retains the exact saved decimal');
         await capture('variance-technical-1280', 1280, 800);
         await raw.locator('summary').click();
         checks.push('variance raw results and diagnostics share one default-closed TechnicalInfo; expansion keeps exact Decimal values');
@@ -282,13 +298,20 @@ const assert = require('node:assert/strict');
     await page.getByText('更新 ERP 来源', { exact: true }).click();
     const ledger = page.getByLabel('账簿', { exact: true });
     await ledger.evaluate(node => node.scrollIntoView({ block: 'center' }));
-    await ledger.focus();
+    // 账簿 is a combobox button: a scripted focus() on a button is not :focus-visible, keyboard focus is.
+    await ledger.evaluate(node => node.focus({ focusVisible: true }));
     await ledger.hover();
     // DESIGN.md 按钮与字段: a focused field keeps its neutral --fnd-line border (no hover paint) under a 1px --fnd-focus
     // outline offset -1px, so hover + focus paints one edge. Token values from the DESIGN.md front matter / tokens.css.
-    const fieldFocus = { light: { border: 'rgba(31, 31, 31, 0.14)', color: 'rgb(138, 103, 41)' }, dark: { border: 'rgba(255, 255, 255, 0.14)', color: 'rgb(191, 163, 108)' } };
+    const fieldFocus = { light: { border: 'rgba(32, 41, 76, 0.12)', color: 'rgb(138, 103, 41)' }, dark: { border: 'rgba(255, 255, 255, 0.12)', color: 'rgb(191, 163, 108)' } };
     for (const theme of ['light', 'dark']) {
       await capture(`materials-focus-${theme}-1280`, 1280, 800, theme === 'dark');
+      // capture dismisses the native pane's setup prompt, which takes focus into that view: give it back to the field.
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.focus());
+      await ledger.evaluate(node => node.focus({ focusVisible: true }));
+      await ledger.hover();
+      // Measure after the border-color transition (--fnd-transition) has settled.
+      await ledger.evaluate(node => Promise.all(node.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished)));
       const focus = await ledger.evaluate(node => { const css = getComputedStyle(node);
         return { focusVisible: node.matches(':focus-visible'), hovered: node.matches(':hover'), outline: css.outlineWidth, style: css.outlineStyle, offset: css.outlineOffset, border: css.borderColor, color: css.outlineColor }; });
       measures.push({ name: `materials-focus-${theme}-1280 ledger`, focus });
@@ -305,7 +328,8 @@ const assert = require('node:assert/strict');
     await page.locator('details.analysis-finance-setup > summary').first().click();
     assert.equal(await settings.getByLabel('总部费用分摊（万元）', { exact: true }).inputValue(), '30.00', 'parameter edits survive closing the drawer');
     await page.getByRole('button', { name: '保存新版并重跑', exact: true }).click();
-    await page.getByRole('table', { name: '业务结果' }).getByRole('cell', { name: '240.00', exact: true }).waitFor({ timeout: 20000 });
+    // Since #152 a figure cell holds a 查看来源 button, so the cell is named by that button; match its text instead.
+    await page.getByRole('table', { name: '业务结果' }).getByRole('cell').filter({ hasText: /^240\.00$/ }).waitFor({ timeout: 20000 });
     await settings.waitFor({ state: 'hidden' });
     assert.equal(await settings.isVisible(), false, 'successful SQL calculation closes settings and shows its result');
     const rerunState = cli('analysis-state', [], task.id);
@@ -331,6 +355,8 @@ const assert = require('node:assert/strict');
     assert.equal(foldedEvidenceText.includes(dataset.id), false, 'folded evidence hides exact dataset id');
     assert.equal(foldedEvidenceText.includes(latestRun.id), false, 'folded evidence hides exact run id');
     for (let index = 0, count = await technical.count(); index < count; index += 1) await technical.nth(index).locator('summary').click();
+    // The folds animate open; read the dialog once the last one's contents are on screen.
+    await page.waitForFunction(id => document.querySelector('[role="dialog"]')?.innerText.includes(id), latestRun.id, { timeout: 5000 }).catch(() => undefined);
     const expandedEvidenceText = await evidence.innerText();
     assert.ok(expandedEvidenceText.includes(dataset.id), 'expanded technical info shows the exact dataset id');
     assert.ok(expandedEvidenceText.includes(latestRun.id), 'expanded technical info shows the exact run id');
@@ -362,7 +388,7 @@ const assert = require('node:assert/strict');
     await page.getByRole('status').filter({ hasText: '已保存方法，可在方法库中复用。' }).waitFor();
     const expandForMethods = page.getByRole('button', { name: '展开任务列表' });
     if (await expandForMethods.isVisible()) await expandForMethods.click();
-    await page.locator('.workspace-library').click();
+    await page.locator('.workspace-library').filter({ hasText: '方法库' }).click();
     const savedMethod = page.locator('.analysis-method').filter({ hasText: '区域利润分摊方法' });
     await savedMethod.waitFor();
     const methodAdvanced = savedMethod.locator('details');
@@ -371,6 +397,7 @@ const assert = require('node:assert/strict');
     assert.equal(await savedMethod.getByLabel('总部费用分摊（万元）', { exact: true }).inputValue(), '', 'saved business values are not silently reused');
     await capture('method-library-1280', 1280, 800);
     await methodAdvanced.locator('summary').click();
+    await methodAdvanced.locator('pre').waitFor({ state: 'visible' });
     assert.ok((await methodAdvanced.innerText()).includes('SELECT'), 'the saved SQL stays accessible');
     await capture('method-library-advanced-dark-1080', 1080, 800, true);
     await page.getByRole('tab', { name: /分析结果/ }).click();
@@ -391,19 +418,21 @@ const assert = require('node:assert/strict');
     assert.deepEqual(await reading.getByRole('listitem').allInnerTexts(), ['继续核对区域费用明细。', '将预算与实际数据按同一口径比较。']);
     assert.equal((await reading.innerText()).includes('**'), false, 'no raw Markdown markers in the reading view');
     const readingType = await reading.evaluate(node => { const css = getComputedStyle(node), paragraph = getComputedStyle(node.querySelector('p'));
-      return { font: css.fontFamily.split(',')[0].replaceAll('"', ''), size: css.fontSize, leading: css.lineHeight, after: paragraph.marginBottom }; });
+      // --fnd-font-prose leads with FND Figures (digits and % only, DESIGN.md 决定 4B); the words are set in the face after it.
+      const families = css.fontFamily.split(',').map(family => family.trim().replaceAll('"', ''));
+      return { figures: families[0], font: families[1], size: css.fontSize, leading: css.lineHeight, after: paragraph.marginBottom }; });
     measures.push({ name: 'draft reading type', readingType });
-    assert.deepEqual(readingType, { font: 'Noto Sans SC', size: '16px', leading: '28px', after: '18px' }, 'reading typography per DESIGN.md');
+    assert.deepEqual(readingType, { figures: 'FND Figures', font: 'Noto Sans SC', size: '16px', leading: '28px', after: '18px' }, 'reading typography per DESIGN.md');
     await reading.scrollIntoViewIfNeeded();
     await capture('draft-1440', 1440, 900);
     await capture('draft-dark-1280', 1280, 800, true);
     checks.push('saved draft opens in 阅读 with its revision state, rendered Markdown and 16px/28px reading type');
     const references = page.locator('details').filter({ has: page.locator('summary').filter({ hasText: /^引用的计算与依据 · 1 次计算$/ }) }).last();
-    await references.locator(':scope > summary').click();
+    await openFold(references);
     assert.ok((await references.innerText()).includes('引用计算 1'), 'draft references use readable ordinals');
     assert.equal((await references.innerText()).includes(run.id), false, 'the saved run id is hidden');
     const referenceTechnical = references.locator('details.analysis-technical');
-    await referenceTechnical.locator('summary').click();
+    await openFold(referenceTechnical);
     assert.ok((await referenceTechnical.innerText()).includes(run.id), 'technical information shows the exact draft reference');
     await capture('draft-references-1280', 1280, 800);
     await references.locator(':scope > summary').click();
@@ -450,7 +479,7 @@ const assert = require('node:assert/strict');
     await page.getByRole('button', { name: /修改任务名称/ }).click();
     await page.getByLabel('任务名称', { exact: true }).fill('华东经营分析 · 财务复核');
     await page.getByRole('button', { name: '保存任务名称' }).click();
-    await page.getByRole('heading', { name: '华东经营分析 · 财务复核' }).waitFor();
+    await page.getByRole('heading', { name: '华东经营分析 · 财务复核' }).first().waitFor();
     assert.equal(cli('task-list').find(row => row.id === task.id).title, '华东经营分析 · 财务复核');
     checks.push('task rename persists without changing task identity');
     await page.getByRole('button', { name: '展开任务列表' }).click();

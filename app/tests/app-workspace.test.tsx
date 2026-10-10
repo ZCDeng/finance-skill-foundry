@@ -160,6 +160,16 @@ describe('unified application session lifecycle', () => {
     expect(api.harnessOpen).toHaveBeenLastCalledWith('analysis', b.id, { verbatim: '做一次回款健康分析', draftId: undefined, submit: undefined, requestId: undefined });
   });
 
+  it('clicking the task that is already open keeps its conversation connected', async () => {
+    const api = mount();
+    await waitFor(() => expect(api.harnessOpen).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.queryByText('连接这项任务的对话')).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
+    fireEvent.click(screen.getByRole('button', { name: b.title }));
+    expect(screen.getByRole('heading', { name: b.title })).toBeTruthy();
+    expect(screen.queryByText('连接这项任务的对话')).toBeNull();
+  });
+
   it('serializes task switches and does not let the old response select its task again', async () => {
     let finish!: (value: Answer<{ sessionId: string; preset: string }>) => void;
     const harnessOpen = vi.fn((_intent: string, id: string) => id === b.id
