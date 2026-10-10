@@ -30,7 +30,7 @@ function PopoverContent({ className, align = 'start', sideOffset = 6, collisionP
         collisionPadding={collisionPadding}
         className={cn(
           'z-50 overflow-y-auto border border-border bg-popover text-popover-foreground outline-none',
-          'rounded-[var(--fnd-radius-menu)] shadow-[var(--fnd-shadow-menu)]',
+          'rounded-[var(--fnd-radius-container)] shadow-[var(--fnd-shadow-menu)]',
           'max-h-(--radix-popover-content-available-height) origin-(--radix-popover-content-transform-origin)',
           className,
         )}

@@ -822,8 +822,8 @@ body{margin:0;background:var(--report-bg);color:var(--report-ink);font-family:va
 .report-receipt{margin:16px 0 0;padding:10px 12px;border:1px solid var(--report-line);border-radius:6px;background:var(--report-paper);color:var(--report-muted);font-size:12px;line-height:20px;overflow-wrap:anywhere}
 .report-receipt ul{margin:0;padding-left:18px}.report-receipt li+li{margin-top:2px}.report-receipt strong{color:var(--report-ink)}
 .report-kicker,.table-meta,figcaption{margin:0;color:var(--report-muted);font-size:13px;line-height:22px}
-h1{margin:8px 0 0;font-size:28px;line-height:40px;font-weight:750;letter-spacing:0}
-h2{margin:32px 0 12px;font-size:22px;line-height:32px;font-weight:720;break-after:avoid}
+h1{margin:8px 0 0;font-size:28px;line-height:40px;font-weight:700;letter-spacing:0}
+h2{margin:32px 0 12px;font-size:22px;line-height:32px;font-weight:700;break-after:avoid}
 h3{margin:28px 0 10px;font-size:18px;line-height:28px;font-weight:700;break-after:avoid}
 h4,h5,h6{margin:24px 0 8px;font-size:16px;line-height:26px;font-weight:700;break-after:avoid}
 p,ul,ol,blockquote,pre,figure,.report-note{margin:0 0 18px}

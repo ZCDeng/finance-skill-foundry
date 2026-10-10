@@ -1,17 +1,17 @@
 @layer components {
 /* 总览 (Overview.tsx). Headings follow the workspace's three levels; notes sit under their heading. */
-.fnd-overview { display: flex; flex-direction: column; gap: var(--fnd-section-gap, 28px); }
+.fnd-overview { display: flex; flex-direction: column; gap: var(--fnd-section-gap, 32px); }
 .fnd-overview__head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .fnd-overview__head p { margin: 4px 0 0; }
-.fnd-overview__title { margin: 0; font-size: 20px; line-height: 28px; }
-.fnd-overview__section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.fnd-overview__h { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; }
+.fnd-overview__title { margin: 0; font-size: var(--fnd-size-title); line-height: 28px; }
+.fnd-overview__section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.fnd-overview__h { margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; font-weight: 600; }
 .fnd-overview__note { margin: 0; font-size: var(--fnd-size-small); }
-.fnd-overview__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.fnd-overview__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .fnd-overview__roll { display: inline-flex; align-items: center; gap: 6px; color: var(--fnd-muted); }
 /* With no task at all the four ways in are the page, so they get room and a frame. */
 .fnd-overview__start--first { padding: 24px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-surface); box-shadow: var(--fnd-shadow-sm); }
-.fnd-overview__start--first .fnd-overview__h { font-size: 18px; }
+.fnd-overview__start--first .fnd-overview__h { font-size: var(--fnd-size-lead); }
 
 .fnd-overview__grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
 /* The page is the canvas; each list sits on a card above it. 开始 stays on the canvas: it is a row of ways in, not content. */
@@ -33,12 +33,12 @@
 .fnd-overview__todo-task { font-size: var(--fnd-size-small); color: var(--fnd-muted); }
 .fnd-overview__todo-task .fnd-overview__task-title { color: var(--fnd-muted); }
 .fnd-overview__clear { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--fnd-level-ok); }
-.fnd-overview__tag { margin-left: 6px; padding: 0 6px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-chip); font-size: var(--fnd-size-label); color: var(--fnd-muted); white-space: nowrap; }
+.fnd-overview__tag { margin-left: 6px; padding: 0 6px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-pill); font-size: var(--fnd-size-label); color: var(--fnd-muted); white-space: nowrap; }
 
 .fnd-overview__progress { margin: 0; padding: 0; list-style: none; display: grid; }
 .fnd-overview__progress li + li { border-top: 1px solid var(--fnd-line); }
 .fnd-overview__progress-row {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; width: 100%; padding: 10px 8px; margin: 0 -8px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; width: 100%; padding: 12px 8px; margin: 0 -8px;
   border: 0; border-radius: var(--fnd-radius-control); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
   transition: background var(--fnd-transition);
 }

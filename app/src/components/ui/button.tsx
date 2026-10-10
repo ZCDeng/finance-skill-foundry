@@ -52,10 +52,10 @@ const buttonVariants = cva(
         default: 'h-[var(--fnd-button-height)] px-3.5',
         sm: 'h-8 px-2.5',
         lg: 'h-[var(--fnd-button-height)] px-3.5',
-        icon: 'size-8 rounded-[6px] p-0',
+        icon: 'size-8 rounded-[var(--fnd-radius-mark)] p-0',
         // A clickable chip (result period tabs, period shortcuts, candidate values): DESIGN.md 按钮与字段.
         // The focus ring stands 1px off the edge so a selected chip keeps its ink edge while focused.
-        chip: 'h-7 rounded-[var(--fnd-radius-chip)] px-2.5 text-[length:var(--fnd-size-label)] focus-visible:outline-offset-1',
+        chip: 'h-7 rounded-[var(--fnd-radius-pill)] px-2.5 text-[length:var(--fnd-size-label)] focus-visible:outline-offset-1',
       },
     },
     compoundVariants: [

@@ -14,7 +14,7 @@
 }
 .fnd-head__mark { font-family: var(--fnd-font-brand); font-size: 22px; line-height: 1; font-weight: 700; white-space: nowrap; color: var(--fnd-selected); }
 .fnd-head__nav { align-self: stretch; display: flex; gap: 4px; }
-.fnd-head__tab { border: 0; background: transparent; border-radius: 8px; padding: 0 16px; height: var(--fnd-button-height); font-size: var(--fnd-size-body); font-weight: 500; color: var(--fnd-muted); cursor: pointer; transition: color var(--fnd-transition), background var(--fnd-transition); }
+.fnd-head__tab { border: 0; background: transparent; border-radius: var(--fnd-radius-control); padding: 0 16px; height: var(--fnd-button-height); font-size: var(--fnd-size-body); font-weight: 500; color: var(--fnd-muted); cursor: pointer; transition: color var(--fnd-transition), background var(--fnd-transition); }
 .fnd-head__tab:hover {
   color: var(--fnd-ink);
   background: var(--fnd-surface-strong);
@@ -38,7 +38,7 @@
   position: relative;
   align-self: stretch;
   height: auto;
-  padding: 0 14px;
+  padding: 0 16px;
   border-radius: 0;
   font-weight: var(--fnd-weight-strong);
 }
@@ -76,8 +76,8 @@
 
 /* The number of to-dos on the 总览 tab. Hidden at 0 by not being drawn. */
 .fnd-head__count {
-  display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px;
-  border-radius: 9px; background: var(--fnd-warning-fill); color: var(--fnd-warning); font-size: 11px; line-height: 1; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 4px;
+  border-radius: var(--fnd-radius-pill); background: var(--fnd-warning-fill); color: var(--fnd-warning); font-size: var(--fnd-size-label); line-height: 1; font-weight: 600;
   font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums;
 }
 
@@ -156,8 +156,8 @@
   font-family: var(--fnd-font-sans);
   font-size: var(--fnd-size-label);
   line-height: 1;
-  padding: 4px 10px;
-  border-radius: var(--fnd-radius-chip);
+  padding: 4px 12px;
+  border-radius: var(--fnd-radius-pill);
   border: 1px solid var(--fnd-ink);
   color: var(--fnd-ink);
   background: transparent;
@@ -187,7 +187,7 @@
   border: 1px solid var(--fnd-line);
   border-radius: var(--fnd-radius-container);
   background: var(--fnd-surface);
-  padding: 20px 22px;
+  padding: 20px 24px;
 }
 
 .fnd-stack {
@@ -231,7 +231,7 @@
   border: 1px solid var(--fnd-line);
   border-radius: var(--fnd-radius-container);
   background: var(--fnd-surface);
-  padding: 18px 20px;
+  padding: 20px 20px;
   cursor: pointer;
   transition: border-color var(--fnd-transition), background var(--fnd-transition);
 }
@@ -326,7 +326,7 @@
 .fnd-time {
   list-style: none;
   margin: 0;
-  padding: 0 0 0 22px;
+  padding: 0 0 0 24px;
   border-left: 1px solid var(--fnd-line);
   display: flex;
   flex-direction: column;
@@ -390,7 +390,7 @@
   background: var(--fnd-warning-fill);
   color: var(--fnd-ink);
   border-radius: var(--fnd-radius-control);
-  padding: 14px 16px;
+  padding: 16px 16px;
   font-size: var(--fnd-size-small);
 }
 
@@ -403,7 +403,7 @@
   overflow: auto;
   border-top: 1px solid var(--fnd-line);
   margin-top: 14px;
-  padding-top: 14px;
+  padding-top: 16px;
 }
 
 /* -- the task bar --------------------------------------------------------- */
@@ -455,7 +455,7 @@
   display: flex;
   overflow: hidden;
   border: 1px solid var(--fnd-line);
-  border-radius: var(--fnd-radius-menu);
+  border-radius: var(--fnd-radius-container);
   background: var(--fnd-surface);
   box-shadow: var(--fnd-shadow-menu);
 }
@@ -623,7 +623,7 @@ textarea.fnd-field {
   display: inline-flex;
   flex: none;
   gap: 2px;
-  padding: 3px;
+  padding: 4px;
   border: 1px solid var(--fnd-line);
   border-radius: var(--fnd-radius-pill);
 }
@@ -839,7 +839,7 @@ textarea.fnd-field {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   padding: 96px 0;
 }
 
@@ -1041,7 +1041,7 @@ textarea.fnd-field {
   border: 1px solid var(--fnd-line);
   border-radius: var(--fnd-radius-container);
   background: var(--fnd-surface);
-  padding: 18px 12px 16px;
+  padding: 20px 12px 16px;
 }
 
 /*
@@ -1117,24 +1117,24 @@ textarea.fnd-field {
 .fnd-doc {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
   max-width: 100%;
 }
 
 .fnd-doc__title {
   font-family: var(--fnd-font-display);
-  font-size: 22px;
+  font-size: var(--fnd-size-conclusion);
   line-height: 1.4;
   font-weight: var(--fnd-weight-heavy);
   margin: 0;
 }
 
 .fnd-doc__section {
-  font-size: 16px;
+  font-size: var(--fnd-size-h3);
   line-height: 1.5;
   font-weight: var(--fnd-weight-heavy);
   margin: 14px 0 0;
-  padding-top: 14px;
+  padding-top: 16px;
   border-top: 1px solid var(--fnd-line);
 }
 
@@ -1179,7 +1179,7 @@ textarea.fnd-field {
   border: 1px solid var(--fnd-line);
   border-radius: var(--fnd-radius-container);
   background: var(--fnd-surface-strong);
-  padding: 16px 18px;
+  padding: 16px 20px;
 }
 
 
@@ -1227,7 +1227,7 @@ details[open] > .fnd-disclosure-summary > .fnd-disclosure-summary__icon {
 
 /* Technical and diagnostic folds sit one step quieter; the text keeps the same left edge. */
 .fnd-disclosure-summary[data-tone='quiet'] {
-  padding-block: 3px;
+  padding-block: 4px;
   color: var(--fnd-muted);
   font-size: var(--fnd-size-label);
   line-height: 18px;
@@ -1345,7 +1345,7 @@ details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary)::d
 /* -- 成果库 ----------------------------------------------------------------- */
 
 .fnd-library__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
-.fnd-library__title { margin: 0; font-size: 20px; line-height: 28px; }
+.fnd-library__title { margin: 0; font-size: var(--fnd-size-title); line-height: 28px; }
 .fnd-library__search { display: flex; align-items: center; gap: 8px; width: min(100%, 320px); color: var(--fnd-muted); }
 /* One row per version kind: its label in the first column, its chips in the second, wrapping under each other
    rather than under the label. The minimum keeps a row of the five formats on one line. */
@@ -1362,7 +1362,7 @@ details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary)::d
 .fnd-library__layout--panel .fnd-library__table :is(th, td):nth-child(3) { display: none; }
 .fnd-library__table td:first-child { min-width: 220px; }
 .fnd-library__tag, .fnd-library__current {
-  margin-left: 8px; padding: 0 6px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-chip);
+  margin-left: 8px; padding: 0 6px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-pill);
   font-size: var(--fnd-size-label); font-weight: 400; color: var(--fnd-muted); white-space: nowrap;
 }
 .fnd-library__current { border-color: var(--fnd-selected); color: var(--fnd-ink); }
@@ -1393,7 +1393,7 @@ details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary)::d
 }
 .fnd-library__panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .fnd-library__panel-head p { margin: 4px 0 0; font-size: var(--fnd-size-small); }
-.fnd-library__panel-title { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; overflow-wrap: anywhere; }
+.fnd-library__panel-title { margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; font-weight: 600; overflow-wrap: anywhere; }
 .fnd-library__panel-body { display: flex; flex-direction: column; gap: 16px; }
 .fnd-library__panel-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .fnd-library__panel-actions:empty { display: none; }
@@ -1416,7 +1416,7 @@ details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary)::d
 .fnd-library__sources ul { margin: 4px 0 0; padding: 0 0 0 12px; list-style: none; font-size: var(--fnd-size-small); overflow-wrap: anywhere; }
 .fnd-library__source-run { overflow-wrap: anywhere; }
 .fnd-library__diff ol { margin: 8px 0 0; padding: 8px 0; list-style: none; max-height: 360px; overflow: auto; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); font-size: var(--fnd-size-small); }
-.fnd-library__diff li { padding: 1px 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fnd-library__diff li { padding: 1px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .fnd-library__diff ins, .fnd-library__diff del { text-decoration: none; }
 .fnd-library__diff li[data-kind='added'] { background: color-mix(in srgb, var(--fnd-level-ok) 12%, transparent); box-shadow: inset 2px 0 0 var(--fnd-level-ok); }
 .fnd-library__diff li[data-kind='removed'] { background: color-mix(in srgb, var(--fnd-warning) 10%, transparent); box-shadow: inset 2px 0 0 var(--fnd-warning); }
@@ -1440,9 +1440,9 @@ details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary)::d
    so the scrollbar sits there rather than over the text. */
 .fnd-guide-hub__body { min-height: 0; overflow: auto; display: grid; gap: 16px; align-content: start; padding-bottom: 16px; margin-right: -8px; padding-right: 8px; }
 .fnd-guide-hub__results ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
-.fnd-guide-hub__hit { display: block; width: 100%; text-align: left; padding: 4px 6px; border-radius: 4px; font-size: var(--fnd-size-body); background: none; border: 0; color: inherit; cursor: pointer; }
+.fnd-guide-hub__hit { display: block; width: 100%; text-align: left; padding: 4px 6px; border-radius: var(--fnd-radius-mark); font-size: var(--fnd-size-body); background: none; border: 0; color: inherit; cursor: pointer; }
 .fnd-guide-hub__hit[aria-current='page'] { background: var(--fnd-surface-strong); color: var(--fnd-selected); }
-.fnd-guide-hub__article { display: grid; gap: 10px; align-content: start; font-size: var(--fnd-size-body); line-height: 1.7; }
+.fnd-guide-hub__article { display: grid; gap: 8px; align-content: start; font-size: var(--fnd-size-body); line-height: 1.7; }
 .fnd-guide-hub__article h3 { margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; }
 .fnd-guide-hub__article ol, .fnd-guide-hub__article ul { margin: 0; padding-left: 1.3em; display: grid; gap: 4px; }
 .fnd-guide-legend { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; font-weight: 500; }
@@ -1459,7 +1459,7 @@ details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary)::d
 .fnd-guide-hub__fields thead th { color: var(--fnd-muted); font-weight: 600; }
 .fnd-guide-hub__fields tbody th { font-weight: 500; white-space: nowrap; }
 .fnd-guide-hub__samples { display: flex; flex-wrap: wrap; flex-basis: 100%; align-items: center; gap: 0 4px; margin: 0; color: var(--fnd-muted); font-size: var(--fnd-size-small); }
-.fnd-checklist { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; border: 1px solid var(--fnd-line); border-radius: 8px; padding: 10px 12px; }
+.fnd-checklist { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); padding: 12px 12px; }
 .fnd-checklist__step { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: var(--fnd-size-body); }
 .fnd-checklist__label { min-width: 7.5em; font-weight: 500; }
 .fnd-checklist__state { color: var(--fnd-muted); }

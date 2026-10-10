@@ -13,12 +13,8 @@
   --fnd-selection-surface: #eef0f4;
   --fnd-radius-control: 8px;
   --fnd-radius-container: 12px;
-  --fnd-radius-chip: 30px;
   --fnd-radius-pill: 9999px;
   --fnd-radius-mark: 6px;
-  --fnd-radius-menu: 10px;
-  --fnd-radius-menu-item: 7px;
-  --fnd-radius-composer: 12px;
   --fnd-pad-button-y: 0px;
   --fnd-pad-button-x: 14px;
   --fnd-button-height: 36px;
@@ -38,6 +34,11 @@
   --fnd-size-reading: 16px;
   --fnd-size-h3: 16px;
   --fnd-size-h2: 24px;
+  /* The rest of the type scale: every size in the app is one of these nine, 12px the smallest. */
+  --fnd-size-lead: 18px;
+  --fnd-size-title: 20px;
+  --fnd-size-conclusion: 22px;
+  --fnd-size-display: 28px;
   --fnd-weight-strong: 600;
   --fnd-weight-heavy: 700;
   --fnd-leading-body: 22px;
@@ -45,10 +46,10 @@
   /* Document headings: one scale for the editor, both reading views and the exported HTML (electron/reports/format.ts). */
   --fnd-doc-title: 28px;
   --fnd-doc-title-leading: 40px;
-  --fnd-doc-title-weight: 750;
+  --fnd-doc-title-weight: 700;
   --fnd-doc-chapter: 22px;
   --fnd-doc-chapter-leading: 32px;
-  --fnd-doc-chapter-weight: 720;
+  --fnd-doc-chapter-weight: 700;
   --fnd-doc-section: 18px;
   --fnd-doc-section-leading: 28px;
   --fnd-doc-sub: 16px;

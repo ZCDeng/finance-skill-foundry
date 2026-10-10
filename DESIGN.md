@@ -16,14 +16,14 @@ typography:
   composer: {fontFamily: '''Noto Sans SC'', sans-serif', fontSize: 16px, lineHeight: 28px}
   brand: {fontFamily: '''Asap Sharp'', ''Noto Sans SC'', sans-serif', fontSize: 22px, fontWeight: 700, lineHeight: 1}
   figure: {fontFamily: '''IBM Plex Mono'', ''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 14px, fontWeight: 400, lineHeight: 22px}
-rounded: {control: 8px, container: 12px, chip: 30px, mark: 6px, menu: 10px}
+rounded: {mark: 6px, control: 8px, container: 12px, pill: 9999px}
 spacing: {control-gap: 8px, compact: 8px, small: 12px, grid-gap: 20px, workspace-gap: 20px, gutter: 24px, section-gap: 32px}
 components:
   button-primary: {backgroundColor: '{colors.fnd-accent}', textColor: '{colors.fnd-on-accent}', typography: '{typography.body}', rounded: '{rounded.control}', padding: 0 14px, height: 36px}
   button-secondary: {backgroundColor: transparent, textColor: '{colors.fnd-ink}', typography: '{typography.body}', rounded: '{rounded.control}', padding: 0 14px, height: 36px}
   input: {backgroundColor: '{colors.fnd-surface}', textColor: '{colors.fnd-ink}', typography: '{typography.body}', rounded: '{rounded.control}', padding: 0 12px, height: 36px}
   nav-current: {backgroundColor: '{colors.fnd-selection-surface}', textColor: '{colors.fnd-selected}', typography: '{typography.body}', rounded: '{rounded.control}', padding: 0 16px, height: 36px}
-  chip: {backgroundColor: transparent, textColor: '{colors.fnd-ink}', typography: '{typography.label}', rounded: '{rounded.chip}', padding: 4px 10px}
+  chip: {backgroundColor: transparent, textColor: '{colors.fnd-ink}', typography: '{typography.label}', rounded: '{rounded.pill}', padding: 4px 10px}
   card: {backgroundColor: '{colors.fnd-surface}', textColor: '{colors.fnd-ink}', rounded: '{rounded.container}', padding: 18px 20px}
   card-compact: {backgroundColor: '{colors.fnd-surface}', textColor: '{colors.fnd-ink}', rounded: '{rounded.container}', padding: 16px}
   workspace-tab: {backgroundColor: transparent, textColor: '{colors.fnd-muted}', typography: '{typography.small}', padding: 12px 0}
@@ -67,9 +67,13 @@ Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳
 
 任务标题 20px，窄窗为 18px；结果页结论优先，首句脚本结论 22px/32px、其余 18px/28px，结果区不画可见标题：顶栏已完整显示任务名，结果的 h3 用任务名（为空时用版本问题）并只留给读屏。有脚本结论时 22px 结论直接领起，没有时日期和四项状态领起。分析版本的问题是助手写的版本说明，放在「技术信息」的「版本问题」一行，版本选择器、比较下拉和计算历史里仍用它区分版本。文稿标题 28px/40px（字重 750）、章 22px/32px（720）、节 18px/28px、小节 16px/26px（700），编辑器、阅读视图与导出 HTML 共用 `--fnd-doc-*` token（h4 至 h6 同用小节字号），由 `document-headings.test.ts` 保持一致。壳与原生对话共用 14px/22px 控件字号，标签 13px、元信息 12px；文稿正文、原生消息和输入共用 16px/28px。应用内阅读与编辑共用一列居中、最大 56rem（896px）的正文；目录由文稿工具栏的「目录」打开，居中的正文列左侧留得下 200px 目录列和 32px 间距时放在正文列外侧，否则以浮层抽屉打开；开合时工具栏和正文都不移动，抽屉在焦点移出、点外面或按 Escape 时关闭，焦点回到「目录」；阅读视图里目录标出正在读的那一节（最后一个越过滚动区顶部下方 96px 的标题，滚到底时为最后一节）：正文色加选择底色，`aria-current="location"`。目录收起、且正文列左侧放得下目录列时，那里显示一列短横线小地图，每个标题一条（章 24px、节 16px 并缩进），当前一节为金色，随正文滚动保持在视野里；鼠标移上去在原处弹出完整目录卡片（Radix HoverCard），点标题跳过去并收起。小地图只服务鼠标，对读屏隐藏且不占 Tab 停点，键盘和读屏走「目录」；窄窗、编辑模式和目录打开时不显示。改写自 chanhdai.com 的 toc-minimap（MIT，见[许可](app/src/components/chanhdai.LICENSE.txt)），去掉了悬停音效。导出 HTML 正文最大 42em。段后 18px、章前 32px；Markdown 的最浅标题深度映射到正文一级章节，保留相对层级。代码使用 `ui-monospace`。全局启用 `tabular-nums`，结果数值列按真实列类型右对齐；文稿表格按单元格内容判断，数字格（含带单位的数）右对齐且不换行，文字格左对齐，以数字为主的列表头和列里的「—」「不适用」等说明格随列右对齐，文字格和数字列表头至少 4em、首列不在字间断开，首列和不带单位的年份不按数字排，放不下时表格横向滚动，阅读视图与导出 HTML 共用同一份 num/text 标记。
 
+**字号与字重（2026-10-10）。** 字号只有九档，全部走 token：12 `label`、13 `small`、14 `body`、16 `h3`/`reading`、18 `lead`、20 `title`、22 `conclusion`、24 `h2`、28 `display`，最小 12px，原来的 11px（顶栏计数、图表刻度、注号）、15px、17px 已归档；品牌字「FA Foundry」的 22px 和行内代码的相对字号例外。字重只用 400/500/600/700，文稿标题和章标题由 750/720 改为 700，导出 HTML 同步。中文不压字距，Fold 的负字距和大写标签都不用。
+
 **The Real Weight Rule.** 中文强调使用已打包的真实字重；数据保留原有精度、零和缺值，不借排版制造业务含义。负数在结果表和 KPI 卡上写成会计括号，只改写法、不改数值，保存、导出、文稿和交给助手的文字仍用负号。
 
 ## Layout
+
+**4px 网格（2026-10-10）。** gap 和 padding 只用 4 的倍数，2px、6px 只用于图标和文字之间；两个量出来的例外：折叠摘要上下 5px（22px 行高凑成 32px 紧凑行），嵌套折叠的竖线后 11px（加 1px 线正好 12px）。原来的 3/5/7/9/10/14/18/22/28px 已逐处归位（gap 向下、padding 向上取整），节奏保持紧凑，分区间距仍是 32px。tokens.test 会检查。
 
 工作区铺满窗口，不受普通页面 1200px 上限约束；应用顶栏 56px，任务栏最小 64px。当前桌面最小窗口宽度为 1080px。初次挂载在 ≥1360px 默认显示 256px 任务栏；1101–1359px 默认收起，打开时为 288px 模态抽屉；≤1100px 将默认并排状态显示为成果专注，并保留对话/成果切换。
 
@@ -91,7 +95,7 @@ Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳
 
 ## Shapes
 
-控件和任务行使用 `control` 圆角，文稿输入与依据使用 `container`，小图标操作和折叠摘要使用 `mark`，工具菜单使用 `menu`，历史 chip 保留原形，可点 chip 的规格见按钮与字段。资料页不再有文件卡。内容以细分隔线组织，避免把每个标题和操作组包成卡片。KPI 卡、月结步骤卡这类并排汇总卡用 `card-compact`。沿用线性 SVG 控件，装饰图标不进入无障碍名称。
+**四档圆角（2026-10-10）。** 圆角只有四个 token：`mark` 6px 给小图标按钮、折叠摘要、菜单项、行内代码和嵌在卡片里的小视窗；`control` 8px 给按钮、输入、选择框、页签和任务行；`container` 12px 给卡片、面板、菜单、弹层、对话框、文稿编辑区和各种预览框；`pill` 9999px 给 chip、徽标、计数和状态小标签。原来的 `menu`（10px）、`menu-item`（7px）、`chip`（30px）和 `composer` 已并入，页面里不再写像素圆角，只有 1–2px 的刻度、滑块把手和复选框（shadcn 原样 4px）例外，tokens.test 会检查。资料页不再有文件卡。内容以细分隔线组织，避免把每个标题和操作组包成卡片。KPI 卡、月结步骤卡这类并排汇总卡用 `card-compact`。沿用线性 SVG 控件，装饰图标不进入无障碍名称。
 
 ## Components
 

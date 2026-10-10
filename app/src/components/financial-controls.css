@@ -246,7 +246,7 @@
 .fnd-combobox__search input {
   width: 100%;
   height: var(--fnd-button-height);
-  padding: 0 10px 0 31px;
+  padding: 0 12px 0 31px;
   border: 1px solid var(--fnd-line);
   border-radius: var(--fnd-radius-control);
   background: var(--fnd-surface);
@@ -272,10 +272,10 @@
 .fnd-combobox__list [role='option'] {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 3px 8px;
+  gap: 4px 8px;
   align-items: center;
-  padding: 8px 9px;
-  border-radius: var(--fnd-radius-menu-item);
+  padding: 8px 8px;
+  border-radius: var(--fnd-radius-mark);
   cursor: pointer;
 }
 
@@ -309,7 +309,7 @@
 .fnd-combobox__state,
 .fnd-combobox__truncated {
   margin: 8px 0 0;
-  padding: 10px;
+  padding: 12px;
   color: var(--fnd-muted);
   font-size: var(--fnd-size-small);
   line-height: 1.55;
@@ -321,7 +321,7 @@
 
 .fnd-combobox__state[data-state='unconfigured'] {
   background: var(--fnd-surface-strong);
-  border-radius: var(--fnd-radius-menu-item);
+  border-radius: var(--fnd-radius-mark);
 }
 
 .fnd-combobox__truncated {
@@ -357,7 +357,7 @@
 .fnd-date-picker__popover {
   width: max(280px, min(320px, var(--radix-popover-trigger-width)));
   max-width: calc(100vw - 24px);
-  padding: 10px;
+  padding: 12px;
 }
 
 .fnd-date-picker__head {
@@ -374,7 +374,7 @@
 .fnd-calendar__day-button,
 .fnd-date-field__toggle {
   border: 1px solid transparent;
-  border-radius: var(--fnd-radius-menu-item);
+  border-radius: var(--fnd-radius-mark);
   background: transparent;
   color: var(--fnd-ink);
   font: inherit;
@@ -503,7 +503,7 @@
   display: inline-flex;
   align-items: center;
   border: 1px solid var(--fnd-line);
-  border-radius: var(--fnd-radius-menu-item);
+  border-radius: var(--fnd-radius-mark);
   transition: border-color var(--fnd-transition), background var(--fnd-transition);
 }
 
