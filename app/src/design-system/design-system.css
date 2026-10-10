@@ -1,0 +1,52 @@
+/*
+ * The design system page's own stylesheet. Dev server only: design-system.html is not a build input,
+ * so nothing here reaches the packaged app.
+ */
+@import '../styles/base.css';
+
+/* Pin a primitive's interaction state without touching it: data-preview="hover focus active" (shadcn skill). */
+@custom-variant hover {
+  @media (hover: hover) {
+    &:hover {
+      @slot;
+    }
+  }
+  &[data-preview~='hover'] {
+    @slot;
+  }
+}
+@custom-variant focus-visible (&:focus-visible, &[data-preview~='focus']);
+@custom-variant active (&:active, &[data-preview~='active']);
+
+@layer layout {
+  .ds { max-width: 1200px; margin: 0 auto; padding: 32px 24px 48px; display: flex; flex-direction: column; gap: 48px; }
+  .ds__head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+  .ds__head h1 { margin: 0; font-size: var(--fnd-size-display); line-height: 40px; }
+  .ds__head p { margin: 4px 0 0; color: var(--fnd-muted); }
+  .ds section { display: flex; flex-direction: column; gap: 16px; }
+  .ds h2 { margin: 0; font-size: var(--fnd-size-h2); line-height: 32px; }
+  .ds h3 { margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; }
+  .ds__note { margin: 0; color: var(--fnd-muted); font-size: var(--fnd-size-small); }
+  .ds__card { padding: 20px 24px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-surface); box-shadow: var(--fnd-shadow-sm); display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .ds__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+  .ds__row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .ds__pair { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 12px; padding: 12px 16px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); }
+  .ds__pair small { grid-column: 1 / -1; color: var(--fnd-muted); font-size: var(--fnd-size-label); font-family: var(--fnd-font-figure); }
+  .ds__ratio { font-family: var(--fnd-font-figure); font-size: var(--fnd-size-small); }
+  .ds__ratio[data-low] { color: var(--fnd-warning); }
+  .ds__swatch { display: flex; flex-direction: column; gap: 4px; font-size: var(--fnd-size-label); }
+  .ds__swatch span:first-child { height: 48px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); }
+  .ds__swatch code { font-family: var(--fnd-font-figure); color: var(--fnd-muted); }
+  .ds__type { display: grid; grid-template-columns: 240px minmax(0, 1fr); align-items: baseline; gap: 16px; padding: 8px 0; border-top: 1px solid var(--fnd-line); }
+  .ds__type code, .ds__matrix th { font-family: var(--fnd-font-figure); font-size: var(--fnd-size-label); color: var(--fnd-muted); font-weight: 400; text-align: left; }
+  .ds__ladder { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 24px; }
+  .ds__ladder > div { display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: var(--fnd-size-label); color: var(--fnd-muted); }
+  .ds__shape { width: 96px; height: 64px; border: 1px solid var(--fnd-line-hover); background: var(--fnd-surface); }
+  .ds__space { height: 16px; background: var(--fnd-selected); border-radius: 1px; }
+  .ds__matrix { border-collapse: separate; border-spacing: 12px 12px; margin: -12px; }
+  .ds__dodont { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .ds__dodont > div { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: var(--fnd-radius-container); border: 1px solid var(--fnd-line); background: var(--fnd-surface); }
+  .ds__dodont > div > strong { font-size: var(--fnd-size-small); }
+  .ds__dodont > div[data-kind='dont'] > strong { color: var(--fnd-warning); }
+  .ds__dodont > div[data-kind='do'] > strong { color: var(--fnd-level-ok); }
+}
