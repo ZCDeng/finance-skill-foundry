@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowRight, Check, Download, Pin, RefreshCw, X } from 'lucide-react';
+import { ArrowRight, Check, Download, Pin, Presentation, RefreshCw, X } from 'lucide-react';
 import { bridge, when, type Answer, type AnalysisRevision, type AnalysisRun, type DatasetSnapshot } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
@@ -14,6 +14,7 @@ import { RankBars } from '../../components/charts/RankBars.js';
 import { Waterfall } from '../../components/charts/Waterfall.js';
 import { formatPeriod } from '../../lib/period.js';
 import { AskLink } from '../guide/GuideHub.js';
+import { BoardPresentation } from './BoardPresentation.js';
 import { ScenarioCard } from './ScenarioCard.js';
 import { scenarioBase } from './dashboardScenario.js';
 import { GoalCard, SensitivityCard } from './WhatIfCards.js';
@@ -184,6 +185,7 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
   const [said, setSaid] = useState('');
   const [error, setError] = useState('');
   const [confirmAll, setConfirmAll] = useState(false);
+  const [presenting, setPresenting] = useState(false);
   const replaced = useMemo(() => new Set(superseded), [superseded]);
   const cards = dashboard?.cards ?? [];
   const board = cards.filter((card) => card.state !== 'explore');
@@ -202,6 +204,9 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
   };
   const actions: CardActions = { readOnly, busy, act, onOpenResult };
   const accepted = board.filter(acceptedCard).length;
+  // 汇报模式 shows what the one-page export would, then the what-ifs as what-ifs; a card still waiting stays off.
+  const laidOut = [...board.filter((card) => card.kind === 'figure'), ...board.filter((card) => card.kind !== 'figure')];
+  const shown = [...laidOut.filter((card) => card.state === 'accepted' && !isWhatIf(card.kind)), ...laidOut.filter((card) => isWhatIf(card.kind))];
   const canExport = Boolean(task && bridge()?.dashboardExport);
   const exportAs = (format: SnapshotFormat) => {
     const api = bridge();
@@ -251,12 +256,14 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
       <div className="dashboard__summary">
         <p className="dashboard__counts">{`共 ${board.length} 张 · 已认可 ${board.length - waiting.length - scenarios} 张 · 待认可 ${waiting.length} 张${scenarios ? ` · 情景 ${scenarios} 张` : ''}`}
           {stale.length ? <span className="dashboard__stale">{`资料已更新，${stale.length} 张待重算`}</span> : null}</p>
-        {!readOnly && <div className="dashboard__tools">
-          {waiting.length > 0 && <Button type="button" variant="outline" disabled={busy} onClick={() => setConfirmAll(true)}>
+        {(!readOnly || shown.length > 0) && <div className="dashboard__tools">
+          <Button type="button" variant="outline" disabled={busy || !shown.length} title={shown.length ? undefined : '先认可要汇报的卡'}
+            onClick={() => setPresenting(true)}><Presentation size={14} strokeWidth={1.5} aria-hidden />汇报模式</Button>
+          {!readOnly && waiting.length > 0 && <Button type="button" variant="outline" disabled={busy} onClick={() => setConfirmAll(true)}>
             <Check size={14} strokeWidth={1.5} aria-hidden />{`全部认可（${waiting.length} 张）`}</Button>}
-          {movable.length > 0 && <Button type="button" variant="outline" disabled={busy} onClick={moveAll}>
+          {!readOnly && movable.length > 0 && <Button type="button" variant="outline" disabled={busy} onClick={moveAll}>
             <RefreshCw size={14} strokeWidth={1.5} aria-hidden />{`换成新结果（${movable.length} 张）`}</Button>}
-          {canExport && <ExportMenu accepted={accepted} left={board.length - accepted} busy={busy} onExport={exportAs} />}
+          {!readOnly && canExport && <ExportMenu accepted={accepted} left={board.length - accepted} busy={busy} onExport={exportAs} />}
         </div>}
       </div>
       {proposed.length > 0 && <section className="dashboard__proposed" aria-labelledby="dashboard-proposed">
@@ -278,6 +285,9 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
         <TemplateChooser runs={runs} cards={cards} readOnly={readOnly} busy={busy} onAdd={addTemplate} compact />
       </details>}
     </>}
+    {presenting && shown.length > 0 ? <BoardPresentation title={task ? [task.title, task.period].filter(Boolean).join(' · ') : '看板'} cards={shown}
+      said={presentedSaid(shown, board.length - shown.length)} onClose={() => setPresenting(false)}
+      slide={(card) => <BoardCard key={card.id} card={card} run={runOf(card)} contextOf={contextOf} actions={actions} presenting />} /> : null}
     <AlertDialog open={confirmAll} onOpenChange={setConfirmAll}>
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -291,6 +301,13 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
       </AlertDialogContent>
     </AlertDialog>
   </div>;
+}
+
+/** What 汇报模式 holds, and what it left off. */
+function presentedSaid(shown: DashboardCard[], left: number) {
+  const scenarios = shown.filter((card) => isWhatIf(card.kind)).length;
+  const parts = [`已认可 ${shown.length - scenarios} 张`, scenarios ? `情景 ${scenarios} 张（不是实际数）` : ''].filter(Boolean).join(' · ');
+  return left ? `${parts}；另有 ${left} 张待认可，没放进来。` : `${parts}。`;
 }
 
 /**
@@ -422,8 +439,10 @@ function TemplateChooser({ runs, cards, readOnly, busy, onAdd, compact = false }
     </EmptyContent></Empty>;
 }
 
-function BoardCard({ card, run, contextOf, actions, newer }: {
+function BoardCard({ card, run, contextOf, actions, newer, presenting = false }: {
   card: DashboardCard; run?: AnalysisRun; contextOf(run: AnalysisRun): FigureSourceContext; actions: CardActions; newer?: AnalysisRun;
+  /** A slide of 汇报模式: the card as it reads now, without what a recompute said or anything to change it. */
+  presenting?: boolean;
 }) {
   let body: ReactNode = null;
   if (!run) body = <p className="analysis-note">这张卡读的计算结果已经不在这个任务里了，可以移除。</p>;
@@ -466,19 +485,19 @@ function BoardCard({ card, run, contextOf, actions, newer }: {
       : <p className="analysis-note">这次结果里这一组的利润桥画不出来，可以移除。</p>;
   }
   const stale = run ? runIsStale(contextOf(run)) : false;
-  return <article className={`dashboard-card dashboard-card--${card.kind}`} data-state={card.state} aria-label={card.title}>
+  return <article className={`dashboard-card dashboard-card--${card.kind}${presenting ? ' dashboard-present__card' : ''}`} data-state={card.state} aria-label={card.title}>
     <header className="dashboard-card__head">
       <h4 className="dashboard-card__title" title={card.title}>{card.title}</h4>
       <span className="dashboard-card__state" data-state={isWhatIf(card.kind) && card.state !== 'explore' ? 'scenario' : card.state}>{stateWord(card)}</span>
     </header>
     {card.note ? <p className="dashboard-card__note">{card.note}</p> : null}
     {body}
-    <RecomputedLine card={card} />
+    {presenting ? null : <RecomputedLine card={card} />}
     <footer className="dashboard-card__foot">
       {run ? <p className="dashboard-card__basis"><span>{`${when(run.created_at)} 计算`}</span>
         {card.state === 'accepted' && card.accepted ? <span>{`${when(card.accepted.at)} 认可`}</span> : null}
         {stale ? <span className="dashboard__stale">资料已更新，待重算</span> : null}</p> : null}
-      <Actions card={card} run={run} actions={actions} newer={newer} />
+      {presenting ? null : <Actions card={card} run={run} actions={actions} newer={newer} />}
     </footer>
   </article>;
 }

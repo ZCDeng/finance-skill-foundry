@@ -127,6 +127,12 @@ export const CHANNELS = {
   /** Which screen is on top. Both embedded panes are placed from it. */
   paneVisible: 'pane:visible',
   /**
+   * 汇报模式: the window full screen while the board is presented, and back after. The renderer says on or off and
+   * hears whether the window was full screen already, so it gives back only what it took. The window's own full
+   * screen rather than the page's: the page's would take Esc for itself, and Esc must close an open source first.
+   */
+  windowFullScreen: 'window:full-screen',
+  /**
    * Main to renderer, and the only channel that travels that way.
    *
    * The fence cancels a request the embedded page made; the page then shows

@@ -1048,6 +1048,16 @@ export function registerIpc(
     return {accepted: panes.host.layout(window, value, event.sender.getZoomFactor())};
   }));
 
+  /** 汇报模式 takes the window full screen and gives it back; `was` says whether it already was. */
+  ipcMain.handle(CHANNELS.windowFullScreen, (event, on: unknown) => answer(async () => {
+    const window = panes.window();
+    if (!window || event.sender !== window.webContents) throw new Error('invalid full-screen sender');
+    if (typeof on !== 'boolean') throw new Error('full screen is on or off');
+    const was = window.isFullScreen();
+    window.setFullScreen(on);
+    return { was };
+  }));
+
   ipcMain.handle(CHANNELS.paneVisible, (_event, screen: unknown) =>
     answer(async () => {
       const name = String(screen ?? '');

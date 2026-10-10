@@ -96,6 +96,31 @@
 .dashboard-sensitivity__grid { font-size: var(--fnd-size-small); }
 .dashboard-sensitivity__grid th, .dashboard-sensitivity__grid td { padding: 4px 8px; white-space: nowrap; }
 .dashboard__asks { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0; }
+/*
+ * 汇报模式: the window is the stage, one card at a time. The card keeps the board's own type and is drawn larger as a
+ * whole, so a chart, a slider and a figure's source all grow together and the type scale stays the app's.
+ */
+.dashboard-present { position: fixed; inset: 0; z-index: 50; display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
+  background: var(--fnd-bg); color: var(--fnd-ink); outline: none; }
+.dashboard-present__bar { display: flex; align-items: center; gap: 16px; padding: 16px 32px; border-bottom: 1px solid var(--fnd-line); background: var(--fnd-surface); }
+.dashboard-present__heading { display: grid; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.dashboard-present__title { margin: 0; font-size: var(--fnd-size-h3); font-weight: var(--fnd-weight-strong); line-height: 24px; overflow-wrap: anywhere; }
+.dashboard-present__said { margin: 0; font-size: var(--fnd-size-small); color: var(--fnd-muted); }
+.dashboard-present__count { margin: 0; flex-shrink: 0; font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums; color: var(--fnd-muted); }
+.dashboard-present__stage { min-height: 0; overflow: auto; display: grid; place-items: center; padding: 32px; }
+.dashboard-present__card { width: 100%; max-width: 640px; padding: 24px 28px; box-shadow: var(--fnd-shadow-md); zoom: 1.25; }
+.dashboard-present__card .dashboard-card__title { font-size: var(--fnd-size-title); line-height: 28px; -webkit-line-clamp: 3; }
+.dashboard-present__card .dashboard-card__value { font-size: var(--fnd-size-display); line-height: 36px; }
+.dashboard-present__card .dashboard-card__subject, .dashboard-present__card .dashboard-card__beside { font-size: var(--fnd-size-body); }
+@media (min-width: 1280px) and (min-height: 800px) { .dashboard-present__card { zoom: 1.5; } }
+@media (min-width: 1680px) and (min-height: 1000px) { .dashboard-present__card { zoom: 1.75; } }
+.dashboard-present__foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 16px; padding: 12px 32px 20px; }
+.dashboard-present__dots { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.dashboard-present__dots > li { display: flex; }
+.dashboard-present__dot { width: 10px; height: 10px; padding: 0; border: 1px solid var(--fnd-line-hover); border-radius: 50%; background: transparent; cursor: pointer; }
+.dashboard-present__dot[aria-current] { border-color: var(--fnd-selected); background: var(--fnd-selected); }
+.dashboard-present__dot:focus-visible { outline: 2px solid var(--fnd-focus); outline-offset: 2px; }
+.dashboard-present__hint { flex-basis: 100%; margin: 0; text-align: center; font-size: var(--fnd-size-label); color: var(--fnd-muted); }
 /* The export menu sits in a portal, outside .dashboard. */
 .dashboard__export-note { margin: 0; padding: 0 8px 6px; max-width: 248px; font-size: var(--fnd-size-label); line-height: 18px; color: var(--fnd-muted); }
 }
