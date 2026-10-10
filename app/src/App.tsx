@@ -12,6 +12,7 @@ import {
   type DeliverableRow,
   type GalleryRow,
   type LaunchSpec,
+  type Overview as OverviewData,
   type PreviewSpec,
   type TaskLifecycleFilter,
   type TaskDetail as Detail,
@@ -21,6 +22,8 @@ import {
   isWorkbook,
 } from './bridge.js';
 import { Deliverables, type OpenDeliverable } from './views/Deliverables.js';
+import { TASK_CHANGED_EVENT } from './views/guide/QuickStartChecklist.js';
+import { Overview, type OverviewTarget } from './views/Overview.js';
 import { PreviewBar } from './views/Preview.js';
 import { TaskDetail } from './views/TaskDetail.js';
 import { Tasks } from './views/Tasks.js';
@@ -65,7 +68,8 @@ const missingRemoval = async (): Promise<{ ok: false; message: string }> =>
 
 export function App() {
   const api = bridge();
-  const [screen, setScreen] = useState<Screen>('analysis');
+  // 总览 is the first screen where the build can read it; a build without it opens on the workspace as before.
+  const [screen, setScreen] = useState<Screen>(() => (api?.overview ? 'overview' : 'analysis'));
   /** The task every session opened here binds to. Survives a screen change. */
   const [current, setCurrent] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -252,9 +256,38 @@ export function App() {
   }, [api, take]);
 
   useEffect(() => {
-    if (screen !== 'deliverables') return;
+    if (screen !== 'deliverables' && screen !== 'overview') return;
     refreshGallery();
   }, [screen, refreshGallery]);
+
+  /*
+   * 总览: read on arriving there and whenever the task list changes, never on a timer. Each read
+   * starts one process for every active task, and nothing on the page changes without a click.
+   */
+  const [overview, setOverview] = useState<OverviewData | null>(null);
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [overviewError, setOverviewError] = useState('');
+  const overviewSequence = useRef(0);
+  const refreshOverview = useCallback(() => {
+    if (!api?.overview) return;
+    const sequence = ++overviewSequence.current;
+    setOverviewLoading(true);
+    void api.overview().then((answer) => {
+      if (overviewSequence.current !== sequence) return;
+      if (answer.ok) { setOverview(answer.value); setOverviewError(''); } else setOverviewError(answer.message);
+    }, (failure: unknown) => {
+      if (overviewSequence.current === sequence) setOverviewError(failure instanceof Error ? failure.message : String(failure));
+    }).finally(() => { if (overviewSequence.current === sequence) setOverviewLoading(false); });
+  }, [api]);
+  const taskKey = tasks.map((row) => `${row.id}:${row.lifecycle_status ?? 'active'}`).join(',');
+  useEffect(() => { refreshOverview(); }, [refreshOverview, screen === 'overview', taskKey]);
+  // A confirmation in the workspace (scope, structure, a control) changes the to-do count on the 总览 tab.
+  useEffect(() => {
+    let timer = 0;
+    const changed = () => { window.clearTimeout(timer); timer = window.setTimeout(refreshOverview, 500); };
+    window.addEventListener(TASK_CHANGED_EVENT, changed);
+    return () => { window.removeEventListener(TASK_CHANGED_EVENT, changed); window.clearTimeout(timer); };
+  }, [refreshOverview]);
 
   /** Ignore stale reads after a task switch, including failures from the prior task. */
   const refreshDetail = useCallback((id: string | null) => {
@@ -926,6 +959,34 @@ export function App() {
     setCurrent(id || null); setDetail(null); setSession(null); setConversationProblem(null); setScreen('analysis');
   };
   /**
+   * Go from 总览 to where a to-do is handled: the task, its tab, and the block on that tab.
+   *
+   * The tab's content arrives after its first read, so the block is looked for a few times
+   * before giving up; once found it is scrolled to and outlined for a moment (`fnd-arrival`).
+   */
+  const openFromOverview = (task: TaskRow, target: OverviewTarget | 'close') => {
+    const section = target === 'controls' || target === 'close' ? 'close' : target === 'results' || target === 'drafts' ? target : 'materials';
+    setTaskLifecycleView('active');
+    setSections((held) => ({ ...held, [task.id]: section }));
+    pickAnalysisTask(task.id);
+    const find = (): Element | null => target === 'controls' ? document.getElementById('month-close-controls')
+      : target === 'rollforward' ? document.querySelector('.analysis-rollforward')
+        : target === 'scope' || target === 'structure' || target === 'datasets' || target === 'billing' ? materialsAnchor(target) : null;
+    if (target === 'results' || target === 'drafts' || target === 'close') return;
+    let tries = 0;
+    const look = () => {
+      const node = find();
+      if (!node) { if (++tries < 30) window.setTimeout(look, 100); return; }
+      if (node instanceof HTMLDetailsElement) node.open = true;
+      node.scrollIntoView?.({ block: 'start' });
+      node.classList.add('fnd-arrival');
+      window.setTimeout(() => node.setAttribute('data-arrival', 'fading'), 1200);
+      window.setTimeout(() => { node.classList.remove('fnd-arrival'); node.removeAttribute('data-arrival'); }, 2800);
+    };
+    window.setTimeout(look, 60);
+  };
+
+  /**
    * Open a draft from 成果库 on its task's 文稿 tab, with that version selected.
    *
    * The selection is written first, because the analysis screen reads it when
@@ -956,7 +1017,9 @@ export function App() {
         if (next !== 'deliverables') setOpened(null);
         setScreen(next);
       }}
-      onGuide={inWorkspace ? () => openGuideAt('') : undefined}
+      onGuide={inWorkspace || screen === 'overview' ? () => { setScreen('analysis'); openGuideAt(''); } : undefined}
+      todoCount={overview?.todo_count ?? 0}
+      overview={Boolean(api?.overview)}
       covered={preview !== null && (screen === 'deliverables' || screen === 'tasks' || locatorPreview)}
       strip={
         screen === 'formulator' ? (
@@ -1008,7 +1071,7 @@ export function App() {
             onReference={api.taskSampleReference ? () => void openReferenceTask().catch(() => undefined) : undefined} /> : null}
           conversation={guide ? <GuideHub article={guideArticle} request={guideRequest} canOpen={Boolean(bound) && !boundReadOnly} taskId={bound?.id}
               onClose={closeGuide}
-              onSample={api.taskSample ? openSampleTask : undefined}
+              onSample={api?.taskSample ? openSampleTask : undefined}
               samples={taskLifecycleView === 'active' ? { count: tasks.filter((row) => row.sample).length, outdated: tasks.some((row) => row.sample_outdated) } : undefined}
               onRemoveSamples={api.taskSampleRemove ? removeSampleTasks : undefined}
               onReference={api.taskSampleReference ? openReferenceTask : undefined}
@@ -1063,6 +1126,22 @@ export function App() {
           busy={exporting}
           reading={reading}
         />
+      ) : null}
+      {screen === 'overview' ? (
+        <Overview data={overview} loading={overviewLoading} error={overviewError}
+          fresh={firstRun}
+          recent={gallery.slice(0, 5)}
+          onRefresh={() => { refreshOverview(); refreshGallery(); }}
+          onOpen={openFromOverview}
+          onOpenClose={(task) => openFromOverview(task, 'close')}
+          onNewQuestion={() => {
+            pickAnalysisTask('');
+            requestAnimationFrame(() => document.getElementById('analysis-question')?.focus());
+          }}
+          onSample={api?.taskSample ? () => { setScreen('analysis'); void openSampleTask().catch((failure: unknown) => setProblem(failure instanceof Error ? failure.message : String(failure))); } : undefined}
+          onChecklist={() => { setScreen('analysis'); openGuideAt('data-checklist'); }}
+          onGuide={() => { setScreen('analysis'); openGuideAt('first-run'); }}
+          onLibrary={() => setScreen('deliverables')} />
       ) : null}
       {screen === 'formulator' ? <Formulator running={formulator} /> : null}
       {screen === 'deliverables' ? (

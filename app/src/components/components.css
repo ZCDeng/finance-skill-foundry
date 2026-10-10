@@ -74,6 +74,13 @@
   background: transparent;
 }
 
+/* The number of to-dos on the 总览 tab. Hidden at 0 by not being drawn. */
+.fnd-head__count {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px;
+  border-radius: 9px; background: var(--fnd-warning-fill); color: var(--fnd-warning); font-size: 11px; line-height: 1; font-weight: 600;
+  font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums;
+}
+
 .fnd-head .fnd-head__tab:focus-visible {
   outline: 1px solid var(--fnd-focus);
   outline-offset: -1px;

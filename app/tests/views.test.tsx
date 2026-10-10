@@ -267,7 +267,7 @@ describe('the shell', () => {
       </Shell>,
     );
     const tabs = [...container.querySelectorAll('.fnd-head__tab')].map((n) => n.textContent);
-    expect(tabs).toEqual(['工作区', '成果库']);
+    expect(tabs).toEqual(['总览', '工作区', '成果库']);
     expect(container.querySelector('.fnd-head__tab[aria-current="page"]')?.textContent).toBe('工作区');
     expect(screen.queryByRole('button', { name: '对话' })).toBeNull();
   });
@@ -309,7 +309,7 @@ describe('the shell', () => {
    * `.fnd-head .fnd-head__tab…`. This is the DOM those selectors have to hit,
    * and the reused back and Formulator buttons they have to miss.
    */
-  it('lets the gold title-bar selectors reach the two tabs and none of the reused ones', async () => {
+  it('lets the gold title-bar selectors reach the three tabs and none of the reused ones', async () => {
     const { Shell } = await import('../src/components/Shell.js');
     const { DataBar } = await import('../src/views/Formulator.js');
     const { container } = render(
@@ -330,7 +330,7 @@ describe('the shell', () => {
       </Shell>,
     );
     const scoped = [...container.querySelectorAll('.fnd-head .fnd-head__tab')].map((n) => n.textContent);
-    expect(scoped).toEqual(['工作区', '成果库']);
+    expect(scoped).toEqual(['总览', '工作区', '成果库']);
     const current = [...container.querySelectorAll(".fnd-head .fnd-head__tab[aria-current='page']")];
     expect(current.map((n) => n.textContent)).toEqual(['成果库']);
     const reused = [...container.querySelectorAll('.fnd-head__tab')].filter((n) => !n.closest('.fnd-head'));

@@ -1,0 +1,67 @@
+@layer components {
+/* 总览 (Overview.tsx). Headings follow the workspace's three levels; notes sit under their heading. */
+.fnd-overview { display: flex; flex-direction: column; gap: var(--fnd-section-gap, 28px); }
+.fnd-overview__head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.fnd-overview__head p { margin: 4px 0 0; }
+.fnd-overview__title { margin: 0; font-size: 20px; line-height: 28px; }
+.fnd-overview__section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.fnd-overview__h { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; }
+.fnd-overview__note { margin: 0; font-size: var(--fnd-size-small); }
+.fnd-overview__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.fnd-overview__roll { display: inline-flex; align-items: center; gap: 6px; color: var(--fnd-muted); }
+/* With no task at all the four ways in are the page, so they get room and a frame. */
+.fnd-overview__start--first { padding: 24px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-surface); }
+.fnd-overview__start--first .fnd-overview__h { font-size: 18px; }
+
+.fnd-overview__grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; align-items: start; }
+@media (max-width: 960px) {
+  .fnd-overview__grid { grid-template-columns: minmax(0, 1fr); }
+  /* One column: the short progress list first, so it is not pushed below a long to-do list. */
+  .fnd-overview__progress-section { order: -1; }
+}
+
+.fnd-overview__group { font-size: var(--fnd-size-body); }
+.fnd-overview__group > .fnd-overview__note { margin: 4px 0 8px; }
+.fnd-overview__todos { margin: 0; padding: 0; list-style: none; display: grid; }
+.fnd-overview__todos li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--fnd-line); }
+.fnd-overview__todos li:first-child { border-top: 0; }
+.fnd-overview__todo-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.fnd-overview__todo-task { font-size: var(--fnd-size-small); color: var(--fnd-muted); }
+.fnd-overview__todo-task .fnd-overview__task-title { color: var(--fnd-muted); }
+.fnd-overview__clear { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--fnd-level-ok); }
+.fnd-overview__tag { margin-left: 6px; padding: 0 6px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-chip); font-size: var(--fnd-size-label); color: var(--fnd-muted); white-space: nowrap; }
+
+.fnd-overview__progress { margin: 0; padding: 0; list-style: none; display: grid; }
+.fnd-overview__progress li + li { border-top: 1px solid var(--fnd-line); }
+.fnd-overview__progress-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; width: 100%; padding: 10px 8px; margin: 0 -8px;
+  border: 0; border-radius: var(--fnd-radius-control); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+  transition: background var(--fnd-transition);
+}
+.fnd-overview__progress-row:hover { background: var(--fnd-surface-strong); }
+.fnd-overview__progress-row:focus-visible { outline: 2px solid var(--fnd-focus); outline-offset: 2px; }
+.fnd-overview__progress-name { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
+.fnd-overview__dots { display: inline-flex; gap: 4px; align-items: center; }
+.fnd-overview__dot { color: var(--fnd-muted); }
+.fnd-overview__dot[data-state='done'] { color: var(--fnd-level-ok); }
+.fnd-overview__dot[data-state='attention'] { color: var(--fnd-level-watch); }
+.fnd-overview__dot[data-state='blocked'] { color: var(--fnd-warning); }
+.fnd-overview__headline { grid-column: 1; font-size: var(--fnd-size-small); color: var(--fnd-ink); }
+.fnd-overview__conclusion { grid-column: 2; justify-self: end; font-size: var(--fnd-size-small); color: var(--fnd-muted); white-space: nowrap; }
+
+.fnd-overview__recent { margin: 0; padding: 0; list-style: none; display: grid; }
+.fnd-overview__recent li { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) auto; gap: 12px; padding: 6px 0; border-top: 1px solid var(--fnd-line); align-items: baseline; }
+.fnd-overview__recent li:first-child { border-top: 0; }
+.fnd-overview__recent-what { overflow-wrap: anywhere; }
+.fnd-overview__when { white-space: nowrap; font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums; }
+@media (max-width: 720px) {
+  .fnd-overview__recent li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+}
+
+/* Where 总览's 去处理 landed: a short outline that fades, so the eye finds the place. No motion when reduced. */
+.fnd-arrival { outline: 2px solid var(--fnd-selected); outline-offset: 4px; border-radius: var(--fnd-radius-control); transition: outline-color 1.2s var(--fnd-easing, ease) 0.3s; }
+.fnd-arrival[data-arrival='fading'] { outline-color: transparent; }
+@media (prefers-reduced-motion: reduce) {
+  .fnd-arrival { transition: none; }
+}
+}

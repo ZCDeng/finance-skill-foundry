@@ -431,7 +431,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
             <details className="analysis-details"><DisclosureSummary>写回 Excel</DisclosureSummary>
               <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} contextId={[...view.runs].reverse().find((run) => run.finance_context_id)?.finance_context_id} />
             </details>
-            <details className="analysis-details"><DisclosureSummary>滚动到下月</DisclosureSummary>
+            <details className="analysis-details analysis-rollforward"><DisclosureSummary>滚动到下月</DisclosureSummary>
               <RollforwardPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} onApplied={() => refresh(task.id)} />
             </details>
           </section>
