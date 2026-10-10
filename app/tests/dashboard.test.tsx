@@ -393,6 +393,91 @@ describe('the 回款情景 card and asking the assistant for cards', () => {
     expect(screen.getByText('共 2 张 · 已认可 0 张 · 待认可 0 张 · 情景 2 张')).toBeTruthy();
   });
 
+  it('presents the accepted cards and the what-ifs one at a time, full screen, with every figure still opening to its source', async () => {
+    boardBackend([
+      card({ id: 'c1', run_id: run.id, state: 'accepted', accepted: { run_id: run.id, at: '2026-10-10T09:00:00Z' } }),
+      card({ id: 'c2', kind: 'rank', title: '风险雷达得分（从高到低）', run_id: run.id, template: 'city',
+        select: { match: { metric_key: 'risk_score', scenario: '本期', entity_origin: 'table' }, label: 'entity', column: 'value', order: 'desc', limit: 10 } }),
+      card({ id: 's1', kind: 'scenario', title: '回款情景：收缴率变了会怎样', run_id: run.id, select: { match } }),
+    ]);
+    // The window goes full screen as it would in the app, and the workspace hears when to take the conversation down.
+    let full: Element | null = null;
+    Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => full });
+    const requestFullscreen = vi.fn(async () => { full = document.documentElement; document.dispatchEvent(new Event('fullscreenchange')); });
+    const exitFullscreen = vi.fn(async () => { full = null; document.dispatchEvent(new Event('fullscreenchange')); });
+    Object.assign(document.documentElement, { requestFullscreen });
+    Object.assign(document, { exitFullscreen });
+    const covered: boolean[] = [];
+    const listen = (event: Event) => covered.push(Boolean((event as CustomEvent<{ open: boolean }>).detail.open));
+    window.addEventListener('foundry:workspace-native-cover', listen);
+    function Board({ readOnly = false }: { readOnly?: boolean }) {
+      const state = useDashboard('t');
+      return <DashboardView task={{ id: 't', title: '华宸物业 9 月月结', period: '2026 年 9 月' }} state={state} runs={[run]} analyses={[]} datasets={[]} readOnly={readOnly} />;
+    }
+    try {
+      const { unmount } = render(<Board />);
+      fireEvent.click(await screen.findByRole('button', { name: '汇报模式' }));
+      const deck = await screen.findByRole('dialog', { name: '华宸物业 9 月月结 · 2026 年 9 月' });
+      expect(requestFullscreen).toHaveBeenCalled();
+      expect(covered).toEqual([true]);
+      // The card still waiting stays off, as it does on the one-page export, and the deck says so.
+      expect(within(deck).getByText('已认可 1 张 · 情景 1 张（不是实际数）；另有 1 张待认可，没放进来。')).toBeTruthy();
+      expect(within(deck).getByText('1 / 2')).toBeTruthy();
+      const gap = within(deck).getByRole('article', { name: '距生死线（本年账单收缴率）' });
+      expect(within(gap).queryByRole('button', { name: /认可|移除/ })).toBeNull();
+      // A figure opens to its source on the slide; keys pressed there are the source's, and Esc closes only it.
+      fireEvent.click(within(gap).getByRole('button', { name: /查看来源/ }));
+      const source = await screen.findByRole('dialog', { name: '距生死线（本年账单收缴率）本期的来源' });
+      fireEvent.keyDown(source, { key: 'ArrowRight' });
+      expect(within(deck).getByText('1 / 2')).toBeTruthy();
+      fireEvent.keyDown(source, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: /的来源$/ })).toBeNull());
+      expect(screen.getByRole('dialog', { name: '华宸物业 9 月月结 · 2026 年 9 月' })).toBeTruthy();
+
+      fireEvent.keyDown(within(deck).getByRole('button', { name: '退出汇报' }), { key: 'ArrowRight' });
+      expect(within(deck).getByText('2 / 2')).toBeTruthy();
+      const scenario = within(deck).getByRole('article', { name: '回款情景：收缴率变了会怎样' });
+      expect(within(scenario).getByText('情景，不是实际数')).toBeTruthy();
+      // The scenario still moves, and its own field keeps the arrow keys.
+      const rate = within(scenario).getByRole('textbox', { name: '假设收缴率' });
+      fireEvent.change(rate, { target: { value: '92' } });
+      expect(within(scenario).getByText('+433 万元')).toBeTruthy();
+      fireEvent.keyDown(rate, { key: 'ArrowLeft' });
+      expect(within(deck).getByText('2 / 2')).toBeTruthy();
+      fireEvent.click(within(deck).getByRole('button', { name: '第 1 张：距生死线（本年账单收缴率）' }));
+      expect(within(deck).getByText('1 / 2')).toBeTruthy();
+      expect((within(deck).getByRole('button', { name: '上一张' }) as HTMLButtonElement).disabled).toBe(true);
+
+      // Leaving full screen ends the presentation, and the conversation comes back.
+      await act(async () => { full = null; document.dispatchEvent(new Event('fullscreenchange')); });
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      expect(covered).toEqual([true, false]);
+      // 退出汇报 leaves full screen too.
+      fireEvent.click(screen.getByRole('button', { name: '汇报模式' }));
+      fireEvent.click(await screen.findByRole('button', { name: '退出汇报' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      expect(exitFullscreen).toHaveBeenCalledTimes(1);
+      expect(covered).toEqual([true, false, true, false]);
+      unmount();
+
+      // An archived task presents as it stands; a board with nothing accepted has nothing to present.
+      render(<Board readOnly />);
+      expect(await screen.findByRole('button', { name: '汇报模式' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: /全部认可|导出一页纸/ })).toBeNull();
+      cleanup();
+      boardBackend([card({ id: 'c2', run_id: run.id })]);
+      render(<Board />);
+      const present = await screen.findByRole('button', { name: '汇报模式' }) as HTMLButtonElement;
+      expect(present.disabled).toBe(true);
+      expect(present.title).toBe('先认可要汇报的卡');
+    } finally {
+      window.removeEventListener('foundry:workspace-native-cover', listen);
+      delete (document as { fullscreenElement?: unknown }).fullscreenElement;
+      delete (document.documentElement as { requestFullscreen?: unknown }).requestFullscreen;
+      delete (document as { exitFullscreen?: unknown }).exitFullscreen;
+    }
+  });
+
   it('puts a question for the assistant into the conversation, unsent', async () => {
     boardBackend([card({})]);
     const heard = vi.fn();
