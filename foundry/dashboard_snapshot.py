@@ -7,7 +7,8 @@ Before anything is filed the snapshot is held to that board:
 - only accepted cards, each still on the run it was accepted on (a 待认可 card is not a figure anyone signed,
   and a 回款情景 card is a what-if, never accepted, never in a snapshot);
 - every figure is the very cell its run holds, every bar a row of its run in the card's order, every step of a
-  profit bridge the variance line it stands for;
+  profit bridge the variance line it stands for, and what the page prints of each is that number, rounded to the
+  places it shows;
 - every accepted card is either on the page or named as left off it, and the cards not taken are the board's.
 
 A page laid out from a board that has changed since is refused, and the manager exports again.
@@ -181,6 +182,57 @@ def _same(stored: Any, shown: str) -> bool:
         return False
 
 
+# A figure as the page writes it (app/src/lib/figures.ts): accounting parentheses or a sign, a currency mark, grouped
+# digits, a %, then words without a digit (万元, 个百分点, （估算）).
+WRITTEN = re.compile(r"^([(（])?\s*([-+−])?\s*(?:¥|￥|\$)?\s*(\d[\d,]*(?:\.\d+)?)\s*(%)?\s*[)）]?\s*(\D*)$")
+
+
+def _decimal(value: Any) -> Decimal | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = Decimal(value.strip().replace(",", "") if isinstance(value, str) else repr(value) if isinstance(value, float) else str(value))
+    except InvalidOperation:
+        return None
+    return number if number.is_finite() else None
+
+
+def _written(text: str) -> tuple[Decimal, int, bool] | None:
+    """The figure a text writes: its number, the places it shows, and whether it reads as a percentage."""
+    found = WRITTEN.match(text.strip())
+    if found is None:
+        return None
+    paren, sign, digits, mark, words = found.groups()
+    number = Decimal(digits.replace(",", ""))
+    return (-number if paren or sign in ("-", "−") else number), len(digits.partition(".")[2]), bool(mark) or "%" in words or "百分点" in words
+
+
+def _reads(stored: Any, text: str) -> bool:
+    """Whether a figure the page writes is the run's own: its number rounded to the places the page shows, as it is or
+    ×100 where the page writes a percentage of a fraction (0.8732 as 87.32%). Text that writes no figure states no
+    amount; a cell that is no number is shown as it is."""
+    written = _written(text)
+    if written is None:
+        return True
+    number = _decimal(stored)
+    if number is None:
+        return stored is not None and not isinstance(stored, bool) and str(stored).strip() == text.strip()
+    figure, places, percent = written
+    half = Decimal(5).scaleb(-places - 1)
+    return any(abs(number * scale - figure) <= half for scale in ((1, 100) if percent else (1,)))
+
+
+def _health(run: dict) -> bool:
+    result = run.get("result") or {}
+    return run.get("engine") == "finance" and result.get("scenario_kind") == "collection_health" and isinstance(result.get("rows"), list)
+
+
+def _says(row: dict, text: str) -> bool:
+    """Whether the page writes a collection-health line's figure as the run itself wrote it (display_value)."""
+    written, own = _written(text), _written(str(row.get("display_value") or ""))
+    return written is None or (own is not None and written[0] == own[0])
+
+
 def _float(value: Any) -> float | None:
     if value is None or isinstance(value, bool) or (isinstance(value, str) and not value.strip()):
         return None
@@ -209,6 +261,20 @@ def _check_figure(card: dict, run: dict, shown: dict) -> None:
     column = card["select"].get("column")
     if len(rows) != 1 or shown["cell"]["column"] != column or not _same(rows[0].get(column), shown["cell"]["value"]):
         raise FoundryError(f"「{card['title']}」 is not the figure its run holds; export again")
+    # What the page prints is held too: the figure, its light, and the figures beside it.
+    row = rows[0]
+    if _health(run):
+        # The same measure's other lines, as the board lists them beside it (dashboardViews.figureView), at most six.
+        beside = [(str(item.get("scenario")), str(item.get("display_value"))) for item in run["result"]["rows"]
+                  if item is not row and item.get("entity") == row.get("entity") and item.get("metric_key") == row.get("metric_key")][:6]
+        honest = (_says(row, shown["value"]["text"]) and shown["level"] == row.get("level")
+                  and shown["level_label"] == (row.get("level_label") or "")
+                  and [(pair["label"], pair["text"]) for pair in shown["beside"]] == beside)
+    else:
+        honest = (_reads(row.get(column), shown["value"]["text"]) and shown["level"] is None and not shown["level_label"]
+                  and all(any(_reads(value, pair["text"]) for value in row.values()) for pair in shown["beside"]))
+    if not honest:
+        raise FoundryError(f"「{card['title']}」 does not print the figure its run holds; export again")
 
 
 def ranked(card: dict, run: dict) -> list[tuple[dict, float]]:
@@ -224,10 +290,13 @@ def ranked(card: dict, run: dict) -> list[tuple[dict, float]]:
 
 
 def _check_rank(card: dict, run: dict, shown: dict) -> None:
-    label = card["select"].get("label")
-    expected = [(str(row.get(label)), value) for row, value in ranked(card, run)]
-    if [(item["label"], item["value"]) for item in shown["items"]] != expected:
+    label, column = card["select"].get("label"), card["select"].get("column")
+    rows = ranked(card, run)
+    if [(item["label"], item["value"]) for item in shown["items"]] != [(str(row.get(label)), value) for row, value in rows]:
         raise FoundryError(f"「{card['title']}」 is not the ranking its run holds; export again")
+    says = (lambda row, text: _says(row, text)) if _health(run) else (lambda row, text: _reads(row.get(column), text))
+    if not all(says(row, item["shown"]["text"]) for (row, _), item in zip(rows, shown["items"])):
+        raise FoundryError(f"「{card['title']}」 does not print the figures its run holds; export again")
     reference = card["select"].get("reference")
     if (reference is None) != (shown["reference"] is None) or (
             reference is not None and (_float(reference.get("value")) != shown["reference"]["value"] or reference.get("label") != shown["reference"]["label"])):
@@ -254,6 +323,8 @@ def _check_bridge(card: dict, run: dict, shown: dict) -> None:
     if lines is None or [step["value"] for step in shown["steps"]] != [_float(value) for _, value in lines] \
             or [step["kind"] for step in shown["steps"]] != ["total", "delta", "delta", "delta", "total"]:
         raise FoundryError(f"「{card['title']}」 is not the profit bridge its run holds; export again")
+    if not all(_reads(value, step["shown"]["text"]) for (_, value), step in zip(lines, shown["steps"])):
+        raise FoundryError(f"「{card['title']}」 does not print the profit bridge its run holds; export again")
 
 
 def check(model: dict, board: dict | None, run_of, *, whole: bool) -> dict[str, dict]:
@@ -578,21 +649,26 @@ def save(task, spec: Any, *, actor: str | None) -> dict:
     target = analysis._inside(analysis.root / relative)
     record_path = analysis._inside(_folder(analysis) / f"{snapshot_id}.json")
     taken = [*model["figures"], *model["charts"]]
-    with exclusive(task.lock_path, timeout=10):
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data)
-        record = _new(
-            task, domain="foundry.dashboard_snapshot.v1", format=fmt, filename=_filename(model, fmt), artifact_path=str(relative),
-            sha256=hashlib.sha256(data).hexdigest(), board_id=model["board_id"], title=title, period=model["period"],
-            cards=[{"id": item["card_id"], "title": item["title"], "kind": cards[item["card_id"]]["kind"],
-                    "run_id": cards[item["card_id"]]["run_id"]} for item in taken],
-            beyond=[item["title"] for item in model["beyond"]],
-            left_out={key: [item["title"] for item in items] for key, items in model["left_out"].items()},
-        )
-        record["id"] = snapshot_id
-        record["seq"] = analysis._next_seq()
-        record["_integrity_hash"] = _hash(record)
-        write_json_atomic(record_path, record)
+    # Filed only while the board is still the version the page was laid out from: a save in the meantime waits on the
+    # same lock, and task.lock is taken inside it as dashboard_save takes it.
+    with store._dashboard_lock():
+        if (store._dashboard() or {}).get("id") != model["board_id"]:
+            raise FoundryError("the dashboard changed since this snapshot was laid out; export again")
+        with exclusive(task.lock_path, timeout=10):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            record = _new(
+                task, domain="foundry.dashboard_snapshot.v1", format=fmt, filename=_filename(model, fmt), artifact_path=str(relative),
+                sha256=hashlib.sha256(data).hexdigest(), board_id=model["board_id"], title=title, period=model["period"],
+                cards=[{"id": item["card_id"], "title": item["title"], "kind": cards[item["card_id"]]["kind"],
+                        "run_id": cards[item["card_id"]]["run_id"]} for item in taken],
+                beyond=[item["title"] for item in model["beyond"]],
+                left_out={key: [item["title"] for item in items] for key, items in model["left_out"].items()},
+            )
+            record["id"] = snapshot_id
+            record["seq"] = analysis._next_seq()
+            record["_integrity_hash"] = _hash(record)
+            write_json_atomic(record_path, record)
     return {"snapshot": record, "path": str(target.resolve())}
 
 

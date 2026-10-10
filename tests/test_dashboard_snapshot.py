@@ -11,8 +11,16 @@ from xml.etree import ElementTree
 import pytest
 from openpyxl import load_workbook
 
+from foundry import dashboard_snapshot
 from foundry.analysis import AnalysisStore
-from foundry.dashboard_snapshot import ranked, save, snapshot_path, snapshots
+from foundry.dashboard_snapshot import (
+    _check_figure,
+    _reads,
+    ranked,
+    save,
+    snapshot_path,
+    snapshots,
+)
 from foundry.errors import FoundryError
 from foundry.finance_service import FinanceStore
 from foundry.task import TaskStore
@@ -169,6 +177,11 @@ def test_a_snapshot_that_is_not_what_the_board_shows_is_refused(board):
             save(task, {"format": "xlsx", "model": model}, actor=actor)
 
     refused(lambda model: model["figures"][0]["cell"].update(value="1.5"), "is not the figure its run holds")
+    # The run's number sent beside other words: what the page would print is held to the run as well.
+    refused(lambda model: model["figures"][0]["value"].update(text="-0.89 个百分点"), "does not print the figure its run holds")
+    refused(lambda model: model["figures"][0].update(level="green", level_label="绿"), "does not print the figure its run holds")
+    refused(lambda model: model["figures"][0]["beside"].append({"label": "上年同期", "text": "+1.20 个百分点"}), "does not print the figure")
+    refused(lambda model: model["charts"][0]["items"][0]["shown"].update(text="(3.00)"), "does not print the figures its run holds")
     refused(lambda model: model["charts"][0]["items"].reverse(), "is not the ranking its run holds")
     refused(lambda model: model["charts"][0].update(reference=None), "own reference line")
     refused(lambda model: model["left_out"].update(pinned=[]), "cards it leaves out")
@@ -183,6 +196,53 @@ def test_a_snapshot_that_is_not_what_the_board_shows_is_refused(board):
                                                                        for card in saved["cards"]]})
     with pytest.raises(FoundryError, match="no card on the dashboard is accepted"):
         save(task, {"format": "xlsx", "model": {**honest, "board_id": later["id"]}}, actor="manager")
+
+
+def test_a_page_prints_each_figure_as_the_board_writes_it(board):
+    """The board's own forms pass: a bar's figure without its unit, a negative in accounting parentheses."""
+    task, manager, run, saved = board
+    model = _model(manager, saved, run)
+    for item in model["charts"][0]["items"]:
+        figure = item["shown"]["text"].split(" ")[0].lstrip("+")
+        item["shown"]["text"] = f"({figure[1:]})" if figure.startswith("-") else figure
+    assert save(task, {"format": "xlsx", "model": model}, actor="manager")["snapshot"]["cards"]
+
+
+def test_a_figure_is_read_at_the_places_the_page_shows():
+    assert _reads("0.8732", "87.32%") and _reads("87.32", "87.32%") and _reads("-0.0098", "-0.98 个百分点")
+    assert _reads("8.33333333333333333333333333333333333", "8.33%") and _reads(1234.5, "1,234.50")
+    assert _reads("-18843.06", "(18,843.06)") and _reads("325644", "325,644.00 万元（估算）")
+    assert not _reads("1234.5", "1,234.60") and not _reads("0.8732", "87.42%") and not _reads("18843.06", "(18,843.06)")
+    # Text that writes no figure states no amount; a cell that is no number is shown as it is.
+    assert _reads("2026-08", "2026 年 8 月") and _reads("87.32%", "87.32%") and not _reads("待定", "1.00")
+
+
+def test_a_figure_prints_the_same_measure_s_other_lines_beside_it_as_the_run_wrote_them():
+    line = lambda scenario, value, shown: {"entity": "集团", "metric_key": "collection_rate_current", "scenario": scenario,
+                                           "value": value, "display_value": shown, "level": "yellow", "level_label": "黄"}
+    rows = [line("本期", "0.8732", "87.32%"), line("上年同期", "0.8811", "88.11%"), line("变动", "-0.79", "-0.79 个百分点")]
+    run = {"engine": "finance", "result": {"scenario_kind": "collection_health", "rows": rows}}
+    card = {"title": "收缴率", "select": {"match": {"entity": "集团", "metric_key": "collection_rate_current", "scenario": "本期"}, "column": "value"}}
+    shown = {"value": {"text": "87.32%"}, "level": "yellow", "level_label": "黄", "cell": {"column": "value", "value": "0.8732"},
+             "beside": [{"label": "上年同期", "text": "88.11%"}, {"label": "变动", "text": "-0.79 个百分点"}]}
+    _check_figure(card, run, shown)
+    shown["beside"][1]["text"] = "+0.79 个百分点"
+    with pytest.raises(FoundryError, match="does not print"):
+        _check_figure(card, run, shown)
+
+
+def test_a_board_saved_while_the_snapshot_is_written_is_not_filed(board, monkeypatch):
+    task, manager, run, saved = board
+    workbook = dashboard_snapshot.workbook
+
+    def saved_meanwhile(*args, **kwargs):
+        manager.dashboard_save({"parent_id": saved["id"], "cards": saved["cards"][:-1]})
+        return workbook(*args, **kwargs)
+
+    monkeypatch.setattr(dashboard_snapshot, "workbook", saved_meanwhile)
+    with pytest.raises(FoundryError, match="changed since"):
+        save(task, {"format": "xlsx", "model": _model(manager, saved, run)}, actor="manager")
+    assert snapshots(task) == []
 
 
 def test_the_library_lists_a_snapshot_and_refuses_one_whose_bytes_changed(board):
