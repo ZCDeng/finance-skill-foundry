@@ -86,6 +86,18 @@ describe('archived chart', () => {
     expect(drawn?.value).toBe('actual');
     expect(drawn?.items.map((item) => item.text)).toEqual(['120.50', '-3']);
     expect(archivedBars([{ a: '1', b: '2' }])).toBeNull();
+    // A variance series starts with columns every row shares; the bars are named by the one that tells them apart.
+    const variance = archivedBars([
+      { ledger: 'L1', organization: '海口', unit: '元', metric: 'revenue', actual: '120' },
+      { ledger: 'L1', organization: '海口', unit: '元', metric: 'profit', actual: '20' },
+    ]);
+    expect(variance?.category).toBe('metric');
+    expect(variance?.items.map((item) => item.label)).toEqual(['revenue', 'profit']);
+    // No single column tells the rows apart: the series stays a table.
+    expect(archivedBars([
+      { period: '2026-08', metric: 'revenue', actual: '1' }, { period: '2026-08', metric: 'profit', actual: '2' },
+      { period: '2026-09', metric: 'revenue', actual: '3' }, { period: '2026-09', metric: 'profit', actual: '4' },
+    ])).toBeNull();
     expect(archivedBars(Array.from({ length: 31 }, (_, index) => ({ name: `行${index}`, actual: '1' })))).toBeNull();
   });
 });

@@ -23,14 +23,16 @@ const drawnRows = 30;
 
 /**
  * The bars an archived series draws: one text column names the bars, one figure column sizes them (actual first).
- * A series without such a pair, or longer than a screen, is not drawn and reads as its table.
+ * The naming column is the first whose text differs on every row, so a column every row shares (账簿、组织、单位)
+ * never labels them all alike. A series without such a pair, or longer than a screen, is not drawn and reads as its table.
  */
 export function archivedBars(rows: Record<string, unknown>[]): { category: string; value: string; items: RankItem[] } | null {
   if (!rows.length || rows.length > drawnRows) return null;
   const columns = Object.keys(rows[0]);
   const filled = (name: string) => rows.filter((row) => row[name] != null && row[name] !== '');
   const numeric = columns.filter((name) => filled(name).length === rows.length && rows.every((row) => plainDecimal(row[name])));
-  const category = columns.find((name) => !numeric.includes(name) && filled(name).length === rows.length && rows.every((row) => typeof row[name] === 'string'));
+  const category = columns.find((name) => !numeric.includes(name) && filled(name).length === rows.length && rows.every((row) => typeof row[name] === 'string')
+    && new Set(rows.map((row) => row[name])).size === rows.length);
   const value = preferredValues.find((name) => numeric.includes(name)) ?? numeric[0];
   if (!category || !value) return null;
   return { category, value, items: rows.map((row) => ({ label: String(row[category]), value: Number(row[value]), text: groupDigits(String(row[value]).trim()) })) };
