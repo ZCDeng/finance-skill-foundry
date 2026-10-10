@@ -654,6 +654,8 @@ def test_analysis_preset_installs_with_harness_and_wheel_resource():
     persona = (PLUGIN / "presets" / "analysis" / "agent.cordis.yml").read_text(encoding="utf-8")
     # 倒推 and 敏感性 answer "what would it take" questions, and are never written up as fact.
     assert "kind=goal 或 sensitivity" in persona and "倒推和敏感性都是情景，不是实际数" in persona
+    # 点选题: the runtime's question card, the recommendation first; picking an option is not confirming a 口径.
+    assert "ask_user_question" in persona and "（推荐）" in persona and "点选不等于确认" in persona
     mirror = ROOT / "foundry" / "resources" / "dsh-plugin"
     for relative in ("analysis.js", "analysis-runtime.js", "finance-tools.js", "index.js", "package.json", "presets/analysis/agent.cordis.yml",
                      "presets/analysis/preset.yml"):
