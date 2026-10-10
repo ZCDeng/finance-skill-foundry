@@ -38,6 +38,7 @@ const api = {
   timingLog: (entry: unknown) => ipcRenderer.invoke('timing:log', entry),
   appearanceGet: () => ipcRenderer.invoke('appearance:get'),
   appearanceSet: (appearance: string) => ipcRenderer.invoke('appearance:set', appearance),
+  windowFullScreen: (on: boolean) => ipcRenderer.invoke('window:full-screen', on),
   tasks: (lifecycle?: string) => ipcRenderer.invoke('foundry:tasks', lifecycle),
   task: (id: string) => ipcRenderer.invoke('foundry:task', id),
   gallery: () => ipcRenderer.invoke('foundry:gallery'),

@@ -413,6 +413,8 @@ export interface Bridge {
   /** The window's appearance (跟随系统 / 浅色 / 深色). Absent in a build without it; the header then shows no switch. */
   appearanceGet?(): Promise<Answer<{ appearance: Appearance }>>;
   appearanceSet?(appearance: Appearance): Promise<Answer<{ appearance: Appearance }>>;
+  /** 汇报模式: the window full screen, or back; `was` says whether it already was. */
+  windowFullScreen?(on: boolean): Promise<Answer<{ was: boolean }>>;
   tasks(lifecycle?: TaskLifecycleFilter): Promise<Answer<TaskRow[]>>;
   task(id: string): Promise<Answer<TaskDetail>>;
   /** 成果库: old-flow versions, the newest draft of each revision chain and every filed export, newest first. */

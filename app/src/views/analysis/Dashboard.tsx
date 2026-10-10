@@ -204,9 +204,9 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
   };
   const actions: CardActions = { readOnly, busy, act, onOpenResult };
   const accepted = board.filter(acceptedCard).length;
-  // 汇报模式 shows what the one-page export would, and the what-ifs as what-ifs; a card still waiting stays off.
-  const shown = [...board.filter((card) => card.kind === 'figure'), ...board.filter((card) => card.kind !== 'figure')]
-    .filter((card) => card.state === 'accepted' || isWhatIf(card.kind));
+  // 汇报模式 shows what the one-page export would, then the what-ifs as what-ifs; a card still waiting stays off.
+  const laidOut = [...board.filter((card) => card.kind === 'figure'), ...board.filter((card) => card.kind !== 'figure')];
+  const shown = [...laidOut.filter((card) => card.state === 'accepted' && !isWhatIf(card.kind)), ...laidOut.filter((card) => isWhatIf(card.kind))];
   const canExport = Boolean(task && bridge()?.dashboardExport);
   const exportAs = (format: SnapshotFormat) => {
     const api = bridge();

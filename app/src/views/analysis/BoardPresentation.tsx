@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { bridge } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import type { DashboardCard } from './dashboardModel.js';
 
@@ -13,9 +14,10 @@ const BACK = new Set(['ArrowLeft', 'ArrowUp', 'PageUp']);
 
 /**
  * 汇报模式: the board one card at a time, filling the screen, for a meeting. The window goes full screen where it
- * can, and the conversation steps aside while it shows. ← → (or PageUp/PageDown) turn the cards and Esc leaves, as
- * does leaving full screen. A figure still opens to its source and a 回款情景 card still moves: keys pressed in its
- * box or in an open source stay theirs.
+ * can (the window's own full screen, given back on leaving if it was not full screen before), and the conversation
+ * steps aside while it shows. ← → (or PageUp/PageDown) turn the cards and Esc leaves. A figure still opens to its
+ * source and a 回款情景 card still moves: keys pressed in its box or in an open source stay theirs, and Esc with a
+ * source open closes only the source.
  */
 export function BoardPresentation({ title, cards, said, slide, onClose }: {
   /** The task and its period, as the page names them. */
@@ -28,21 +30,23 @@ export function BoardPresentation({ title, cards, said, slide, onClose }: {
 }) {
   const [at, setAt] = useState(0);
   const stage = useRef<HTMLDivElement>(null);
-  const close = useRef(onClose);
-  close.current = onClose;
   const index = Math.min(at, cards.length - 1);
   const card = cards[index];
 
   useEffect(() => {
     cover(true);
-    const root = document.documentElement;
-    if (root.requestFullscreen && !document.fullscreenElement) void root.requestFullscreen().catch(() => undefined);
-    // Leaving full screen (Esc, or the window's own control) ends the presentation with it.
-    const left = () => { if (!document.fullscreenElement) close.current(); };
-    document.addEventListener('fullscreenchange', left);
+    // Not the page's full screen: in it the window takes Esc for itself, before an open source could close on it.
+    const api = bridge();
+    let open = true;
+    let took = false;
+    const giveBack = () => void api?.windowFullScreen?.(false).catch(() => undefined);
+    void api?.windowFullScreen?.(true).then((answer) => {
+      if (!answer.ok || answer.value.was) return;
+      if (open) took = true; else giveBack();
+    }).catch(() => undefined);
     return () => {
-      document.removeEventListener('fullscreenchange', left);
-      if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => undefined);
+      open = false;
+      if (took) giveBack();
       cover(false);
     };
   }, []);
