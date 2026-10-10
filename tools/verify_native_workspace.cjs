@@ -112,6 +112,9 @@ const captureContext = `(() => {
   },'packaged wiring',90000);
   // Let the real shell finish its own initial task/session restore before
   // testing the native boundary directly. This avoids racing startup effects.
+  // Since 0.11.0 the app opens on 总览; the task list lives on the 工作区 tab.
+  const workspaceTab=page.getByRole('navigation',{name:'主导航'}).getByRole('button',{name:'工作区',exact:true});
+  if(await workspaceTab.getAttribute('aria-current')!=='page')await workspaceTab.click();
   const expandTasks=page.getByRole('button',{name:'展开任务列表',exact:true});
   if(await expandTasks.isVisible())await expandTasks.click();
   await page.locator('.workspace-task[title="验收：区域收入分析"]').click();
