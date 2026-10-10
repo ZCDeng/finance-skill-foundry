@@ -59,12 +59,15 @@ export function goalCollection(lines: Map<string, WhatIfRow>, entity: string, ta
   const vat = numberOf(params.vat_factor) ?? 1.06;
   const unit = revenueRow?.unit ?? '';
   const money = revenue === null ? null : (points / 100) * revenue * vat;
-  const part = money !== null ? (points > 0 ? '一年还要多收' : '一年已比目标多收') : (points > 0 ? '收缴率还要提高' : '收缴率已高出目标');
-  const value = money !== null ? withUnit(fixed(Math.abs(money), 0), unit) : `${fixed(Math.abs(points), 2)} 个百分点`;
+  // A rate that reads as the goal to the hundredth has reached it: neither short of it nor past it.
+  const met = fixed(Math.abs(points), 2) === '0.00';
+  const part = met ? (target ? '已达到目标' : '正好在生死线上')
+    : money !== null ? (points > 0 ? '一年还要多收' : '一年已比目标多收') : (points > 0 ? '收缴率还要提高' : '收缴率已高出目标');
+  const value = met ? `${fixed(goal, 2)}%` : money !== null ? withUnit(fixed(Math.abs(money), 0), unit) : `${fixed(Math.abs(points), 2)} 个百分点`;
   // Without a target the goal is the line itself, which the card shows among the run's lines.
   const beside: [string, string][] = target ? [['目标收缴率', `${fixed(goal, 2)}%`]] : [];
   beside.push(['这次计算的收缴率', `${fixed(current, 2)}%`]);
-  if (money !== null) beside.push([points > 0 ? '还差' : '已高出', `${fixed(Math.abs(points), 2)} 个百分点`]);
+  if (money !== null && !met) beside.push([points > 0 ? '还差' : '已高出', `${fixed(Math.abs(points), 2)} 个百分点`]);
   if (target) beside.push(['到目标时距生死线', `${signed(at, 2)} 个百分点`]);
   const caption = (target ? '以上几项读自这次计算，只有目标收缴率是假设。' : '以上几项读自这次计算，目标就是生死线收缴率。') + (money !== null
     ? `一年回款差 = 收缴率差 × 近 12 个月营业收入 × ${vat}（回款含增值税），是估算。` : '这次计算没有近 12 个月营业收入，算不出金额。');
@@ -86,18 +89,22 @@ export function goalBudget(lines: Map<string, WhatIfRow>, entity: string): GoalV
   const done = numberOf(inputs.revenue);
   const months = numberOf(inputs.months_elapsed);
   const manual = MANUAL_BUDGET.test(remainingRow.note ?? '');
-  const part = remaining > 0 ? `剩余 ${months !== null ? 12 - months : '—'} 个月每月要做到` : '全年收入预算已完成，超出';
-  const value = remaining > 0 ? (monthlyRow.display_value || withUnit(fixed(need, 2), unit)) : withUnit(fixed(-remaining, 2), unit);
+  // Short by what reads as 0.00 is done to the cent: neither a month's target nor an overshoot.
+  const short = remaining > 0 && fixed(remaining, 2) !== '0.00';
+  const exact = !short && fixed(Math.abs(remaining), 2) === '0.00';
+  const part = short ? `剩余 ${months !== null ? 12 - months : '—'} 个月每月要做到` : exact ? '全年收入预算正好完成' : '全年收入预算已完成，超出';
+  const value = short ? (monthlyRow.display_value || withUnit(fixed(need, 2), unit))
+    : exact ? withUnit(decimalToFixed(inputs.revenue_budget_full, 2), unit) : withUnit(fixed(-remaining, 2), unit);
   const beside: [string, string][] = [
     [manual ? '全年收入预算（手填）' : '全年收入预算', withUnit(decimalToFixed(inputs.revenue_budget_full, 2), unit)],
     ['本年累计', withUnit(decimalToFixed(inputs.revenue, 2), unit)],
   ];
   if (budget !== null && done !== null && budget > 0) beside.push(['已完成', `${fixed((done / budget) * 100, 2)}%`]);
-  if (remaining > 0) beside.push(['还差', remainingRow.display_value || withUnit(fixed(remaining, 2), unit)]);
+  if (short) beside.push(['还差', remainingRow.display_value || withUnit(fixed(remaining, 2), unit)]);
   const pace = done !== null && months ? done / months : null;
   if (pace !== null) {
     beside.push(['已过月份月均', withUnit(fixed(pace, 2), unit)]);
-    if (remaining > 0 && pace > 0) beside.push(['每月要比月均多', `${signed((need / pace - 1) * 100, 1)}%`]);
+    if (short && pace > 0) beside.push(['每月要比月均多', `${signed((need / pace - 1) * 100, 1)}%`]);
   }
   const caption = `全年收入预算、本年累计和已过月数读自这次计算${manual ? '，全年收入预算是手填的' : ''}。每月要做到 = 还差 ÷ 剩余月数，是倒推，不是预测。`;
   return { goal: 'budget', subject: `${entity} · 全年收入预算`, part, value, beside, caption, basis: [remainingRow, monthlyRow] };

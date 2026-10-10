@@ -68,7 +68,12 @@ def goal_collection(lines: dict[str, dict], entity: str, target: str | None, par
     vat = 1.06 if vat is None else vat
     unit = (revenue_row or {}).get("unit") or ""
     money = None if revenue is None else (points / 100) * revenue * vat
-    if money is not None:
+    # A rate that reads as the goal to the hundredth has reached it: neither short of it nor past it.
+    met = fixed(abs(points), 2) == "0.00"
+    if met:
+        part = "已达到目标" if target else "正好在生死线上"
+        value = f"{fixed(goal, 2)}%"
+    elif money is not None:
         part = "一年还要多收" if points > 0 else "一年已比目标多收"
         value = _with_unit(fixed(abs(money), 0), unit)
     else:
@@ -77,7 +82,7 @@ def goal_collection(lines: dict[str, dict], entity: str, target: str | None, par
     # Without a target the goal is the line itself, which the card shows among the run's lines.
     beside = [["目标收缴率", f"{fixed(goal, 2)}%"]] if target else []
     beside.append(["这次计算的收缴率", f"{fixed(current, 2)}%"])
-    if money is not None:
+    if money is not None and not met:
         beside.append(["还差" if points > 0 else "已高出", f"{fixed(abs(points), 2)} 个百分点"])
     if target:
         beside.append(["到目标时距生死线", f"{signed(at, 2)} 个百分点"])
@@ -97,9 +102,14 @@ def goal_budget(lines: dict[str, dict], entity: str) -> dict:
     remaining, need = float(remaining_row["value"]), float(monthly_row["value"])
     budget, done, months = (_number(inputs.get(name)) for name in ("revenue_budget_full", "revenue", "months_elapsed"))
     manual = bool(MANUAL_BUDGET.search(remaining_row.get("note") or ""))
-    if remaining > 0:
+    # Short by what reads as 0.00 is done to the cent: neither a month's target nor an overshoot.
+    short = remaining > 0 and fixed(remaining, 2) != "0.00"
+    if short:
         part = f"剩余 {js_text(12 - months) if months is not None else '—'} 个月每月要做到"
         value = monthly_row.get("display_value") or _with_unit(fixed(need, 2), unit)
+    elif fixed(abs(remaining), 2) == "0.00":
+        part = "全年收入预算正好完成"
+        value = _with_unit(decimal_to_fixed(inputs.get("revenue_budget_full"), 2), unit)
     else:
         part = "全年收入预算已完成，超出"
         value = _with_unit(fixed(-remaining, 2), unit)
@@ -107,12 +117,12 @@ def goal_budget(lines: dict[str, dict], entity: str) -> dict:
               ["本年累计", _with_unit(decimal_to_fixed(inputs.get("revenue"), 2), unit)]]
     if budget and done is not None and budget > 0:
         beside.append(["已完成", f"{fixed(done / budget * 100, 2)}%"])
-    if remaining > 0:
+    if short:
         beside.append(["还差", remaining_row.get("display_value") or _with_unit(fixed(remaining, 2), unit)])
     pace = done / months if done is not None and months else None
     if pace is not None:
         beside.append(["已过月份月均", _with_unit(fixed(pace, 2), unit)])
-        if remaining > 0 and pace > 0:
+        if short and pace > 0:
             beside.append(["每月要比月均多", f"{signed((need / pace - 1) * 100, 1)}%"])
     caption = ("全年收入预算、本年累计和已过月数读自这次计算" + ("，全年收入预算是手填的" if manual else "")
                + "。每月要做到 = 还差 ÷ 剩余月数，是倒推，不是预测。")

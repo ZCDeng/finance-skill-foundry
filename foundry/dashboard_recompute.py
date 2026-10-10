@@ -389,11 +389,12 @@ def shown(card: dict, run: dict) -> dict:
         rate = "fraction" if select.get("column") in FRACTION_COLUMNS else "points" if row.get("unit") in POINT_UNITS else None
         return {"value": None if value is None else str(value), "display": None if display is None else str(display),
                 "level": row.get("level"), "unit": row.get("unit"), "rate": rate}
+    if card["kind"] == "goal":
+        return _goal_shown(select, rows, found, run)
     if card["kind"] in WHAT_IF:
-        # A what-if is judged by the line it works from: where its entity stands against the line, or, for the
-        # budget worked back, what each month left now has to bring in.
-        key = "revenue_budget_monthly" if select.get("goal") == "budget" else "collection_gap"
-        row = next((row for row in found if row.get("metric_key") == key), {})
+        # A scenario or a sensitivity grid is judged by where its entity stands against the line: the grid's framed
+        # cell is that same figure.
+        row = next((row for row in found if row.get("metric_key") == "collection_gap"), {})
         return {"value": None if row.get("value") is None else str(row["value"]),
                 "display": row.get("display_value"), "level": row.get("level"), "unit": row.get("unit")}
     if card["kind"] == "rank":
@@ -416,6 +417,24 @@ def shown(card: dict, run: dict) -> dict:
                       for metric in ("revenue", "cost", "expense")}}
 
 
+def _goal_shown(select: dict, rows: list, found: list, run: dict) -> dict:
+    """A goal card's answer as it reads (foundry/what_if.py): the amount or the rate it works back to, and what it says of
+    it. A month's revenue moves that amount without moving the line, and a target leaves the line out of it."""
+    from foundry import what_if
+    from foundry.figure_text import js_text, split_display
+
+    entity = found[0].get("entity") if found else None
+    lines = what_if.lines_of(rows, entity)
+    try:
+        view = (what_if.goal_budget(lines, js_text(entity)) if select.get("goal") == "budget"
+                else what_if.goal_collection(lines, js_text(entity), select.get("target"), (run.get("result") or {}).get("params") or {}))
+    except (KeyError, TypeError, ValueError):
+        return {"value": None, "display": None, "level": None, "unit": None, "part": None}
+    figure, unit = split_display(view["value"])
+    return {"value": figure.replace(",", ""), "display": view["value"], "level": None,
+            "unit": "百分点" if unit == "个百分点" else unit or None, "part": view["part"]}
+
+
 def _sign(value: Decimal | None) -> int:
     return 0 if value is None or value == 0 else (1 if value > 0 else -1)
 
@@ -423,6 +442,9 @@ def _sign(value: Decimal | None) -> int:
 def change(card: dict, before: dict, after: dict) -> tuple[bool, str]:
     """Whether the card moved enough to look at, and the words for how it moved."""
     if card["kind"] == "figure" or card["kind"] in WHAT_IF:
+        if card["kind"] == "goal" and before.get("part") and after.get("part") and before["part"] != after["part"]:
+            # Short of the goal, at it, past it: the figure is the gap's size, so the words say which side it is on.
+            return True, f"{before['part']} → {after['part']}"
         if before.get("level") and after.get("level") and before["level"] != after["level"]:
             return True, f"级别 {LEVEL_WORDS.get(before['level'], before['level'])} → {LEVEL_WORDS.get(after['level'], after['level'])}"
         old, new = _number(before.get("value")), _number(after.get("value"))

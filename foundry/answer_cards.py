@@ -510,9 +510,11 @@ def collection_goal(run: dict, spec: dict) -> dict:
         if short:
             groups = {"title": f"按{by}，还要收得最多的 {len(short)} 个",
                       "lines": [[_group_words(row["key"]), decimal_to_fixed(format(amount, "f"), 2)] for row, amount in short]}
+    # What reads as 0.00 either way has reached the target: neither still to collect nor collected past it.
+    met = decimal_to_fixed(format(abs(need), "f"), 2) == "0.00"
     return {"subject": f"{subject} · {label}到 {shown}",
-            "part": "还要收" if need > 0 else "已超过目标，多收了",
-            "value": {"text": decimal_to_fixed(format(abs(need), "f"), 2), "negative": False},
+            "part": "已达到目标" if met else "还要收" if need > 0 else "已超过目标，多收了",
+            "value": {"text": shown if met else decimal_to_fixed(format(abs(need), "f"), 2), "negative": False},
             "beside": beside, "groups": groups, "basis": [],
             "caption": f"还要收 = {base_words} × 目标{label} − {done_words}，按这次计算的口径和截止日算；之后新出的账单不在里面。"}
 

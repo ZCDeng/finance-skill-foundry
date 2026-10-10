@@ -394,6 +394,115 @@
      "collection_gap"
     ]
    }
+  },
+  {
+   "name": "集团收缴率正好到目标",
+   "entity": "华宸物业",
+   "rows": [
+    {
+     "entity": "华宸物业",
+     "metric_key": "break_even_collection",
+     "metric_label": "生死线收缴率",
+     "scenario": "本期",
+     "value": "91.14262814607362800",
+     "unit": "%",
+     "display_value": "91.14%",
+     "note": "",
+     "inputs": {
+      "expense_ratio": "0.09195931753694218",
+      "gross_margin": "0.1805330360762059"
+     }
+    },
+    {
+     "entity": "华宸物业",
+     "metric_key": "collection_gap",
+     "metric_label": "距生死线（本年账单收缴率）",
+     "scenario": "本期",
+     "value": "-3.22412814607362800",
+     "unit": "百分点",
+     "display_value": "-3.22 个百分点",
+     "note": "低于生死线，每收100元倒贴现金",
+     "inputs": {
+      "collection_rate_current": "0.879185",
+      "expense_ratio": "0.09195931753694218",
+      "gross_margin": "0.1805330360762059"
+     }
+    },
+    {
+     "entity": "华宸物业",
+     "metric_key": "ttm_revenue",
+     "metric_label": "近12个月营业收入",
+     "scenario": "本期",
+     "value": "564030.9654",
+     "unit": "万元",
+     "display_value": "564,030.97 万元",
+     "note": "估算",
+     "inputs": {
+      "revenue": "325644",
+      "revenue_py": "331613.0346",
+      "revenue_py_full": "570000"
+     }
+    },
+    {
+     "entity": "华宸物业",
+     "metric_key": "revenue_budget_remaining",
+     "metric_label": "全年收入预算还差",
+     "scenario": "本期",
+     "value": "174356",
+     "unit": "万元",
+     "display_value": "174,356.00 万元",
+     "note": "",
+     "inputs": {
+      "revenue": "325644",
+      "revenue_budget_full": "500000"
+     }
+    },
+    {
+     "entity": "华宸物业",
+     "metric_key": "revenue_budget_monthly",
+     "metric_label": "剩余月份每月需完成收入",
+     "scenario": "本期",
+     "value": "43589",
+     "unit": "万元",
+     "display_value": "43,589.00 万元",
+     "note": "含手填数：已过月数",
+     "inputs": {
+      "months_elapsed": "8",
+      "revenue": "325644",
+      "revenue_budget_full": "500000"
+     }
+    }
+   ],
+   "target": "87.92%",
+   "params": {
+    "vat_factor": "1.06"
+   },
+   "view": {
+    "goal": "collection",
+    "subject": "华宸物业 · 收缴率到 87.92%",
+    "part": "已达到目标",
+    "value": "87.92%",
+    "beside": [
+     [
+      "目标收缴率",
+      "87.92%"
+     ],
+     [
+      "这次计算的收缴率",
+      "87.92%"
+     ],
+     [
+      "到目标时距生死线",
+      "-3.22 个百分点"
+     ]
+    ],
+    "caption": "以上几项读自这次计算，只有目标收缴率是假设。一年回款差 = 收缴率差 × 近 12 个月营业收入 × 1.06（回款含增值税），是估算。",
+    "basis": [
+     "break_even_collection",
+     "collection_gap",
+     "ttm_revenue"
+    ]
+   }
   }
  ],
  "budgets": [
@@ -724,6 +833,114 @@
      [
       "已完成",
       "100.39%"
+     ],
+     [
+      "已过月份月均",
+      "40,705.50 万元"
+     ]
+    ],
+    "caption": "全年收入预算、本年累计和已过月数读自这次计算，全年收入预算是手填的。每月要做到 = 还差 ÷ 剩余月数，是倒推，不是预测。",
+    "basis": [
+     "revenue_budget_remaining",
+     "revenue_budget_monthly"
+    ]
+   }
+  },
+  {
+   "name": "预算正好完成",
+   "entity": "华宸物业",
+   "rows": [
+    {
+     "entity": "华宸物业",
+     "metric_key": "break_even_collection",
+     "metric_label": "生死线收缴率",
+     "scenario": "本期",
+     "value": "91.14262814607362800",
+     "unit": "%",
+     "display_value": "91.14%",
+     "note": "",
+     "inputs": {
+      "expense_ratio": "0.09195931753694218",
+      "gross_margin": "0.1805330360762059"
+     }
+    },
+    {
+     "entity": "华宸物业",
+     "metric_key": "collection_gap",
+     "metric_label": "距生死线（本年账单收缴率）",
+     "scenario": "本期",
+     "value": "-3.22412814607362800",
+     "unit": "百分点",
+     "display_value": "-3.22 个百分点",
+     "note": "低于生死线，每收100元倒贴现金",
+     "inputs": {
+      "collection_rate_current": "0.879185",
+      "expense_ratio": "0.09195931753694218",
+      "gross_margin": "0.1805330360762059"
+     }
+    },
+    {
+     "entity": "华宸物业",
+     "metric_key": "ttm_revenue",
+     "metric_label": "近12个月营业收入",
+     "scenario": "本期",
+     "value": "564030.9654",
+     "unit": "万元",
+     "display_value": "564,030.97 万元",
+     "note": "估算",
+     "inputs": {
+      "revenue": "325644",
+      "revenue_py": "331613.0346",
+      "revenue_py_full": "570000"
+     }
+    },
+    {
+     "entity": "华宸物业",
+     "metric_key": "revenue_budget_remaining",
+     "metric_label": "全年收入预算还差",
+     "scenario": "本期",
+     "value": "0",
+     "unit": "万元",
+     "display_value": "0.00 万元",
+     "note": "含手填数：全年收入预算、已过月数",
+     "inputs": {
+      "revenue": "325644",
+      "revenue_budget_full": "325644"
+     }
+    },
+    {
+     "entity": "华宸物业",
+     "metric_key": "revenue_budget_monthly",
+     "metric_label": "剩余月份每月需完成收入",
+     "scenario": "本期",
+     "value": "0",
+     "unit": "万元",
+     "display_value": "0.00 万元",
+     "note": "含手填数：已过月数",
+     "inputs": {
+      "months_elapsed": "8",
+      "revenue": "325644",
+      "revenue_budget_full": "325644"
+     }
+    }
+   ],
+   "view": {
+    "goal": "budget",
+    "subject": "华宸物业 · 全年收入预算",
+    "part": "全年收入预算正好完成",
+    "value": "325,644.00 万元",
+    "beside": [
+     [
+      "全年收入预算（手填）",
+      "325,644.00 万元"
+     ],
+     [
+      "本年累计",
+      "325,644.00 万元"
+     ],
+     [
+      "已完成",
+      "100.00%"
      ],
      [
       "已过月份月均",
