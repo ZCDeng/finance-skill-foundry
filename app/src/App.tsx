@@ -595,6 +595,47 @@ export function App() {
     }
   }, [buildReference, showSampleTask]);
 
+  /**
+   * 60 秒看看它能做什么 (electron/firstLook.ts): offered on 总览 until it is seen through or closed. 开始看 builds the
+   * 参考结果 if it is not there yet and opens its board, where three hints walk the minute.
+   */
+  const [firstLookOffered, setFirstLookOffered] = useState(false);
+  const [firstLookBusy, setFirstLookBusy] = useState(false);
+  const [firstLookError, setFirstLookError] = useState('');
+  const [touring, setTouring] = useState<string | null>(null);
+  useEffect(() => {
+    if (!api?.firstLookGet || !api.taskSampleReference) return;
+    let live = true;
+    void api.firstLookGet().then((answer) => { if (live && answer.ok && !answer.value.done) setFirstLookOffered(true); }, () => undefined);
+    return () => { live = false; };
+  }, [api]);
+  const endFirstLook = useCallback(() => {
+    setFirstLookOffered(false);
+    setFirstLookError('');
+    setTouring(null);
+    if (!api?.firstLookDone) return;
+    // A flag that did not reach the disk would bring the offer back next launch unasked, so it comes back now, saying why.
+    void api.firstLookDone().then((answer) => (answer.ok ? '' : answer.message), (failure: unknown) => (failure instanceof Error ? failure.message : String(failure)))
+      .then((message) => {
+        if (!message) return;
+        setFirstLookError(`没能记下你已看过，下次打开还会出现：${message}`);
+        setFirstLookOffered(true);
+      });
+  }, [api]);
+  const startFirstLook = useCallback(() => {
+    const selection = selectionRevision.current;
+    setFirstLookBusy(true);
+    setFirstLookError('');
+    void buildReference(false).then((id) => {
+      if (!id) { setFirstLookError(referenceFailure.current || '参考结果没有生成出来，请稍后再试。'); return; }
+      // The build can take a minute: a manager who went elsewhere meanwhile stays there, and the offer waits on 总览.
+      if (selectionRevision.current !== selection || screenRef.current !== 'overview') return;
+      setTouring(id);
+      setScreen('analysis');
+      showSampleTask(id, 'dashboard');
+    }).finally(() => setFirstLookBusy(false));
+  }, [buildReference, showSampleTask]);
+
   /** The September practice task for 跟着做's last step, opened on 资料 where its structures wait. */
   const openNextMonthTask = useCallback(async () => {
     if (!api?.taskSampleNext) throw new Error('这个版本还不能创建 9 月练习任务。');
@@ -1109,6 +1150,7 @@ export function App() {
             <Analysis active={inWorkspace} embedded section={analysisSection} onSectionChange={setAnalysisSection}
               task={bound} tasks={tasks} draftRequest={draftRequest} onPick={pickAnalysisTask} onNew={newAnalysisTask} onChat={chatAnalysis}
               onOpenTarget={bound ? (target) => openFromOverview(bound, target as OverviewTarget | 'close') : undefined}
+              tour={touring && bound?.id === touring ? { onEnd: endFirstLook } : undefined}
               onLocatorPreview={api.sourceLocatorOpen ? (spec) => {
                 // The locator answer carries no origin. Where the viewer is
                 // comes from `previewStatus`, as it does for every other preview.
@@ -1154,7 +1196,8 @@ export function App() {
           onSample={api?.taskSample ? () => { setScreen('analysis'); void openSampleTask().catch((failure: unknown) => setProblem(failure instanceof Error ? failure.message : String(failure))); } : undefined}
           onChecklist={() => { setScreen('analysis'); openGuideAt('data-checklist'); }}
           onGuide={() => { setScreen('analysis'); openGuideAt('first-run'); }}
-          onLibrary={() => setScreen('deliverables')} />
+          onLibrary={() => setScreen('deliverables')}
+          firstLook={firstLookOffered ? { busy: firstLookBusy, error: firstLookError, onStart: startFirstLook, onDismiss: endFirstLook } : undefined} />
       ) : null}
       {screen === 'formulator' ? <Formulator running={formulator} /> : null}
       {screen === 'deliverables' ? (

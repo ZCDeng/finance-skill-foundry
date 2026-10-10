@@ -415,6 +415,9 @@ export interface Bridge {
   appearanceSet?(appearance: Appearance): Promise<Answer<{ appearance: Appearance }>>;
   /** 汇报模式: the window full screen, or back; `was` says whether it already was. */
   windowFullScreen?(on: boolean): Promise<Answer<{ was: boolean }>>;
+  /** 60 秒看看它能做什么: whether it was seen through or closed. Absent in a build without it; 总览 then does not offer it. */
+  firstLookGet?(): Promise<Answer<{ done: boolean }>>;
+  firstLookDone?(): Promise<Answer<{ done: boolean }>>;
   tasks(lifecycle?: TaskLifecycleFilter): Promise<Answer<TaskRow[]>>;
   task(id: string): Promise<Answer<TaskDetail>>;
   /** 成果库: old-flow versions, the newest draft of each revision chain and every filed export, newest first. */

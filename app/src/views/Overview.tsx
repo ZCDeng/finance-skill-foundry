@@ -1,5 +1,5 @@
 import { useId, type ReactNode } from 'react';
-import { ArrowRight, BookOpen, CircleAlert, CircleCheck, CircleDashed, CircleSlash, ClipboardList, FlaskConical, MessageSquarePlus, RefreshCw, Repeat } from 'lucide-react';
+import { ArrowRight, BookOpen, CircleAlert, CircleCheck, CircleDashed, CircleSlash, ClipboardList, FlaskConical, MessageSquarePlus, RefreshCw, Repeat, Sparkles } from 'lucide-react';
 
 import { SNAPSHOT_FORMAT_WORDS, type GalleryRow, type Overview as OverviewData, type OverviewTask, type OverviewTodo, type TaskRow, when } from '../bridge.js';
 import { Button } from '../components/ui/button.js';
@@ -69,6 +69,17 @@ export interface OverviewProps {
   onChecklist(): void;
   onGuide(): void;
   onLibrary(): void;
+  /** 60 秒看看它能做什么, while it has been neither seen through nor closed. */
+  firstLook?: FirstLookOffer;
+}
+
+/** The first look's offer on 总览: start it over the sample's 参考结果 board, or say no once and for all. */
+export interface FirstLookOffer {
+  /** The 参考结果 is being built: the first time takes most of a minute. */
+  busy: boolean;
+  error?: string;
+  onStart(): void;
+  onDismiss(): void;
 }
 
 /**
@@ -79,7 +90,7 @@ export interface OverviewProps {
  * adds figures across tasks: two tasks' periods, organisations and 口径 differ, and a total of
  * them would be a number no workbook holds.
  */
-export function Overview({ data, loading, error, fresh, recent, onRefresh, onOpen, onOpenClose, onNewQuestion, onSample, onChecklist, onGuide, onLibrary }: OverviewProps) {
+export function Overview({ data, loading, error, fresh, recent, onRefresh, onOpen, onOpenClose, onNewQuestion, onSample, onChecklist, onGuide, onLibrary, firstLook }: OverviewProps) {
   const rows = data?.tasks ?? [];
   // No active task is not the same as none at all: everything may be archived. Only the second is a first run.
   const empty = data !== null && rows.length === 0 && fresh;
@@ -96,6 +107,7 @@ export function Overview({ data, loading, error, fresh, recent, onRefresh, onOpe
         </Button>
       </div>
       {error ? <p role="alert" className="analysis-message analysis-message--error">{error}</p> : null}
+      {firstLook ? <FirstLook offer={firstLook} /> : null}
       <Recomputed rows={rows} onOpen={onOpen} />
       <Start empty={empty} idle={idle} tasks={rows.map((row) => row.task)} onOpen={onOpen} onNewQuestion={onNewQuestion} onSample={onSample} onChecklist={onChecklist} onGuide={onGuide} />
       {data === null && loading ? <Loading label="正在读取各任务的月结状态…"><SkeletonRows rows={4} /></Loading> : null}
@@ -106,6 +118,25 @@ export function Overview({ data, loading, error, fresh, recent, onRefresh, onOpe
       {recent.length ? <Recent rows={recent} onLibrary={onLibrary} /> : null}
     </div>
   );
+}
+
+/**
+ * 60 秒看看它能做什么: the sample's 参考结果 board with three things pointed out on it, for the first minute. The
+ * 跟着做 steps are for learning it properly; this is the minute that shows why.
+ */
+function FirstLook({ offer }: { offer: FirstLookOffer }) {
+  const id = useId();
+  return <Section id={`${id}-first-look`} title="60 秒看看它能做什么" className="fnd-overview__first-look"
+    note="打开示例的参考结果看板，看三处：点一个数看来源，拖一下收缴率，导出一页纸。">
+    <div className="fnd-overview__actions">
+      <Button type="button" disabled={offer.busy} aria-busy={offer.busy || undefined} onClick={offer.onStart}>
+        <Sparkles size={15} strokeWidth={1.5} aria-hidden />{offer.busy ? '正在准备参考结果…' : '开始看'}
+      </Button>
+      <Button type="button" variant="ghost" disabled={offer.busy} onClick={offer.onDismiss}>不用了</Button>
+      {offer.busy ? <span className="fnd-muted fnd-overview__note">第一次要生成参考结果，大约一分钟。</span> : null}
+    </div>
+    {offer.error ? <p role="alert" className="analysis-message analysis-message--error">{offer.error}</p> : null}
+  </Section>;
 }
 
 /** This month's, by the computer's calendar: the line counts what the app did for the manager, not a close period. */

@@ -54,6 +54,9 @@ export const CHANNELS = {
    */
   appearanceGet: 'appearance:get',
   appearanceSet: 'appearance:set',
+  /** 60 秒看看它能做什么: whether 总览 still offers it, and the one way to stop it. See `firstLook.ts`. */
+  firstLookGet: 'first-look:get',
+  firstLookDone: 'first-look:done',
   tasks: 'foundry:tasks',
   task: 'foundry:task',
   gallery: 'foundry:gallery',

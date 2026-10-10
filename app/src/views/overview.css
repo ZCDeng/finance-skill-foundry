@@ -12,6 +12,9 @@
 /* With no task at all the four ways in are the page, so they get room and a frame. */
 .fnd-overview__start--first { padding: 24px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-surface); box-shadow: var(--fnd-shadow-sm); }
 .fnd-overview__start--first .fnd-overview__h { font-size: var(--fnd-size-lead); }
+/* 60 秒看看它能做什么: offered once, on a card like the lists below it. */
+.fnd-overview__first-look { padding: 20px 24px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container);
+  background: var(--fnd-surface); box-shadow: var(--fnd-shadow-sm); }
 
 .fnd-overview__grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
 /* The page is the canvas; each list sits on a card above it. 开始 stays on the canvas: it is a row of ways in, not content. */

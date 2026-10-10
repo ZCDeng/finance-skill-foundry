@@ -169,7 +169,20 @@ export const EXPORTS: [SnapshotFormat, string, string][] = [
   ['pdf', 'PDF', '一页 A4 横版'], ['pptx', 'PPT', '一页幻灯片'], ['xlsx', 'Excel', '数字和来源'],
 ];
 
-export function DashboardView({ task, state, runs, analyses, datasets, superseded = [], readOnly, onOpenResult }: {
+/** 60 秒看看它能做什么 on this board: three hints, and what to do when the manager has seen them or closed them. */
+export type BoardTour = { onEnd(): void };
+
+type TourStep = 'source' | 'scenario' | 'export';
+const TOUR: { key: TourStep; title: string; text: string }[] = [
+  { key: 'source', title: '点一个数看来源',
+    text: '点框出来的那张卡上的数字：它读的是哪份资料、哪一格，用的什么公式，都写在里面。开会时有人问「这个数哪来的」，点开就是答案。' },
+  { key: 'scenario', title: '拖一下收缴率',
+    text: '在「回款情景」卡上改一改假设的收缴率，距生死线、现金经营利润和一年回款跟着变。它是情景，不是实际数，不进月结和文稿。' },
+  { key: 'export', title: '导出一页纸',
+    text: '已认可的卡可以导出成一页 PDF 或 PPT，每个数都带来源编号。开会时也可以点「汇报模式」，一张一张讲。' },
+];
+
+export function DashboardView({ task, state, runs, analyses, datasets, superseded = [], readOnly, tour, onOpenResult }: {
   /** The task the board is on, as the page names it; without it the board has no export. */
   task?: SnapshotTask & { id: string };
   state: DashboardState;
@@ -178,9 +191,13 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
   datasets: DatasetSnapshot[];
   superseded?: string[];
   readOnly: boolean;
+  /** 60 秒看看它能做什么 is walking this board. */
+  tour?: BoardTour;
   onOpenResult?(run: AnalysisRun): void;
 }) {
   const { dashboard, loaded, load, change, news, dismiss } = state;
+  const [tourAt, setTourAt] = useState(0);
+  const root = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState('');
   const [error, setError] = useState('');
@@ -208,6 +225,17 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
   const laidOut = [...board.filter((card) => card.kind === 'figure'), ...board.filter((card) => card.kind !== 'figure')];
   const shown = [...laidOut.filter((card) => card.state === 'accepted' && !isWhatIf(card.kind)), ...laidOut.filter((card) => isWhatIf(card.kind))];
   const canExport = Boolean(task && bridge()?.dashboardExport);
+  // What each hint frames: the first figure that opens to its source, the 回款情景 card, and 导出一页纸 (or 汇报模式
+  // where this build cannot export).
+  const step = tour ? TOUR[tourAt].key : null;
+  const lit = {
+    source: board.find((card) => card.kind === 'figure' && runOf(card))?.id,
+    scenario: board.find((card) => card.kind === 'scenario' && runOf(card))?.id,
+  };
+  const spotlit = (card: DashboardCard) => (step === 'source' || step === 'scenario') && lit[step] === card.id;
+  useEffect(() => {
+    if (step) root.current?.querySelector('[data-spotlight]')?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+  }, [step, loaded]);
   const exportAs = (format: SnapshotFormat) => {
     const api = bridge();
     if (!task || !api?.dashboardExport || !dashboard) return;
@@ -243,7 +271,8 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
   if (!loaded) return <p role="status" className="analysis-note">正在读取看板…</p>;
   const figures = board.filter((card) => card.kind === 'figure');
   const charts = board.filter((card) => card.kind !== 'figure');
-  return <div className="dashboard">
+  return <div className="dashboard" ref={root}>
+    {tour ? <TourHint at={tourAt} onStep={setTourAt} onEnd={tour.onEnd} /> : null}
     <div className="analysis-section-heading"><h3>看板</h3></div>
     <p className="analysis-note">每张卡都读自这个任务已经算好的结果，点数字能看到它从哪来。看过没问题就点「认可」。</p>
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
@@ -258,12 +287,13 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
           {stale.length ? <span className="dashboard__stale">{`资料已更新，${stale.length} 张待重算`}</span> : null}</p>
         {(!readOnly || shown.length > 0) && <div className="dashboard__tools">
           <Button type="button" variant="outline" disabled={busy || !shown.length} title={shown.length ? undefined : '先认可要汇报的卡'}
+            data-spotlight={step === 'export' && !(!readOnly && canExport) ? '' : undefined}
             onClick={() => setPresenting(true)}><Presentation size={14} strokeWidth={1.5} aria-hidden />汇报模式</Button>
           {!readOnly && waiting.length > 0 && <Button type="button" variant="outline" disabled={busy} onClick={() => setConfirmAll(true)}>
             <Check size={14} strokeWidth={1.5} aria-hidden />{`全部认可（${waiting.length} 张）`}</Button>}
           {!readOnly && movable.length > 0 && <Button type="button" variant="outline" disabled={busy} onClick={moveAll}>
             <RefreshCw size={14} strokeWidth={1.5} aria-hidden />{`换成新结果（${movable.length} 张）`}</Button>}
-          {!readOnly && canExport && <ExportMenu accepted={accepted} left={board.length - accepted} busy={busy} onExport={exportAs} />}
+          {!readOnly && canExport && <ExportMenu accepted={accepted} left={board.length - accepted} busy={busy} onExport={exportAs} spotlight={step === 'export'} />}
         </div>}
       </div>
       {proposed.length > 0 && <section className="dashboard__proposed" aria-labelledby="dashboard-proposed">
@@ -275,10 +305,10 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
           .map((card) => <BoardCard key={card.id} card={card} run={runOf(card)} contextOf={contextOf} actions={actions} />)}</div>}
       </section>}
       {figures.length > 0 && <section aria-label="关键数字" className="dashboard__figures">
-        {figures.map((card) => <BoardCard key={card.id} card={card} run={runOf(card)} contextOf={contextOf} actions={actions} newer={movable.find((item) => item.card.id === card.id)?.next} />)}
+        {figures.map((card) => <BoardCard key={card.id} card={card} run={runOf(card)} contextOf={contextOf} actions={actions} newer={movable.find((item) => item.card.id === card.id)?.next} spotlight={spotlit(card)} />)}
       </section>}
       {charts.length > 0 && <section aria-label="图" className="dashboard__charts">
-        {charts.map((card) => <BoardCard key={card.id} card={card} run={runOf(card)} contextOf={contextOf} actions={actions} newer={movable.find((item) => item.card.id === card.id)?.next} />)}
+        {charts.map((card) => <BoardCard key={card.id} card={card} run={runOf(card)} contextOf={contextOf} actions={actions} newer={movable.find((item) => item.card.id === card.id)?.next} spotlight={spotlit(card)} />)}
       </section>}
       {!readOnly && <BoardAsks busy={busy} />}
       {!readOnly && <details className="analysis-details"><DisclosureSummary>从模板添加</DisclosureSummary>
@@ -303,6 +333,24 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
   </div>;
 }
 
+/** One hint of 60 秒看看它能做什么, held at the top of the board while the board scrolls under it. */
+function TourHint({ at, onStep, onEnd }: { at: number; onStep(at: number): void; onEnd(): void }) {
+  const hint = TOUR[at];
+  const last = at === TOUR.length - 1;
+  return <aside className="dashboard-tour" aria-label="60 秒看看它能做什么">
+    <div className="dashboard-tour__head">
+      <p className="dashboard-tour__count">{`${at + 1} / ${TOUR.length}`}</p>
+      <Button type="button" size="sm" variant="ghost" aria-label="关掉，不再提示" onClick={onEnd}><X size={14} strokeWidth={1.5} aria-hidden /></Button>
+    </div>
+    <h4 className="dashboard-tour__title">{hint.title}</h4>
+    <p className="dashboard-tour__text">{hint.text}</p>
+    <div className="dashboard-tour__actions">
+      {at > 0 ? <Button type="button" size="sm" variant="ghost" onClick={() => onStep(at - 1)}>上一步</Button> : null}
+      <Button type="button" size="sm" onClick={() => (last ? onEnd() : onStep(at + 1))}>{last ? '看完了' : '下一步'}</Button>
+    </div>
+  </aside>;
+}
+
 /** What 汇报模式 holds, and what it left off. */
 function presentedSaid(shown: DashboardCard[], left: number) {
   const scenarios = shown.filter((card) => isWhatIf(card.kind)).length;
@@ -314,10 +362,12 @@ function presentedSaid(shown: DashboardCard[], left: number) {
  * 导出一页纸: the accepted cards as one A4 page (PDF, or a slide) or a workbook. What is not accepted stays off it,
  * and the page says so.
  */
-function ExportMenu({ accepted, left, busy, onExport }: { accepted: number; left: number; busy: boolean; onExport(format: SnapshotFormat): void }) {
+function ExportMenu({ accepted, left, busy, onExport, spotlight = false }: {
+  accepted: number; left: number; busy: boolean; onExport(format: SnapshotFormat): void; spotlight?: boolean;
+}) {
   return <DropdownMenu>
     <DropdownMenuTrigger asChild>
-      <Button type="button" variant="outline" disabled={busy || !accepted} title={accepted ? undefined : '先认可要导出的卡'}>
+      <Button type="button" variant="outline" disabled={busy || !accepted} title={accepted ? undefined : '先认可要导出的卡'} data-spotlight={spotlight ? '' : undefined}>
         <Download size={14} strokeWidth={1.5} aria-hidden />导出一页纸</Button>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end" collisionPadding={16}>
@@ -439,8 +489,10 @@ function TemplateChooser({ runs, cards, readOnly, busy, onAdd, compact = false }
     </EmptyContent></Empty>;
 }
 
-function BoardCard({ card, run, contextOf, actions, newer, presenting = false }: {
+function BoardCard({ card, run, contextOf, actions, newer, presenting = false, spotlight = false }: {
   card: DashboardCard; run?: AnalysisRun; contextOf(run: AnalysisRun): FigureSourceContext; actions: CardActions; newer?: AnalysisRun;
+  /** Framed for a hint of 60 秒看看它能做什么. */
+  spotlight?: boolean;
   /** A slide of 汇报模式: the card as it reads now, without what a recompute said or anything to change it. */
   presenting?: boolean;
 }) {
@@ -485,7 +537,7 @@ function BoardCard({ card, run, contextOf, actions, newer, presenting = false }:
       : <p className="analysis-note">这次结果里这一组的利润桥画不出来，可以移除。</p>;
   }
   const stale = run ? runIsStale(contextOf(run)) : false;
-  return <article className={`dashboard-card dashboard-card--${card.kind}${presenting ? ' dashboard-present__card' : ''}`} data-state={card.state} aria-label={card.title}>
+  return <article className={`dashboard-card dashboard-card--${card.kind}${presenting ? ' dashboard-present__card' : ''}`} data-state={card.state} data-spotlight={spotlight ? '' : undefined} aria-label={card.title}>
     <header className="dashboard-card__head">
       <h4 className="dashboard-card__title" title={card.title}>{card.title}</h4>
       <span className="dashboard-card__state" data-state={isWhatIf(card.kind) && card.state !== 'explore' ? 'scenario' : card.state}>{stateWord(card)}</span>
