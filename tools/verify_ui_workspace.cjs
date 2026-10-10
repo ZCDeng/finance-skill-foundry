@@ -280,6 +280,16 @@ const assert = require('node:assert/strict');
     await page.getByRole('tab', { name: /分析结果/ }).click();
     await page.getByRole('table', { name: '业务结果' }).waitFor({ timeout: 30000 });
     checks.push('真实合成资料 metadata/scope_hints 一键采用为分析范围；保存写入 requirements，结果页设置与高级同步，重载后持久化');
+    // 本月三句话 (#166) opens at the top of the task; once folded, the results own the first screen again.
+    const brief = page.locator('details.analysis-brief');
+    assert.equal(await brief.getAttribute('open'), '', '本月三句话 opens expanded at the top of the task');
+    await brief.locator(':scope > summary').click();
+    await brief.locator(':scope > :not(summary)').first().waitFor({ state: 'hidden' });
+    // The fold animates shut; measure once only its summary is left.
+    await page.waitForFunction(() => {
+      const node = document.querySelector('details.analysis-brief'), summary = node?.querySelector(':scope > summary');
+      return node && summary && node.getBoundingClientRect().height - summary.getBoundingClientRect().height < 40;
+    }, null, { timeout: 10000 });
     await capture('results-1440', 1440, 900);
     await capture('results-1280', 1280, 800);
     // The whole 业务结果 table sits inside the visible part of the results pane, unscrolled.
