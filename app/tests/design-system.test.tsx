@@ -2,10 +2,12 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DesignSystem } from '../src/design-system/DesignSystem.js';
 
-afterEach(cleanup);
+// jsdom has no 2D canvas and logs for every call; the page then shows each ratio as "—".
+beforeEach(() => { vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 // jsdom gives import.meta.url an http scheme; the suite runs from app/.
 const APP = process.cwd();
