@@ -284,6 +284,19 @@ export const FINANCE_TOOLS = {
     parent_id: text("可选父图表版本"),
     label: text("图表名称"),
   }, ["run_id"]),
+  dashboard_read: {
+    description: "读本任务看板上的卡（只含本会话能读的运行）。卡不存数字，只记 run_id 和 select：读那次成功运行里 select.match 指的哪几行。state：explore 是助手提议、经理还没钉住；pinned 已在看板上、等经理认可；accepted 经理已认可。kind=scenario 的回款情景卡永远不认可。提议新卡前先读，看板上已有的同样的卡不要再提。只读。",
+    parameters: { type: "object", required: [], properties: {}, additionalProperties: false }, kind: "read", argv: () => ["dashboard-read", "--spec", "{}"],
+  },
+  dashboard_propose: specTool("dashboard-propose", "在看板上提议一张卡，放进看板页「助手提议」，经理点「钉住」才上看板；认可只能经理在界面做。不要说卡已经上了看板或已认可。卡不存数字：读 run_id 那次成功运行里 select.match（列名 → 该列的文字）选中的行，数字和来源都来自那次运行。kind=figure 一个数：match 恰好选中一行，column 是数所在的列（回款健康运行用 value）。kind=rank 排名条：match 选出要排的行，column 是数值列，label 是每条的名字列（回款健康运行用 entity），order 为 asc 或 desc，limit 1–50，可选 reference {value,label} 画参考线（距生死线用 {value:'0',label:'生死线'}）。kind=bridge 利润桥：读 explain_variance 的预算或上期利润桥运行，match 选出含 profit 行的那一组。kind=scenario 回款情景卡：读回款健康运行（finance_scenario_run kind=collection_health），match 写 {entity: 主体名, scenario: '本期'}，经理在卡上拖收缴率看距生死线、现金经营利润和一年回款怎么变；卡上永远标「情景，不是实际数」，不能认可、不进月结和文稿。回款健康运行的行按 entity、metric_key、scenario（本期/上年同期/变动）区分，城市公司明细表的行带 entity_origin=table。「只看海口」「按城市公司拆开」这类说法只改 match 选哪些行，不改口径；要换口径、期间或资料，先按原流程算出新的运行（口径改动仍由经理确认），再用新的 run_id 提议。同一运行、同一种卡、同样的行，看板上已有时会被拒。", {
+    card: { type: "object", required: ["kind", "title", "run_id", "select"], additionalProperties: false, properties: {
+      kind: { type: "string", enum: ["figure", "rank", "bridge", "scenario"] },
+      title: boundedText(60, "卡片标题，经理看得懂的中文，写清看什么", 1),
+      run_id: runId,
+      select: { type: "object", description: "match（列名 → 文字，最多 8 列）；figure 加 column；rank 加 column、label、order、limit、可选 reference" },
+      note: boundedText(200, "一句为什么值得看，可选"),
+    } },
+  }, ["card"]),
   finance_context_save: specTool("finance-context-save", "建立不可变财务口径：bindings 为别名到现有快照 ID；scopes 按别名声明 ledger/organization/period/currency/unit/scenario，值来自资料或经理明确口径，不能猜测。policy.field_map 可映射中文列名。管理科目用 revenue/cost/expense；余额也可分析，缺少凭证时不虚构分录链接。修改科目映射或口径生成新版本。", {
     name: text("财务口径名称"), bindings: { type: "object", additionalProperties: { type: "string" } },
     scopes: { type: "object", additionalProperties: { type: "object" } }, policies: { type: "object", additionalProperties: { type: "object" } },

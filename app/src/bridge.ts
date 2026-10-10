@@ -240,6 +240,8 @@ export interface OverviewRecomputed {
   changed: boolean;
   change: string;
   state: 'pinned' | 'accepted';
+  /** A scenario card (回款情景) is never accepted; it is only looked at. */
+  kind?: 'figure' | 'rank' | 'bridge' | 'scenario';
   carried_from: string | null;
 }
 

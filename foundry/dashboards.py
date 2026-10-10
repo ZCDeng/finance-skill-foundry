@@ -9,6 +9,10 @@ Three kinds:
 - ``rank``: one column across the rows ``select.match`` names, each labelled by ``select.label``, sorted by
   ``select.order`` and cut at ``select.limit``.
 - ``bridge``: the profit bridge of the variance rows ``select.match`` names.
+- ``scenario`` (回款情景): one entity's 本期 lines of a collection-health run, which ``select.match`` names. The card
+  moves the collection rate by hand and shows what follows (距生死线, cash operating profit, a year's collections).
+  What it shows past the run's own lines is a what-if, never a figure of the run, so the card is never accepted
+  and never goes into the close or a report.
 
 Three states (notes/claude-dashboards-borrowing-plan-20261010.md, 八):
 
@@ -29,7 +33,7 @@ from typing import Any
 from foundry.errors import FoundryError
 from foundry.task import now_iso
 
-KINDS = frozenset({"figure", "rank", "bridge"})
+KINDS = frozenset({"figure", "rank", "bridge", "scenario"})
 STATES = frozenset({"explore", "pinned", "accepted"})
 TEMPLATES = frozenset({"operating", "collection", "city"})
 ORDERS = frozenset({"asc", "desc"})
@@ -44,6 +48,8 @@ MAX_RANK = 50
 
 # The bridge reads the profit lines of a variance run (foundry/finance_variance.py).
 BRIDGE_METHOD = "revenue_minus_cost_minus_expense"
+# The lines a scenario card moves the collection rate against (foundry/collection_metrics.py).
+SCENARIO_LINES = ("gross_margin", "expense_ratio", "break_even_collection", "collection_gap")
 
 
 def _text(value: Any, label: str, *, maximum: int, required: bool = True) -> str | None:
@@ -132,6 +138,15 @@ def normalize_select(kind: str, select: Any, run: dict) -> dict:
             out["reference"] = {"value": str(reference["value"]),
                                 "label": _text(reference.get("label"), "reference label", maximum=MAX_TITLE)}
         return out
+    if kind == "scenario":
+        if result.get("scenario_kind") != "collection_health":
+            raise FoundryError("a scenario card reads a collection health result")
+        if len({row.get("entity") for _, row in found}) != 1:
+            raise FoundryError("a scenario card reads the lines of one entity")
+        for key in SCENARIO_LINES:
+            if sum(1 for _, row in found if row.get("metric_key") == key) != 1:
+                raise FoundryError(f"a scenario card needs one {key} line of its entity; name the 本期 lines")
+        return {"match": match}
     if result.get("method") != BRIDGE_METHOD:
         raise FoundryError("a bridge card reads a budget or prior-period variance result")
     if not any(row.get("metric") == "profit" for _, row in found):
@@ -150,10 +165,12 @@ def normalize_card(card: Any, *, run_of, previous: dict | None, proposer: str, s
         raise FoundryError("dashboard card must be an object")
     kind = card.get("kind")
     if kind not in KINDS:
-        raise FoundryError("dashboard card kind must be figure, rank or bridge")
+        raise FoundryError("dashboard card kind must be figure, rank, bridge or scenario")
     state = state or card.get("state", "pinned")
     if state not in STATES:
         raise FoundryError("dashboard card state must be explore, pinned or accepted")
+    if kind == "scenario" and state == "accepted":
+        raise FoundryError("a scenario card is never accepted; what it shows is a what-if, not a figure of the run")
     run = run_of(card.get("run_id"))
     if run.get("execution_status") not in {"succeeded", "success"}:
         raise FoundryError("a dashboard card reads a run that succeeded")

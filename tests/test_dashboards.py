@@ -204,6 +204,40 @@ def test_two_saves_on_one_board_never_both_build_on_the_same_version(tmp_path, m
     assert states == {"集团距生死线": "accepted", "距生死线（从低到高）": "explore"}
 
 
+def _scenario(run: dict, entity: str = "集团") -> dict:
+    return {"kind": "scenario", "title": "回款情景", "run_id": run["id"], "template": "collection",
+            "select": {"match": {"entity": entity, "scenario": "本期"}}}
+
+
+def test_a_scenario_card_reads_one_entitys_lines_and_is_never_accepted(tmp_path):
+    manager, run, bindings = _board(tmp_path)
+    board = manager.dashboard_save({"parent_id": None, "cards": [_scenario(run), _scenario(run, "海口")]})
+    assert [card["select"] for card in board["cards"]] == [{"match": {"entity": "集团", "scenario": "本期"}},
+                                                         {"match": {"entity": "海口", "scenario": "本期"}}]
+    # What it shows past the run's own lines is a what-if: it never goes into the close as an accepted figure.
+    with pytest.raises(FoundryError, match="never accepted"):
+        manager.dashboard_save({"parent_id": board["id"], "cards": [{**board["cards"][0], "state": "accepted"}]})
+    scenario = _scenario(run)
+    with pytest.raises(FoundryError, match="name the 本期 lines"):
+        manager.dashboard_save({"parent_id": board["id"], "cards": [{**scenario, "select": {"match": {"entity": "集团"}}}]})
+    with pytest.raises(FoundryError, match="one entity"):
+        manager.dashboard_save({"parent_id": board["id"], "cards": [{**scenario, "select": {"match": {"scenario": "本期"}}}]})
+
+    # The assistant proposes one like any card; the session's answer shows only the cards on runs it may read.
+    assistant = FinanceStore(manager.task, snapshot_ids=set(bindings.values()), actor="assistant")
+    empty = manager.dashboard_save({"parent_id": board["id"], "cards": []})
+    proposed = assistant.dashboard_propose({"card": {**scenario, "state": "accepted"}})
+    assert proposed["parent_id"] == empty["id"]
+    assert [(card["kind"], card["state"], card["proposed_by"]) for card in proposed["cards"]] == [("scenario", "explore", "assistant")]
+
+    # Run again on newer files, the card is judged by its entity's 距生死线.
+    from foundry.dashboard_recompute import change, shown
+
+    stands = shown(proposed["cards"][0], run)
+    assert stands["unit"] == "百分点" and stands["level"] == "red" and stands["display"].endswith("个百分点")
+    assert change(proposed["cards"][0], stands, {**stands, "value": "0.5", "level": "yellow"}) == (True, "级别 红 → 黄")
+
+
 def test_the_app_arranges_the_board_as_the_manager_and_an_unstamped_call_cannot(tmp_path, capsys):
     from foundry.cli import main
 

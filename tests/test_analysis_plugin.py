@@ -398,6 +398,8 @@ const inputs = {
  'list_finance_context': {},
  'finance_readiness': {},
  'chart_deliverable_save': {spec: {run_id: 'run-1'}},
+ 'dashboard_read': {},
+ 'dashboard_propose': {spec: {card: {kind: 'scenario', title: '回款情景', run_id: 'run-1', select: {match: {entity: '集团', scenario: '本期'}}}}},
  'finance_context_save': {spec: {bindings: {actual: 'snapshot-1'}, scopes: {actual: {ledger: 'L1', currency: 'CNY', unit: '元'}}}},
  'finance_map_save': {spec: {rows: [{account_code: '001', management_account: 'revenue'}]}},
  'run_metric': {spec: {context_id: 'context-1', metric: {kind: 'management_pnl'}}},

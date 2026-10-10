@@ -64,17 +64,21 @@ describe('总览', () => {
         ({ card_id: title, title, at, changed, change, state: 'pinned' as const, carried_from });
       const withBoards: OverviewData = { ...data, tasks: [
         { ...data.tasks[0], dashboard: { recomputed: [card('集团距生死线', '2026-10-10T09:00:00Z', false, '+0.28 个百分点', '华东 7 月月结'),
-          card('风险雷达', '2026-10-10T09:00:00Z', true, '前三名变了')] } },
+          card('风险雷达', '2026-10-10T09:00:00Z', true, '前三名变了'),
+          { ...card('回款情景', '2026-10-10T09:00:00Z', false, '+0.28 个百分点'), kind: 'scenario' as const }] } },
         { ...data.tasks[1], dashboard: { recomputed: [card('收入', '2026-09-28T09:00:00Z', true, '变动 +20.0%')] } },
       ] };
       render(<Overview {...props} data={withBoards} />);
       // September's recompute is last month's news.
-      const line = screen.getByText('本月已为你自动重算 2 张卡、发现 1 处变化');
+      const line = screen.getByText('本月已为你自动重算 3 张卡、发现 1 处变化');
       fireEvent.click(line);
       const listed = line.closest('details')!;
       const rows = within(listed).getAllByRole('listitem').map((row) => row.textContent);
       expect(rows[0]).toContain('「风险雷达」：前三名变了');
       expect(rows[1]).toContain('「集团距生死线」：+0.28 个百分点');
+      // A scenario card is never accepted: it is only looked at.
+      expect(within(listed).getByRole('button', { name: /去看看：华东 8 月月结，回款情景/ })).toBeTruthy();
+      expect(within(listed).getByRole('button', { name: /去认可：华东 8 月月结，集团距生死线/ })).toBeTruthy();
       fireEvent.click(within(listed).getByRole('button', { name: /去看看：华东 8 月月结，风险雷达/ }));
       expect(props.onOpen).toHaveBeenCalledWith(august, 'dashboard');
     } finally {

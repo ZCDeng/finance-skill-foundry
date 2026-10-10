@@ -37,6 +37,8 @@
   color: var(--fnd-muted); border: 1px solid var(--fnd-line); }
 .dashboard-card__state[data-state='pinned'] { color: var(--fnd-ink); border-color: transparent; background: var(--fnd-level-watch-fill); }
 .dashboard-card__state[data-state='accepted'] { color: var(--fnd-level-ok); border-color: currentColor; }
+/* A what-if is never accepted: it is labelled for what it is, in the scenario's own quiet outline. */
+.dashboard-card__state[data-state='scenario'] { color: var(--fnd-ink); border-style: dashed; border-color: var(--fnd-line-hover); }
 
 .dashboard-card__note { margin: 0; font-size: var(--fnd-size-small); color: var(--fnd-muted); overflow-wrap: anywhere; }
 .dashboard-card__subject { margin: 0; font-size: var(--fnd-size-small); color: var(--fnd-muted); overflow-wrap: anywhere; }
@@ -75,4 +77,18 @@
 .dashboard__templates > li > div { display: grid; gap: 4px; min-width: 0; flex: 1 1 240px; }
 .dashboard__templates .analysis-note { margin: 0; }
 .dashboard__empty .dashboard__templates { width: min(100%, 640px); }
+
+/* 回款情景: the what-if flag heads the card on every view, so a moved figure is never read as the run's. */
+.dashboard-scenario { display: grid; gap: 8px; min-width: 0; }
+.dashboard-scenario__flag { justify-self: start; margin: 0; padding: 0 8px; border-radius: var(--fnd-radius-pill);
+  background: var(--fnd-level-watch-fill); color: var(--fnd-ink); font-size: var(--fnd-size-label); line-height: 20px; }
+.dashboard-scenario .dashboard-card__beside dd { display: inline-flex; align-items: baseline; justify-content: flex-end; flex-wrap: wrap; gap: 0 4px; }
+.dashboard-scenario .dashboard-card__beside dd .analysis-health-level { margin-left: 4px; }
+.dashboard-scenario__reset { justify-self: start; }
+.dashboard-scenario__base { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 4px 12px; margin: 0; }
+.dashboard-scenario__base > div { display: grid; gap: 0; min-width: 0; }
+.dashboard-scenario__base dt { font-size: var(--fnd-size-label); color: var(--fnd-muted); }
+.dashboard-scenario__base dd { margin: 0; font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.dashboard-scenario > .fnd-chart__caption { margin: 0; }
+.dashboard__asks { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0; }
 }

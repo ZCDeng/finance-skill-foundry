@@ -5,6 +5,8 @@ import type { AnalysisRun, Bridge } from '../src/bridge.js';
 import { DashboardView, useDashboard } from '../src/views/analysis/Dashboard.js';
 import { cardSignature, DashboardPinContext, figureDraft, matchingRows, splitDisplay, type CardDraft, type Dashboard, type DashboardCard } from '../src/views/analysis/dashboard.js';
 import { newerRun, TEMPLATES } from '../src/views/analysis/dashboardTemplates.js';
+import { scenarioAt, scenarioBase } from '../src/views/analysis/dashboardScenario.js';
+import { ASK_EVENT, ASK_PROMPTS } from '../src/views/guide/ask.js';
 import { BusinessResultView } from '../src/views/analysis/BusinessResultView.js';
 import type { FigureSourceContext } from '../src/views/analysis/figureSource.js';
 import fixture from './fixtures/collection-health-run.json';
@@ -143,10 +145,11 @@ describe('the board', () => {
     await view();
     expect(screen.getByRole('heading', { name: '还没有看板' })).toBeTruthy();
     const row = screen.getByText('回款健康').closest('li')!;
-    fireEvent.click(within(row).getByRole('button', { name: /添加 4 张卡/ }));
-    await waitFor(() => expect(backend.board()?.cards).toHaveLength(4));
+    fireEvent.click(within(row).getByRole('button', { name: /添加 5 张卡/ }));
+    await waitFor(() => expect(backend.board()?.cards).toHaveLength(5));
     expect(backend.board()!.cards.every((row) => row.state === 'pinned')).toBe(true);
-    expect(await screen.findByText('共 4 张 · 已认可 0 张 · 待认可 4 张')).toBeTruthy();
+    // The 回款情景 card is a what-if: on the board, never waiting to be accepted.
+    expect(await screen.findByText('共 5 张 · 已认可 0 张 · 待认可 4 张 · 情景 1 张')).toBeTruthy();
     // A figure card opens its source like the result page does.
     const gap = screen.getByRole('article', { name: '距生死线（本年账单收缴率）' });
     expect(within(gap).getByRole('button', { name: /查看来源/ })).toBeTruthy();
@@ -293,5 +296,77 @@ describe('the board on newer files and from last month', () => {
     const gap = screen.getByRole('article', { name: '距生死线（本年账单收缴率）' });
     expect(within(gap).getByText('按 2026 年 9 月的资料重算')).toBeTruthy();
     expect(financeCall.mock.calls.filter(([, command]) => command === 'dashboard-carry')).toHaveLength(2);
+  });
+});
+
+describe('the 回款情景 card and asking the assistant for cards', () => {
+  // The group's lines with the last twelve months' revenue the cash lines are counted over.
+  const rows = [...(health.result!.rows as Record<string, unknown>[]), {
+    entity: '集团', entity_origin: 'declared', metric_key: 'ttm_revenue', metric_label: '近12个月营业收入', scenario: '本期', value: '10000',
+    unit: '万元', display_value: '10,000.00 万元', level: null, level_label: null, estimate: false, formula: '近12个月营业收入', note: '',
+  }];
+  const run = { ...health, id: 's'.repeat(32), result: { ...health.result!, rows, params: { vat_factor: '1.06', gap_yellow_below: '0.03' } } } as AnalysisRun;
+  const match = { entity: '集团', scenario: '本期' };
+
+  it('works out the gap, a year\'s cash operating profit and collections from the run\'s own lines', () => {
+    const base = scenarioBase(run, match)!;
+    // The rate the run's gap was taken at: 生死线 91.14% less 3.22 points.
+    expect(base.current).toBeCloseTo(87.9185, 4);
+    const at = scenarioAt(base, 92);
+    expect(at.gap).toBeCloseTo(0.8574, 4);
+    expect(at.level).toBe('yellow');
+    expect(at.profit).toBeCloseTo(85.74, 2);
+    expect(at.collected).toBeCloseTo(((92 - base.current) / 100) * 10000 * 1.06, 6);
+    expect(scenarioAt(base, base.current).collected).toBeCloseTo(0, 9);
+    // One entity's lines or none: the whole table, or a run of another kind, carries no scenario.
+    expect(scenarioBase(run, { scenario: '本期' })).toBeNull();
+    expect(scenarioBase(variance, {})).toBeNull();
+  });
+
+  it('moves the rate by hand, flags itself as a what-if and is never offered for acceptance', async () => {
+    const scenario = template('collection').cards([run]).find((row) => row.kind === 'scenario')!;
+    expect(scenario.select).toEqual({ match });
+    boardBackend([card({ id: 's1', kind: 'scenario', title: scenario.title, run_id: run.id, select: scenario.select })]);
+    function Board() {
+      const state = useDashboard('t');
+      return <DashboardView state={state} runs={[run]} analyses={[]} datasets={[]} readOnly={false} />;
+    }
+    render(<Board />);
+    const article = await screen.findByRole('article', { name: '回款情景：收缴率变了会怎样' });
+    expect(within(article).getByText('情景，不是实际数')).toBeTruthy();
+    expect(within(article).getByText('情景')).toBeTruthy();
+    expect(within(article).queryByRole('button', { name: '认可' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /全部认可/ })).toBeNull();
+    expect(screen.getByText('共 1 张 · 已认可 0 张 · 待认可 0 张 · 情景 1 张')).toBeTruthy();
+    // At the run's own rate the card reads as the run does.
+    const rate = within(article).getByRole('textbox', { name: '假设收缴率' }) as HTMLInputElement;
+    expect(rate.value).toBe('87.92');
+    expect(within(article).getByText('低于生死线')).toBeTruthy();
+    fireEvent.focus(rate);
+    fireEvent.change(rate, { target: { value: '92' } });
+    expect(within(article).getByText('+0.86 个百分点')).toBeTruthy();
+    expect(within(article).getByText('贴近生死线')).toBeTruthy();
+    expect(within(article).getByText('86 万元')).toBeTruthy();
+    expect(within(article).getByText('+433 万元')).toBeTruthy();
+    // The run's own lines still open to their source; back at the run's rate, nothing is moved.
+    expect(within(article).getAllByRole('button', { name: /查看来源/ }).length).toBeGreaterThanOrEqual(3);
+    fireEvent.click(within(article).getByRole('button', { name: '回到这次计算的收缴率' }));
+    expect(within(article).getByText('低于生死线')).toBeTruthy();
+  });
+
+  it('puts a question for the assistant into the conversation, unsent', async () => {
+    boardBackend([card({})]);
+    const heard = vi.fn();
+    const listen = (event: Event) => heard((event as CustomEvent).detail);
+    window.addEventListener(ASK_EVENT, listen);
+    function Board() {
+      const state = useDashboard('t');
+      return <DashboardView state={state} runs={[health]} analyses={[]} datasets={[]} readOnly={false} />;
+    }
+    render(<Board />);
+    fireEvent.click(await screen.findByRole('button', { name: '加一张回款情景卡' }));
+    expect(heard).toHaveBeenCalledWith(ASK_PROMPTS['collection-scenario']);
+    expect(screen.getByRole('button', { name: '提议几张卡' })).toBeTruthy();
+    window.removeEventListener(ASK_EVENT, listen);
   });
 });

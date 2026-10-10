@@ -161,6 +161,8 @@ const RULES: Rule[] = [
   [/a figure card must name exactly one row/i, '这个数在结果里对不上唯一的一行，没有钉上。'],
   [/a rank card needs at least two rows/i, '这次结果里能排名的不到两行，没有加上这张卡。'],
   [/a dashboard card reads a run that succeeded/i, '这次计算没有成功，不能放到看板上。'],
+  [/a scenario card is never accepted/i, '回款情景卡是假设，不用认可，也不进月结和文稿。'],
+  [/a scenario card (reads a collection health result|reads the lines of one entity|needs one)/i, '回款情景卡要读一个主体本期的回款健康结果（毛利率、期间费用率和距生死线），这次结果里凑不齐。'],
   // Data files.
   [/unsupported format \.xls\b/i, '这是老格式的 Excel（.xls），暂时不能直接读取。请在 Excel 里打开它，「文件 › 另存为」选「Excel 工作簿（.xlsx）」，再加入另存的那份。原文件不用改动。'],
   [/unsupported format \.(\w+)/i, (match) => `暂不支持 .${match[1]} 文件。可以加入的格式：Excel（.xlsx）、CSV、JSON、Markdown 和纯文本。`],

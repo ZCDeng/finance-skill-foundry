@@ -389,6 +389,11 @@ def shown(card: dict, run: dict) -> dict:
         rate = "fraction" if select.get("column") in FRACTION_COLUMNS else "points" if row.get("unit") in POINT_UNITS else None
         return {"value": None if value is None else str(value), "display": None if display is None else str(display),
                 "level": row.get("level"), "unit": row.get("unit"), "rate": rate}
+    if card["kind"] == "scenario":
+        # A scenario card is judged by where its entity stands against the line, the one line it moves.
+        row = next((row for row in found if row.get("metric_key") == "collection_gap"), {})
+        return {"value": None if row.get("value") is None else str(row["value"]),
+                "display": row.get("display_value"), "level": row.get("level"), "unit": row.get("unit")}
     if card["kind"] == "rank":
         column, label = select["column"], select["label"]
         ranked = [(str(row[label]), _number(row.get(column))) for row in found
@@ -415,7 +420,7 @@ def _sign(value: Decimal | None) -> int:
 
 def change(card: dict, before: dict, after: dict) -> tuple[bool, str]:
     """Whether the card moved enough to look at, and the words for how it moved."""
-    if card["kind"] == "figure":
+    if card["kind"] in {"figure", "scenario"}:
         if before.get("level") and after.get("level") and before["level"] != after["level"]:
             return True, f"级别 {LEVEL_WORDS.get(before['level'], before['level'])} → {LEVEL_WORDS.get(after['level'], after['level'])}"
         old, new = _number(before.get("value")), _number(after.get("value"))

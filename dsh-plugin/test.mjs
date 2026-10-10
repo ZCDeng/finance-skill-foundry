@@ -492,7 +492,7 @@ for (const toolName of ROSTER) {
     .map((entry) => entry.name));
   const rows = clientExports.FINANCE_SHORTCUTS;
   assert.deepEqual([...new Set(rows.map((row) => row.section))],
-    ["开始与资料体检", "月结与管理报表", "预算与差异分析", "对账", "凭证草稿", "回款与现金"]);
+    ["开始与资料体检", "月结与管理报表", "预算与差异分析", "对账", "凭证草稿", "回款与现金", "看板"]);
   assert.equal(new Set(rows.map((row) => row.id)).size, rows.length, "shortcut ids must be unique");
   for (const row of rows) {
     assert.ok(SKILL_IDS.has(row.skill), `${row.id} names ${row.skill}, which is not a bundled skill`);
