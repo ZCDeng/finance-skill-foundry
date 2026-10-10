@@ -110,7 +110,7 @@ const specTool = (command, description, properties, required = []) => ({
   description,
   parameters: { type: "object", required: ["spec"], additionalProperties: false,
     properties: { spec: { type: "object", required, properties, additionalProperties: true } } },
-  kind: ["drilldown-fact", "open-source-locator", "finance-controls-propose", "finance-controls-list", "workbook-inspect", "workbook-read", "prepare-explanation", "validate-explanation", "finance-background-list", "analysis-requirements-list", "finance-adjustment-list", "report-template-list", "structure-proposal-list", "structure-template-list"].includes(command) ? "read" : ["run-metric", "explain-variance", "finance-scenario-run", "finance-controls-run", "collection-run"].includes(command) ? "execute" : "edit",
+  kind: ["drilldown-fact", "open-source-locator", "finance-controls-propose", "finance-controls-list", "workbook-inspect", "workbook-read", "prepare-explanation", "validate-explanation", "finance-background-list", "analysis-requirements-list", "finance-adjustment-list", "report-template-list", "structure-proposal-list", "structure-template-list", "answer-cards"].includes(command) ? "read" : ["run-metric", "explain-variance", "finance-scenario-run", "finance-controls-run", "collection-run"].includes(command) ? "execute" : "edit",
   argv: ({ spec }) => [command, "--spec", JSON.stringify(spec)],
 });
 const contextId = text("list_finance_context 或 finance_context_save 返回的当前任务口径版本 id");
@@ -297,6 +297,22 @@ export const FINANCE_TOOLS = {
       note: boundedText(200, "一句为什么值得看，可选"),
     } },
   }, ["card"]),
+  answer_cards: specTool("answer-cards", "在回答下方画卡，经理一眼看到数、看来源、点「接着问」。回答的文字写完后最后调用一次，调用之后不再写字。最多 3 张卡、3 个接着问；一句话能答清的问题不画卡。卡上的数由服务从已经算好的成功运行里取出，按看板的写法显示，并带公式、资料和计算时间：你不写数字，也不在文字里重复卡上的数。kind=figure 一个数：run_id + select（写法同 dashboard_propose 的 figure：match 恰好选中一行，column 是数所在的列，回款健康运行用 value）；或收缴率运行 collection_run_id + figure（collection_rate_current 当期收缴率、arrears_recovery_rate 清欠率、collection_rate_total 综合收缴率、collection_rate_month 本月收缴率、waiver_rate 减免率、household_rate 交清的户占比，或金额 receivable、collected、month_receivable、month_collected、arrears_opening、arrears_collected、outstanding、advance_balance、waiver）+ 可选 group（分组运行里的一组，{列: 值}，如 {type: '洋房'}）；整体收缴率卡会带上套表报数和相差多少个百分点。kind=compare 2–4 个数并排：items 每项写法同 figure，不计算它们之间的差。kind=rank 排名条：run_id + select（写法同 dashboard_propose 的 rank），或分组的收缴率运行 collection_run_id + figure + order（asc/desc）+ 可选 limit、reference。kind=bridge 利润桥：explain_variance 的利润桥运行，select.match 选出含 profit 行的那一组。kind=trend 一条线随期间变化：run_id + select {match 选出同一条线各期的行, column 数所在的列, period 期间列名（默认 period）}，3–24 期。follow_ups 写经理接下来最可能问的问题，每个 40 字以内，经理点了只填进对话框、由他改了再发。有一张卡画不出（行选错、运行没成功、分组不存在）整次被拒并说明原因，照原因改了再调。经理可以在卡上看来源、打开结果；数字卡、排名卡和利润桥可以由经理自己钉到看板：不要说卡已经钉上看板或已认可。只读，不改任何东西。", {
+    cards: { type: "array", maxItems: 3, items: { type: "object", required: ["kind", "title"], properties: {
+      kind: { type: "string", enum: ["figure", "compare", "rank", "bridge", "trend"] },
+      title: boundedText(60, "卡片标题，经理看得懂的中文，写清看什么", 1),
+      run_id: runId,
+      collection_run_id: text("collection_run 返回的收缴率运行 id"),
+      select: { type: "object", description: "figure：match + column；rank：match + column + label + order + limit + 可选 reference；bridge：match；trend：match + column + 可选 period" },
+      figure: text("收缴率运行的哪个数，如 collection_rate_current"),
+      group: { type: "object", additionalProperties: { type: "string" }, description: "分组收缴率运行里的一组，{列: 值}" },
+      items: { type: "array", minItems: 2, maxItems: 4, items: { type: "object" }, description: "compare：每项写法同 figure（run_id + select，或 collection_run_id + figure + 可选 group）" },
+      order: { type: "string", enum: ["asc", "desc"] },
+      limit: { type: "integer", minimum: 1, maximum: 50 },
+      reference: { type: "object", description: "排名条的参考线 {value, label}；收缴率排名的 value 和运行里的率一样写小数（80% 写 0.8）" },
+    } } },
+    follow_ups: { type: "array", maxItems: 3, items: boundedText(40, "经理接下来可能问的一个问题", 1) },
+  }),
   finance_context_save: specTool("finance-context-save", "建立不可变财务口径：bindings 为别名到现有快照 ID；scopes 按别名声明 ledger/organization/period/currency/unit/scenario，值来自资料或经理明确口径，不能猜测。policy.field_map 可映射中文列名。管理科目用 revenue/cost/expense；余额也可分析，缺少凭证时不虚构分录链接。修改科目映射或口径生成新版本。", {
     name: text("财务口径名称"), bindings: { type: "object", additionalProperties: { type: "string" } },
     scopes: { type: "object", additionalProperties: { type: "object" } }, policies: { type: "object", additionalProperties: { type: "object" } },

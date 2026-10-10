@@ -78,6 +78,11 @@ describe('the edge this window draws on the embedded page', () => {
     expect(DARK_THEME.selected).toBe(token('--fnd-selected', 'dark'));
     expect(DARK_THEME.onSelected).toBe(token('--fnd-on-selected', 'dark'));
     expect(DARK_THEME.selectionSurface).toBe(token('--fnd-selection-surface', 'dark'));
+    for (const [key, name] of [['negative', '--fnd-negative'], ['warningLine', '--fnd-warning-line'], ['levelWatch', '--fnd-level-watch'],
+      ['levelOk', '--fnd-level-ok'], ['markAbsent', '--fnd-mark-absent']] as const) {
+      expect(LIGHT_THEME[key], key).toBe(token(name, 'light'));
+      expect(DARK_THEME[key], key).toBe(token(name, 'dark'));
+    }
   });
 
   /*

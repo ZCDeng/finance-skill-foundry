@@ -155,6 +155,38 @@ const RECEIPT_VERBS = new Set(["emit-brief", "query-locked", "record-reference"]
  * corrupted document, and the honest report for that is the text itself with
  * no receipt attached.
  */
+/**
+ * The finance verbs whose answer the conversation draws as cards.
+ *
+ * `answer_cards` prints `{task_id, cards, follow_ups, text}`: the model reads
+ * `text`, a line per card, and the row draws `cards`. `dashboard_propose`
+ * prints the board it saved with `presented` beside it -- the card it just
+ * proposed, drawn for the conversation -- and the model keeps reading the
+ * board, without the drawing it has no use for.
+ *
+ * Degrading like the receipt: a stdout that is not that shape is passed on
+ * as it came, with nothing to draw.
+ */
+const PRESENTING_VERBS = new Set(["answer_cards", "answer-cards", "dashboard_propose", "dashboard-propose"]);
+
+export function readPresented(toolName, raw) {
+  if (!PRESENTING_VERBS.has(toolName)) return { stdout: raw };
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { stdout: raw };
+    if (toolName.startsWith("answer")) {
+      if (typeof parsed.text !== "string" || !Array.isArray(parsed.cards)) return { stdout: raw };
+      const { text, ...presented } = parsed;
+      return { stdout: text, presented };
+    }
+    const { presented, ...board } = parsed;
+    if (!presented || typeof presented !== "object" || Array.isArray(presented)) return { stdout: raw };
+    return { stdout: JSON.stringify(board), presented };
+  } catch {
+    return { stdout: raw };
+  }
+}
+
 export function readReceipt(toolName, raw) {
   if (!RECEIPT_VERBS.has(toolName)) return { stdout: raw, filed: [] };
   try {
@@ -368,6 +400,11 @@ const OUTPUT_SCHEMA = {
      * which draws the row in the conversation.
      */
     filed: { type: "array", items: { type: "object" } },
+    /*
+     * Cards drawn under the answer (`readPresented`). Like `filed`, for the
+     * conversation and not for the model, which reads `stdout` only.
+     */
+    presented: { type: "object" },
   },
   required: ["tool", "stdout"],
   additionalProperties: false,
@@ -436,9 +473,12 @@ export function toolDefinition(toolName, spec = specFor(toolName)) {
        * so a nested call draws its text and no strip. Correct, rather than a
        * strip claiming it filed nothing.
        */
-      presentationMeta: (_args, value) => ({
-        filed: Array.isArray(value?.filed) ? value.filed : [],
-      }),
+      presentationMeta: (_args, value) => {
+        const meta = { filed: Array.isArray(value?.filed) ? value.filed : [] };
+        const presented = value?.presented;
+        if (presented && typeof presented === "object" && !Array.isArray(presented)) meta.presented = presented;
+        return meta;
+      },
     },
     presentCall: presentCall(toolName, spec.kind ?? CALL_KINDS[toolName] ?? "other"),
     execute: async (args, exec) => {
@@ -449,8 +489,9 @@ export function toolDefinition(toolName, spec = specFor(toolName)) {
       const raw = spec.execute
         ? await spec.execute(input, exec)
         : foundry(spec.argv(input), exec, spec.requireSession === true);
-      const { stdout, filed } = readReceipt(toolName, raw);
-      return { tool: toolName, stdout, filed };
+      const { stdout: read, filed } = readReceipt(toolName, raw);
+      const { stdout, presented } = readPresented(toolName, read);
+      return presented ? { tool: toolName, stdout, filed, presented } : { tool: toolName, stdout, filed };
     },
   };
 }

@@ -1,0 +1,1199 @@
+{
+ "note": "Shared by tests/test_figure_text.py and app/tests/figure-text-parity.test.ts: each answer is what the renderer writes, and the server's port (foundry/figure_text.py, foundry/answer_cards.py) must write the same.",
+ "runs": {
+  "variance": {
+   "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+   "task_id": "tttttttttttttttttttttttttttttttt",
+   "schema_version": 1,
+   "created_at": "2026-10-08T00:00:00Z",
+   "analysis_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "execution_status": "succeeded",
+   "reproducibility_status": "reproducible",
+   "review_status": "unreviewed",
+   "publication_status": "draft",
+   "input_hashes": {},
+   "engine": "finance",
+   "result": {
+    "columns": [
+     {
+      "name": "organization",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "period",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "unit",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "metric",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "actual",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "baseline",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "amount_change",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "profit_impact",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "contribution",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "ratio",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "comparison_status",
+      "type": "VARCHAR"
+     }
+    ],
+    "rows": [
+     {
+      "organization": "华东",
+      "period": "2026-08",
+      "unit": "万元",
+      "metric": "revenue",
+      "actual": "120",
+      "baseline": "100",
+      "amount_change": "20",
+      "profit_impact": "20",
+      "contribution": "20",
+      "ratio": "0.2",
+      "comparison_status": "complete"
+     },
+     {
+      "organization": "华东",
+      "period": "2026-08",
+      "unit": "万元",
+      "metric": "cost",
+      "actual": "70.005",
+      "baseline": "60",
+      "amount_change": "-10.005",
+      "profit_impact": "-10.005",
+      "contribution": "-10.005",
+      "ratio": "0.2",
+      "comparison_status": "complete"
+     },
+     {
+      "organization": "华东",
+      "period": "2026-08",
+      "unit": "万元",
+      "metric": "expense",
+      "actual": "20",
+      "baseline": "15",
+      "amount_change": "-5",
+      "profit_impact": "-5",
+      "contribution": "-5",
+      "ratio": "0.2",
+      "comparison_status": "complete"
+     },
+     {
+      "organization": "华东",
+      "period": "2026-08",
+      "unit": "万元",
+      "metric": "profit",
+      "actual": "29.995",
+      "baseline": "25",
+      "amount_change": "4.995",
+      "profit_impact": "4.995",
+      "contribution": "4.995",
+      "ratio": "0.1998",
+      "comparison_status": "complete"
+     }
+    ],
+    "row_count": 4,
+    "truncated": false,
+    "method": "revenue_minus_cost_minus_expense",
+    "comparison": {
+     "actual_scenario": "actual",
+     "baseline_scenario": "budget"
+    }
+   }
+  },
+  "prior": {
+   "id": "pppppppppppppppppppppppppppppppp",
+   "task_id": "tttttttttttttttttttttttttttttttt",
+   "schema_version": 1,
+   "created_at": "2026-10-08T00:00:00Z",
+   "analysis_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "execution_status": "succeeded",
+   "reproducibility_status": "reproducible",
+   "review_status": "unreviewed",
+   "publication_status": "draft",
+   "input_hashes": {},
+   "engine": "finance",
+   "result": {
+    "columns": [
+     {
+      "name": "organization",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "period",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "unit",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "metric",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "actual",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "baseline",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "amount_change",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "profit_impact",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "contribution",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "ratio",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "comparison_status",
+      "type": "VARCHAR"
+     }
+    ],
+    "rows": [
+     {
+      "organization": "华东",
+      "period": "2026-08",
+      "unit": "万元",
+      "metric": "revenue",
+      "actual": "1200000",
+      "baseline": "1000000.5",
+      "amount_change": "199999.5",
+      "profit_impact": "199999.5",
+      "contribution": "199999.5",
+      "ratio": "0.2",
+      "comparison_status": "complete"
+     },
+     {
+      "organization": "华东",
+      "period": "2026-08",
+      "unit": "万元",
+      "metric": "cost",
+      "actual": "700000",
+      "baseline": "600000",
+      "amount_change": "-100000",
+      "profit_impact": "-100000",
+      "contribution": "-100000",
+      "ratio": "0.2",
+      "comparison_status": "complete"
+     },
+     {
+      "organization": "华东",
+      "period": "2026-08",
+      "unit": "万元",
+      "metric": "expense",
+      "actual": "200000",
+      "baseline": "150000",
+      "amount_change": "-50000",
+      "profit_impact": "-50000",
+      "contribution": "-50000",
+      "ratio": "0.2",
+      "comparison_status": "complete"
+     },
+     {
+      "organization": "华东",
+      "period": "2026-08",
+      "unit": "万元",
+      "metric": "profit",
+      "actual": "300000",
+      "baseline": "250000.5",
+      "amount_change": "49999.5",
+      "profit_impact": "49999.5",
+      "contribution": "49999.5",
+      "ratio": "0.2",
+      "comparison_status": "complete"
+     }
+    ],
+    "row_count": 4,
+    "truncated": false,
+    "method": "revenue_minus_cost_minus_expense",
+    "comparison": {
+     "actual_scenario": "actual",
+     "baseline_scenario": "actual",
+     "actual_filters": {
+      "period": "2026-08"
+     },
+     "baseline_filters": {
+      "period": "2026-07"
+     }
+    }
+   }
+  },
+  "metric": {
+   "id": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+   "task_id": "tttttttttttttttttttttttttttttttt",
+   "schema_version": 1,
+   "created_at": "2026-10-08T00:00:00Z",
+   "analysis_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "execution_status": "succeeded",
+   "reproducibility_status": "reproducible",
+   "review_status": "unreviewed",
+   "publication_status": "draft",
+   "input_hashes": {},
+   "engine": "sql",
+   "result": {
+    "columns": [
+     {
+      "name": "metric",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "period",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "unit",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "actual",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "same_period_budget",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "variance",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "attainment_pct",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "same_period_budget_estimated",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "value",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "attainment_rate",
+      "type": "VARCHAR"
+     }
+    ],
+    "rows": [
+     {
+      "metric": "revenue",
+      "period": "2026-01:2026-08",
+      "unit": "万元",
+      "actual": 1234567.885,
+      "same_period_budget": "1200000",
+      "variance": "34567.885",
+      "attainment_pct": "102.88",
+      "same_period_budget_estimated": true
+     },
+     {
+      "metric": "gross_margin",
+      "unit": "比率",
+      "value": "0.18053",
+      "actual": null,
+      "attainment_rate": 0.9453
+     },
+     {
+      "metric": "cash",
+      "value": -18843.064,
+      "unit": "元"
+     },
+     {
+      "metric": "gap",
+      "value": "-0.65",
+      "unit": "百分点"
+     },
+     {
+      "metric": "pct",
+      "value": "3.3",
+      "unit": "%"
+     },
+     {
+      "metric": "raw",
+      "value": "12.5",
+      "unit": "-"
+     }
+    ],
+    "row_count": 6,
+    "truncated": false
+   }
+  },
+  "trend": {
+   "id": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+   "task_id": "tttttttttttttttttttttttttttttttt",
+   "schema_version": 1,
+   "created_at": "2026-10-08T00:00:00Z",
+   "analysis_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "execution_status": "succeeded",
+   "reproducibility_status": "reproducible",
+   "review_status": "unreviewed",
+   "publication_status": "draft",
+   "input_hashes": {},
+   "engine": "sql",
+   "result": {
+    "columns": [
+     {
+      "name": "metric",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "period",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "unit",
+      "type": "VARCHAR"
+     },
+     {
+      "name": "actual",
+      "type": "VARCHAR"
+     }
+    ],
+    "rows": [
+     {
+      "metric": "revenue",
+      "period": "2026-03",
+      "unit": "万元",
+      "actual": "310.5"
+     },
+     {
+      "metric": "revenue",
+      "period": "2026-01",
+      "unit": "万元",
+      "actual": "100"
+     },
+     {
+      "metric": "revenue",
+      "period": "2026-02",
+      "unit": "万元",
+      "actual": "-20.125"
+     },
+     {
+      "metric": "cost",
+      "period": "2026-01",
+      "unit": "万元",
+      "actual": "50"
+     }
+    ],
+    "row_count": 4,
+    "truncated": false
+   }
+  }
+ },
+ "cells": [
+  {
+   "value": 1234567.885,
+   "column": "actual",
+   "row": {},
+   "text": "1,234,567.89"
+  },
+  {
+   "value": "1234567.885",
+   "column": "budget",
+   "row": {},
+   "text": "1,234,567.89"
+  },
+  {
+   "value": "-0.005",
+   "column": "variance",
+   "row": {},
+   "text": "-0.01"
+  },
+  {
+   "value": -0.004,
+   "column": "difference",
+   "row": {},
+   "text": "0.00"
+  },
+  {
+   "value": 0.94531,
+   "column": "attainment_rate",
+   "row": {},
+   "text": "94.53%"
+  },
+  {
+   "value": "102.885",
+   "column": "attainment_pct",
+   "row": {},
+   "text": "102.89%"
+  },
+  {
+   "value": "0.0325",
+   "column": "ratio_delta",
+   "row": {},
+   "text": "3.25 个百分点"
+  },
+  {
+   "value": "-0.0125",
+   "column": "gap_pp",
+   "row": {},
+   "text": "-1.25 个百分点"
+  },
+  {
+   "value": "0.8212",
+   "column": "当期收缴率",
+   "row": {},
+   "text": "82.12%"
+  },
+  {
+   "value": "18843",
+   "column": "汇率_影响_万元",
+   "row": {},
+   "text": "18,843.00"
+  },
+  {
+   "value": "revenue",
+   "column": "metric",
+   "row": {},
+   "text": "收入"
+  },
+  {
+   "value": "profit",
+   "column": "指标",
+   "row": {},
+   "text": "利润"
+  },
+  {
+   "value": "0.18053",
+   "column": "value",
+   "row": {
+    "unit": "比率"
+   },
+   "text": "18.05%"
+  },
+  {
+   "value": "3.3",
+   "column": "value",
+   "row": {
+    "unit": "%"
+   },
+   "text": "3.30%"
+  },
+  {
+   "value": "3.3",
+   "column": "value",
+   "row": {
+    "unit": "pct"
+   },
+   "text": "3.30%"
+  },
+  {
+   "value": "-0.65",
+   "column": "value",
+   "row": {
+    "unit": "百分点"
+   },
+   "text": "-0.65 个百分点"
+  },
+  {
+   "value": "12.5",
+   "column": "value",
+   "row": {
+    "unit": "-"
+   },
+   "text": "12.5（未标单位）"
+  },
+  {
+   "value": "1234.5",
+   "column": "value",
+   "row": {
+    "unit": "万元"
+   },
+   "text": "1234.5"
+  },
+  {
+   "value": "1234.5",
+   "column": "value",
+   "row": {
+    "unit": "",
+    "单位": "百分点"
+   },
+   "text": "1,234.50 个百分点"
+  },
+  {
+   "value": "1234.5",
+   "column": "value",
+   "row": {},
+   "text": "1234.5"
+  },
+  {
+   "value": "2026-08",
+   "column": "period",
+   "row": {},
+   "text": "2026 年 8 月"
+  },
+  {
+   "value": "2026-01:2026-08",
+   "column": "期间",
+   "row": {},
+   "text": "2026 年 1–8 月"
+  },
+  {
+   "value": "2025-11:2026-02",
+   "column": "period",
+   "row": {},
+   "text": "2025 年 11 月–2026 年 2 月"
+  },
+  {
+   "value": "YTD",
+   "column": "period",
+   "row": {},
+   "text": "YTD"
+  },
+  {
+   "value": null,
+   "column": "actual",
+   "row": {},
+   "text": "—"
+  },
+  {
+   "value": "",
+   "column": "budget",
+   "row": {},
+   "text": "—"
+  },
+  {
+   "value": "n/a",
+   "column": "actual",
+   "row": {},
+   "text": "n/a"
+  },
+  {
+   "value": 12,
+   "column": "count",
+   "row": {},
+   "text": "12"
+  },
+  {
+   "value": "abc",
+   "column": "note",
+   "row": {},
+   "text": "abc"
+  },
+  {
+   "value": 1e-07,
+   "column": "amount",
+   "row": {},
+   "text": "1e-7"
+  },
+  {
+   "value": 123456789012345680000,
+   "column": "amount",
+   "row": {},
+   "text": "123,456,789,012,345,680,000.00"
+  },
+  {
+   "value": "1,234.5",
+   "column": "amount",
+   "row": {},
+   "text": "1,234.50"
+  },
+  {
+   "value": 0.1,
+   "column": "收入",
+   "row": {},
+   "text": "0.10"
+  },
+  {
+   "value": "7",
+   "column": "毛利率",
+   "row": {},
+   "text": "700.00%"
+  },
+  {
+   "value": "0.5",
+   "column": "completion",
+   "row": {},
+   "text": "50.00%"
+  },
+  {
+   "value": "2.5",
+   "column": "rate",
+   "row": {},
+   "text": "250.00%"
+  }
+ ],
+ "accounting": [
+  {
+   "text": "-18843.06",
+   "shown": "(18843.06)",
+   "negative": true
+  },
+  {
+   "text": "-0.65 个百分点",
+   "shown": "-0.65 个百分点",
+   "negative": true
+  },
+  {
+   "text": "82.12%",
+   "shown": "82.12%",
+   "negative": false
+  },
+  {
+   "text": "-3.30%",
+   "shown": "(3.30%)",
+   "negative": true
+  },
+  {
+   "text": "+3.10 个百分点",
+   "shown": "+3.10 个百分点",
+   "negative": false
+  },
+  {
+   "text": "(1,234.00)",
+   "shown": "(1,234.00)",
+   "negative": true
+  },
+  {
+   "text": "—",
+   "shown": "—",
+   "negative": false
+  },
+  {
+   "text": "abc",
+   "shown": "abc",
+   "negative": false
+  },
+  {
+   "text": "-1,234.00 万元",
+   "shown": "-1,234.00 万元",
+   "negative": true
+  },
+  {
+   "text": "1,234",
+   "shown": "1,234",
+   "negative": false
+  },
+  {
+   "text": "-0",
+   "shown": "(0)",
+   "negative": true
+  }
+ ],
+ "periods": [
+  {
+   "value": "2026-08",
+   "text": "2026 年 8 月"
+  },
+  {
+   "value": "2026",
+   "text": "2026 年"
+  },
+  {
+   "value": "2026-01:2026-08",
+   "text": "2026 年 1–8 月"
+  },
+  {
+   "value": "2025-11:2026-02",
+   "text": "2025 年 11 月–2026 年 2 月"
+  },
+  {
+   "value": "2026-08:2026-08",
+   "text": "2026 年 8 月"
+  },
+  {
+   "value": "2026-13",
+   "text": "2026-13"
+  },
+  {
+   "value": "YTD",
+   "text": "YTD"
+  },
+  {
+   "value": "2608",
+   "text": "2608"
+  },
+  {
+   "value": "",
+   "text": ""
+  }
+ ],
+ "digits": [
+  {
+   "value": 1234567.5,
+   "text": "1,234,567.5"
+  },
+  {
+   "value": "-1234567",
+   "text": "-1,234,567"
+  },
+  {
+   "value": "12.3456",
+   "text": "12.3456"
+  },
+  {
+   "value": "abc",
+   "text": "abc"
+  },
+  {
+   "value": "",
+   "text": "—"
+  },
+  {
+   "value": null,
+   "text": "—"
+  },
+  {
+   "value": 0.00035,
+   "text": "0.00035"
+  },
+  {
+   "value": "+1000",
+   "text": "+1,000"
+  }
+ ],
+ "figures": [
+  {
+   "run": "variance",
+   "select": {
+    "match": {
+     "metric": "profit"
+    },
+    "column": "actual"
+   },
+   "view": {
+    "subject": "2026 年 8 月 · 万元",
+    "part": "实际",
+    "value": "30.00",
+    "beside": [
+     [
+      "预算",
+      "25.00"
+     ],
+     [
+      "差异",
+      "5.00"
+     ],
+     [
+      "差异率",
+      "19.98%"
+     ]
+    ],
+    "level": null,
+    "level_label": null
+   }
+  },
+  {
+   "run": "variance",
+   "select": {
+    "match": {
+     "metric": "cost"
+    },
+    "column": "contribution"
+   },
+   "view": {
+    "subject": "2026 年 8 月 · 万元",
+    "part": "差异贡献",
+    "value": "-10.01",
+    "beside": [],
+    "level": null,
+    "level_label": null
+   }
+  },
+  {
+   "run": "variance",
+   "select": {
+    "match": {
+     "metric": "profit"
+    },
+    "column": "ratio"
+   },
+   "view": {
+    "subject": "2026 年 8 月 · 万元",
+    "part": "差异率",
+    "value": "19.98%",
+    "beside": [],
+    "level": null,
+    "level_label": null
+   }
+  },
+  {
+   "run": "metric",
+   "select": {
+    "match": {
+     "metric": "revenue"
+    },
+    "column": "actual"
+   },
+   "view": {
+    "subject": "2026 年 1–8 月 · 万元",
+    "part": "实际",
+    "value": "1,234,567.89",
+    "beside": [
+     [
+      "预算（估算）",
+      "1,200,000.00"
+     ],
+     [
+      "差异",
+      "34,567.89"
+     ],
+     [
+      "达成率",
+      "102.88%"
+     ]
+    ],
+    "level": null,
+    "level_label": null
+   }
+  },
+  {
+   "run": "metric",
+   "select": {
+    "match": {
+     "metric": "gross_margin"
+    },
+    "column": "value"
+   },
+   "view": {
+    "subject": "未声明期间 · 比率",
+    "part": "数值",
+    "value": "18.05%",
+    "beside": [],
+    "level": null,
+    "level_label": null
+   }
+  },
+  {
+   "run": "metric",
+   "select": {
+    "match": {
+     "metric": "cash"
+    },
+    "column": "value"
+   },
+   "view": {
+    "subject": "未声明期间 · 元",
+    "part": "数值",
+    "value": "-18843.064",
+    "beside": [],
+    "level": null,
+    "level_label": null
+   }
+  },
+  {
+   "run": "metric",
+   "select": {
+    "match": {
+     "metric": "gap"
+    },
+    "column": "value"
+   },
+   "view": {
+    "subject": "未声明期间 · 百分点",
+    "part": "数值",
+    "value": "-0.65 个百分点",
+    "beside": [],
+    "level": null,
+    "level_label": null
+   }
+  },
+  {
+   "run": "metric",
+   "select": {
+    "match": {
+     "metric": "raw"
+    },
+    "column": "value"
+   },
+   "view": {
+    "subject": "未声明期间 · -",
+    "part": "数值",
+    "value": "12.5（未标单位）",
+    "beside": [],
+    "level": null,
+    "level_label": null
+   }
+  },
+  {
+   "run": "metric",
+   "select": {
+    "match": {
+     "metric": "gross_margin"
+    },
+    "column": "actual"
+   },
+   "view": {
+    "subject": "未声明期间 · 比率",
+    "part": "实际",
+    "value": "—",
+    "beside": [
+     [
+      "达成率",
+      "94.53%"
+     ]
+    ],
+    "level": null,
+    "level_label": null
+   }
+  },
+  {
+   "run": "health",
+   "select": {
+    "match": {
+     "entity": "集团",
+     "metric_key": "collection_gap",
+     "scenario": "本期"
+    },
+    "column": "value"
+   },
+   "view": {
+    "subject": "集团",
+    "part": "本期",
+    "value": "-3.22 个百分点",
+    "beside": [],
+    "level": "red",
+    "level_label": "红"
+   }
+  },
+  {
+   "run": "health",
+   "select": {
+    "match": {
+     "entity": "集团",
+     "metric_key": "gross_margin",
+     "scenario": "本期"
+    },
+    "column": "value"
+   },
+   "view": {
+    "subject": "集团",
+    "part": "本期",
+    "value": "18.05%",
+    "beside": [],
+    "level": null,
+    "level_label": null
+   }
+  }
+ ],
+ "ranks": [
+  {
+   "run": "health",
+   "select": {
+    "match": {
+     "metric_key": "collection_gap",
+     "scenario": "本期",
+     "entity_origin": "table"
+    },
+    "label": "entity",
+    "column": "value",
+    "order": "asc",
+    "limit": 5
+   },
+   "view": {
+    "unit": "个百分点",
+    "items": [
+     {
+      "label": "兰州城市公司",
+      "value": -6.9437269564967785,
+      "text": "-6.94",
+      "note": "红"
+     },
+     {
+      "label": "宜昌城市公司",
+      "value": -4.943727487895023,
+      "text": "-4.94",
+      "note": "红"
+     },
+     {
+      "label": "大连城市公司",
+      "value": -2.3437268915853373,
+      "text": "-2.34",
+      "note": "红"
+     },
+     {
+      "label": "成都城市公司",
+      "value": -1.8437263496419907,
+      "text": "-1.84",
+      "note": "红"
+     },
+     {
+      "label": "武汉城市公司",
+      "value": 0.1562730035771327,
+      "text": "0.16",
+      "note": "黄"
+     }
+    ]
+   }
+  },
+  {
+   "run": "variance",
+   "select": {
+    "match": {},
+    "label": "metric",
+    "column": "contribution",
+    "order": "desc",
+    "limit": 10
+   },
+   "view": {
+    "unit": "万元",
+    "items": [
+     {
+      "label": "revenue",
+      "value": 20,
+      "text": "20",
+      "note": null
+     },
+     {
+      "label": "profit",
+      "value": 4.995,
+      "text": "4.995",
+      "note": null
+     },
+     {
+      "label": "expense",
+      "value": -5,
+      "text": "-5",
+      "note": null
+     },
+     {
+      "label": "cost",
+      "value": -10.005,
+      "text": "-10.005",
+      "note": null
+     }
+    ]
+   }
+  },
+  {
+   "run": "trend",
+   "select": {
+    "match": {
+     "metric": "revenue"
+    },
+    "label": "period",
+    "column": "actual",
+    "order": "desc",
+    "limit": 2
+   },
+   "view": {
+    "unit": "万元",
+    "items": [
+     {
+      "label": "2026-03",
+      "value": 310.5,
+      "text": "310.5",
+      "note": null
+     },
+     {
+      "label": "2026-01",
+      "value": 100,
+      "text": "100",
+      "note": null
+     }
+    ]
+   }
+  }
+ ],
+ "bridges": [
+  {
+   "run": "variance",
+   "match": {},
+   "view": {
+    "unit": "万元",
+    "steps": [
+     {
+      "label": "预算利润",
+      "kind": "total",
+      "value": 25,
+      "text": "25"
+     },
+     {
+      "label": "收入",
+      "kind": "delta",
+      "value": 20,
+      "text": "20"
+     },
+     {
+      "label": "成本",
+      "kind": "delta",
+      "value": -10.005,
+      "text": "-10.005"
+     },
+     {
+      "label": "费用",
+      "kind": "delta",
+      "value": -5,
+      "text": "-5"
+     },
+     {
+      "label": "实际利润",
+      "kind": "total",
+      "value": 29.995,
+      "text": "29.995"
+     }
+    ]
+   }
+  },
+  {
+   "run": "prior",
+   "match": {},
+   "view": {
+    "unit": "万元",
+    "steps": [
+     {
+      "label": "实际（2026 年 7 月）利润",
+      "kind": "total",
+      "value": 250000.5,
+      "text": "250,000.5"
+     },
+     {
+      "label": "收入",
+      "kind": "delta",
+      "value": 199999.5,
+      "text": "199,999.5"
+     },
+     {
+      "label": "成本",
+      "kind": "delta",
+      "value": -100000,
+      "text": "-100,000"
+     },
+     {
+      "label": "费用",
+      "kind": "delta",
+      "value": -50000,
+      "text": "-50,000"
+     },
+     {
+      "label": "实际（2026 年 8 月）利润",
+      "kind": "total",
+      "value": 300000,
+      "text": "300,000"
+     }
+    ]
+   }
+  }
+ ]
+}

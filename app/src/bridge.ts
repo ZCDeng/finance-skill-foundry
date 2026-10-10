@@ -428,6 +428,8 @@ export interface Bridge {
    */
   onHarnessRefused?(cb: (reason: string) => void): () => void;
   onHarnessExited?(cb: () => void): () => void;
+  /** 打开结果 or 钉到看板 on a card in the assistant's answer, checked by the host before it is passed on. */
+  onHarnessCardAction?(cb: (action: HarnessCardAction) => void): () => void;
   /** Absent when this build has no harness to embed Formulator beside. */
   formulatorLaunch?(): Promise<Answer<LaunchSpec>>;
   formulatorStop?(): Promise<Answer<{ stopped: boolean }>>;
@@ -484,6 +486,8 @@ export function bridge(): Bridge | null {
   return (globalThis as { foundry?: Bridge }).foundry ?? null;
 }
 
+/** A click on a card in the assistant's answer that the window acts on (electron/harness/cardAction.ts). */
+export type HarnessCardAction = import('../electron/harness/cardAction').CardAction;
 export type WaitKind = import('../electron/ipc/contract').WaitKind;
 export type WaitOutcome = import('../electron/ipc/contract').WaitOutcome;
 /** One user wait as the timing log takes it: what, how it ended, and two durations. */
