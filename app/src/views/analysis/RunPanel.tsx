@@ -9,6 +9,7 @@ import { BusinessResultView } from './BusinessResultView.js';
 import { CollectionHealthView, isCollectionHealthRun } from './CollectionHealthView.js';
 import { RevisionDiff } from './RevisionDiff.js';
 import { runFiles, type FigureSourceContext } from './figureSource.js';
+import { Waterfall, bridgeCloses, type BridgeStep } from '../../components/charts/Waterfall.js';
 import { TechnicalInfo, type TechnicalRow } from './TechnicalInfo.js';
 import { businessColumnLabel, runPresentationRole, selectBusinessResult } from './businessResults.js';
 import { errorText } from './shared.js';
@@ -518,6 +519,7 @@ function FinanceVarianceTable({ run, actions, technical }: { run: AnalysisRun; a
   return <section className="analysis-finance-variance">
     {actions}
     <p className="analysis-note">范围：{financeVarianceScope(run)}</p>
+    <ProfitBridges run={run} />
     <Table key={`${run.id}:finance-variance`} columns={[
       ...dimensionHeaders, { name: '科目', type: 'VARCHAR' }, { name: copy.actualLabel, type: 'DECIMAL' }, { name: copy.baselineLabel, type: 'DECIMAL' },
       ...(hasAmountChange ? [{ name: '科目增减', type: 'DECIMAL' }] : []), { name: '差异贡献', type: 'DECIMAL' }, { name: '差异率', type: 'VARCHAR' },
@@ -574,6 +576,53 @@ function FinanceVarianceHeadline({ run }: { run: AnalysisRun }) {
 }
 
 /** A bridge line whose account has source rows on one side only (缺项), or the profit line built on one. */
+/** A stored decimal for the geometry only; the bar's label is the stored text, grouped. */
+function bridgeNumber(value: unknown): number | null {
+  const text = value == null ? '' : String(value).trim();
+  return /^[-+]?\d*\.?\d+$/.test(text) ? Number(text) : null;
+}
+
+/**
+ * The profit bridge of each group (at most three): 对照利润, then what 收入, 成本 and 费用 each contributed, then
+ * 实际利润. A group with a 缺项, a missing line, two units, or contributions that do not close draws nothing; the
+ * table below still shows every row.
+ */
+function ProfitBridges({ run }: { run: AnalysisRun }) {
+  const dimensions = financeVarianceDimensionColumns(run).map((column) => column.name);
+  const copy = financeVarianceCopy(run);
+  const groups = new Map<string, Record<string, unknown>[]>();
+  for (const row of run.result?.rows ?? []) {
+    const key = JSON.stringify(dimensions.map((name) => row[name] ?? null));
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+  const bridges = [...groups.values()].flatMap((rows) => {
+    if (rows.some(isPartial)) return [];
+    const line = (metric: string) => rows.filter((row) => row.metric === metric);
+    const [profit] = line('profit');
+    if (!profit || line('profit').length > 1) return [];
+    const unit = rowUnit(profit);
+    if (unit === null) return [];
+    const total = (label: string, value: unknown): BridgeStep | null => {
+      const number = bridgeNumber(value);
+      return number == null ? null : { label, kind: 'total', value: number, text: groupDigits(String(value).trim()) };
+    };
+    const deltas = ['revenue', 'cost', 'expense'].map((metric) => {
+      const found = line(metric);
+      const number = found.length === 1 ? bridgeNumber(found[0].contribution) : null;
+      return number == null ? null : { label: financeMetricLabel[metric], kind: 'delta' as const, value: number, text: groupDigits(String(found[0].contribution).trim()) };
+    });
+    const steps = [total(`${copy.baselineLabel}利润`, profit.baseline), ...deltas, total(`${copy.actualLabel}利润`, profit.actual)];
+    if (steps.some((step) => step == null) || !bridgeCloses(steps as BridgeStep[])) return [];
+    const label = dimensions.map((name) => name === 'period' ? periodText(rows[0][name]) : textValue(rows[0][name])).join(' · ');
+    return [{ label, steps: steps as BridgeStep[], unit }];
+  }).slice(0, 3);
+  if (!bridges.length) return null;
+  return <section className="analysis-profit-bridges" aria-label="利润桥">
+    {bridges.map((bridge, index) => <Waterfall key={`${bridge.label}:${index}`} title={bridge.label ? `利润桥 · ${bridge.label}` : '利润桥'}
+      steps={bridge.steps} unit={bridge.unit || undefined} />)}
+  </section>;
+}
+
 function isPartial(row: Record<string, unknown>): boolean {
   return row.comparison_status === 'partial';
 }

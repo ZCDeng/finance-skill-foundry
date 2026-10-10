@@ -1,0 +1,37 @@
+@layer components {
+/* In-app charts (DESIGN.md 图表): drawn in the theme's own colours, figures in IBM Plex Mono, no gold. A chart's
+ * export twin is app/electron/reports/visuals.ts, which fixes its colours for paper. */
+.fnd-chart-figure { margin: 0; max-width: 640px; display: grid; gap: 4px; }
+.fnd-chart-figure__note { font-size: var(--fnd-size-label); color: var(--fnd-muted); }
+.fnd-chart { display: block; width: 100%; height: auto; overflow: visible; }
+.fnd-chart__grid { stroke: var(--fnd-line); stroke-width: 1; }
+.fnd-chart__zero { stroke: var(--fnd-line-hover); stroke-width: 1; }
+.fnd-chart__reference { stroke: var(--fnd-warning-line); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.fnd-chart__tick,
+.fnd-chart__value { fill: var(--fnd-muted); font-family: var(--fnd-font-figure); font-size: var(--fnd-size-label); font-variant-numeric: tabular-nums; }
+.fnd-chart__value { fill: var(--fnd-ink); }
+.fnd-chart__value[data-negative] { fill: var(--fnd-negative); }
+.fnd-chart__label { fill: var(--fnd-muted); font-family: var(--fnd-font-prose); font-size: var(--fnd-size-label); }
+.fnd-chart__hit { fill: transparent; }
+.fnd-chart__hit:hover { fill: var(--fnd-line-hover); }
+
+.fnd-sparkline { width: 100%; }
+.fnd-sparkline__line { fill: none; stroke: var(--fnd-ink); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.fnd-sparkline__dot { fill: var(--fnd-ink); }
+.fnd-sparkline__last { fill: var(--fnd-ink); stroke: var(--fnd-surface); stroke-width: 1; }
+.fnd-sparkline__last[data-negative] { fill: var(--fnd-negative); }
+
+.fnd-waterfall__bar--total { fill: var(--fnd-ink); }
+.fnd-waterfall__bar--up { fill: var(--fnd-level-ok); }
+.fnd-waterfall__bar--down { fill: var(--fnd-negative); }
+.fnd-waterfall__link { stroke: var(--fnd-muted); stroke-width: 1; stroke-dasharray: 3 3; }
+
+.fnd-rank-bars__bar { fill: var(--fnd-ink); fill-opacity: 0.78; }
+.fnd-rank-bars__bar--negative { fill: var(--fnd-negative); fill-opacity: 1; }
+
+.fnd-small-multiples { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 232px)); gap: 12px 16px; }
+.fnd-small-multiples__cell { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 4px 8px; padding: 8px 12px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); background: var(--fnd-surface); }
+.fnd-small-multiples__label { font-size: var(--fnd-size-small); color: var(--fnd-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fnd-small-multiples__value { font-size: var(--fnd-size-small); }
+.fnd-small-multiples__cell .fnd-sparkline { grid-column: 1 / -1; }
+}

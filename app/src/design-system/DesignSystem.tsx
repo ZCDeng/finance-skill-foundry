@@ -8,6 +8,10 @@ import { CalendarDays, ChevronDown, FileDown, Plus, Trash2 } from 'lucide-react'
 
 import { DisclosureSummary } from '@/components/Disclosure.js';
 import { Figure } from '@/components/Figure.js';
+import { RankBars } from '@/components/charts/RankBars.js';
+import { SmallMultiples } from '@/components/charts/SmallMultiples.js';
+import { Sparkline, type SeriesPoint } from '@/components/charts/Sparkline.js';
+import { Waterfall } from '@/components/charts/Waterfall.js';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -33,6 +37,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.j
 import { Textarea } from '@/components/ui/textarea.js';
 
 type Theme = 'light' | 'dark';
+
+/** Specimen series for the chart section: made-up figures, never a result. */
+const months = ['1 月', '2 月', '3 月', '4 月', '5 月', '6 月', '7 月', '8 月'];
+const specimen = (values: (number | null)[]): SeriesPoint[] => values.map((value, index) => ({
+  label: months[index], value, text: value == null ? '—' : `${value.toFixed(2)}%`,
+}));
+const CITY_SERIES = [
+  { label: '海口', points: specimen([78.2, 79.1, 80.4, 79.8, 81.0, 81.6, 82.0, 82.1]) },
+  { label: '三亚', points: specimen([84.0, 83.1, 82.7, 81.9, 80.2, 79.5, 78.8, 77.6]) },
+  { label: '琼海', points: specimen([70.4, 72.0, null, 73.5, 74.1, 75.0, 74.6, 75.2]) },
+  { label: '儋州', points: specimen([66.0, 67.2, 68.0, 69.4, 70.1, 70.0, 71.3, 72.4]), breaks: [5] },
+];
 
 /**
  * Any CSS colour (hex, rgb, oklch, color-mix, display-p3) as sRGB, by painting one pixel over a
@@ -257,6 +273,28 @@ export function DesignSystem() {
           <CommandInput aria-label="科目搜索" placeholder="搜索名称或编码" />
           <CommandList><CommandItem value="1122">1122 应收账款</CommandItem><CommandItem value="1231">1231 坏账准备</CommandItem></CommandList>
         </Command>
+      </div>
+    </Section>
+
+    <Section title="图表" note="手写 SVG，不用图表库。颜色跟主题走，数字用 IBM Plex Mono，负数括号暗红，不用金色。数据是示意，不是计算结果。">
+      <div className="ds__charts">
+        <div><h3>迷你折线</h3><p className="ds__note">缺值和口径变化处断开，最后一点加圆点。</p>
+          <Sparkline title="海口当期收缴率" points={CITY_SERIES[0].points} /></div>
+        <div><h3>小图阵列</h3><p className="ds__note">同一刻度，线高就是数大。</p>
+          <SmallMultiples title="城市公司当期收缴率" series={CITY_SERIES} /></div>
+        <div><h3>利润桥</h3>
+          <Waterfall title="预算利润到实际利润" unit="万元" steps={[
+            { label: '预算利润', kind: 'total', value: 25, text: '25.00' },
+            { label: '收入', kind: 'delta', value: 20, text: '20.00' },
+            { label: '成本', kind: 'delta', value: -10, text: '-10.00' },
+            { label: '费用', kind: 'delta', value: -5, text: '-5.00' },
+            { label: '实际利润', kind: 'total', value: 30, text: '30.00' },
+          ]} /></div>
+        <div><h3>排名条</h3>
+          <RankBars title="距生死线" reference={{ value: 0, label: '生死线' }} items={[
+            { label: '海口', value: 3.1, text: '3.10' }, { label: '三亚', value: -1.4, text: '-1.40' },
+            { label: '琼海', value: 0.6, text: '0.60' }, { label: '儋州', value: -4.2, text: '-4.20' },
+          ]} /></div>
       </div>
     </Section>
 
