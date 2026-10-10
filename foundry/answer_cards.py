@@ -319,6 +319,9 @@ def analysis_trend(run: dict, select: Any) -> dict:
     if len(points) > MAX_TREND:
         raise Card(f"a trend card shows at most {MAX_TREND} periods")
     points.sort(key=lambda point: point["period"])
+    units = {js_text(row_unit(point["row"]) or "") for point in points}
+    if len(units) > 1:
+        raise Card(f"these rows are in different units ({'、'.join(sorted(units))}); name the rows of one line only")
     unit = row_unit(points[0]["row"])
     return {"points": points, "unit": "" if unit is None else js_text(unit), "part": column_label(column),
             "subject": " · ".join(match.values())}
@@ -432,7 +435,9 @@ def collection_rank(run: dict, spec: dict) -> dict:
     if reference is not None:
         if not isinstance(reference, dict) or _float(reference.get("value")) is None:
             raise Card("a rank card reference is a figure with a label")
-        reference = {"value": _float(reference["value"]), "label": _text(reference.get("label"), "reference label", dashboards.MAX_TITLE)}
+        # Written as the run writes its rates (0.8 for 80%), and drawn on the bars' scale.
+        reference = {"value": _float(reference["value"]) * scale,
+                     "label": _text(reference.get("label"), "reference label", dashboards.MAX_TITLE)}
     by = "、".join(GROUP_LABELS.get(name, name) for name in (groups[0].get("key") or {}))
     return {"items": items, "unit": "%" if kind == "rate" else "", "reference": reference, "order": order,
             "part": label, "subject": f"按{by}"}

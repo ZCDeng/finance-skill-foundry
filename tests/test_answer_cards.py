@@ -86,7 +86,8 @@ def test_a_collection_figure_carries_the_workbook_s_rate_and_the_difference_the_
     out = FinanceStore(task, actor="assistant").answer_cards({"cards": [
         {"kind": "figure", "title": "当期收缴率", "collection_run_id": run["id"], "figure": "collection_rate_current"},
         {"kind": "figure", "title": "洋房", "collection_run_id": grouped["id"], "figure": "collection_rate_current", "group": {"type": "洋房"}},
-        {"kind": "rank", "title": "各类型", "collection_run_id": grouped["id"], "figure": "collection_rate_current", "order": "asc", "limit": 2},
+        {"kind": "rank", "title": "各类型", "collection_run_id": grouped["id"], "figure": "collection_rate_current", "order": "asc", "limit": 2,
+         "reference": {"value": 0.8, "label": "目标"}},
     ]})
     whole, one, rank = out["cards"]
     assert whole["value"]["text"] == "48.65%"
@@ -96,6 +97,8 @@ def test_a_collection_figure_carries_the_workbook_s_rate_and_the_difference_the_
     assert (one["subject"], one["value"]["text"]) == ("洋房", "80.00%")
     assert [(item["label"], item["text"]) for item in rank["items"]] == [("别墅", "0.00"), ("（空）", "0.00")]
     assert rank["unit"] == "%" and rank["subject"] == "按房产类型"
+    # The target is written as the run writes its rates and drawn on the bars' percent scale.
+    assert rank["reference"] == {"value": 80.0, "label": "目标"}
     with pytest.raises(FoundryError, match="洋房"):
         FinanceStore(task).answer_cards({"cards": [
             {"kind": "figure", "title": "x", "collection_run_id": grouped["id"], "figure": "collection_rate_current", "group": {"type": "公寓"}}]})
@@ -125,15 +128,17 @@ def test_a_trend_reads_one_line_across_its_periods(tmp_path):
     task = TaskStore(tmp_path / "var").create(title="趋势")
     path = tmp_path / "monthly.json"
     path.write_text(json.dumps([
-        {"period": "2026-03", "metric": "revenue", "actual": "310.5", "unit": "万元"},
-        {"period": "2026-01", "metric": "revenue", "actual": "100", "unit": "万元"},
-        {"period": "2026-02", "metric": "revenue", "actual": "-20.125", "unit": "万元"},
-        {"period": "2026-01", "metric": "cost", "actual": "50", "unit": "万元"},
+        {"period": "2026-03", "metric": "revenue", "line": "收入", "actual": "310.5", "unit": "万元"},
+        {"period": "2026-01", "metric": "revenue", "line": "收入", "actual": "100", "unit": "万元"},
+        {"period": "2026-02", "metric": "revenue", "line": "收入", "actual": "-20.125", "unit": "万元"},
+        {"period": "2026-01", "metric": "cost", "line": "成本", "actual": "50", "unit": "万元"},
+        {"period": "2026-02", "metric": "margin", "line": "成本", "actual": "0.3", "unit": "比率"},
+        {"period": "2026-03", "metric": "margin", "line": "成本", "actual": "0.4", "unit": "比率"},
     ]), encoding="utf-8")
     analysis = AnalysisStore(task)
     dataset = analysis.add_dataset(path, name="monthly")
     saved = analysis.save_analysis({"question": "月度收入", "bindings": {"m": dataset["id"]},
-                                    "sql": "select period, metric, actual, unit from m"})
+                                    "sql": "select period, metric, line, actual, unit from m"})
     run = analysis.run_analysis(saved["id"])
     store = FinanceStore(task)
     out = store.answer_cards({"cards": [{"kind": "trend", "title": "收入走势", "run_id": run["id"],
@@ -144,6 +149,9 @@ def test_a_trend_reads_one_line_across_its_periods(tmp_path):
     assert trend["unit"] == "万元" and trend["pin"] is None
     with pytest.raises(FoundryError, match="two rows hold 2026-01"):
         store.answer_cards({"cards": [{"kind": "trend", "title": "x", "run_id": run["id"], "select": {"match": {}, "column": "actual"}}]})
+    with pytest.raises(FoundryError, match="different units"):
+        store.answer_cards({"cards": [{"kind": "trend", "title": "x", "run_id": run["id"],
+                                       "select": {"match": {"line": "成本"}, "column": "actual"}}]})
 
 
 def test_a_proposed_board_card_comes_back_drawn_for_the_conversation(tmp_path):

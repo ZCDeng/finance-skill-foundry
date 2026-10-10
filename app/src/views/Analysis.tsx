@@ -82,6 +82,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   const [materialsRefresh, setMaterialsRefresh] = useState(0);
   // The collection run a card in the conversation asked to open on the 收费明细 panel.
   const [billingShow, setBillingShow] = useState<{ id: string; count: number } | undefined>(undefined);
+  // Bumped when a card in the conversation opens a run: RunPanel reads the kept run only when it mounts.
+  const [runOpens, setRunOpens] = useState(0);
   // One scope per task, edited from the 资料 page and the finance settings alike.
   const analysisScope = useAnalysisScope(task?.id, task?.title ?? '', state?.datasets ?? [], scopeRefresh.version, scopeRefresh.quiet);
   // Held here, not in the workbench: it unmounts when the tab changes, and a run
@@ -376,6 +378,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       }
       writeCopy(`${taskId}:run`, action.runId);
       if (action.analysisId) setSelectedAnalysis(action.analysisId);
+      setRunOpens((value) => value + 1);
       chooseTab('results');
       // The assistant may have calculated it after this page last read the task.
       void refresh(taskId).catch(() => undefined);
@@ -497,7 +500,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               <AskLink ask="readiness" label="让助手做资料体检" disabled={busy} />
               <AskLink ask="collection-health" label="让助手做回款健康分析" disabled={busy} />
             </> : undefined} /> : <>
-            <RunPanel key={task.id} analysis={analysis} analyses={view.analyses} runs={view.runs} drafts={view.drafts} datasets={view.datasets} superseded={view.superseded_datasets} busy={busy}
+            <RunPanel key={`${task.id}:${runOpens}`} analysis={analysis} analyses={view.analyses} runs={view.runs} drafts={view.drafts} datasets={view.datasets} superseded={view.superseded_datasets} busy={busy}
               question={task.title}
               versionPicker={<SearchableSelect label="分析版本" compact value={analysis.id}
                 triggerText={`第 ${view.analyses.findIndex((row) => row.id === analysis.id) + 1} 版（共 ${view.analyses.length} 版）· ${when(analysis.created_at)}`}

@@ -1012,6 +1012,19 @@ ${canonicalAppendix} 已改写`;
     expect(await screen.findByText('已钉到看板，等你在「看板」页认可。')).toBeTruthy();
   });
 
+  it('opens the run a conversation card read even while the results page is already showing another', async () => {
+    let tell: ((action: HarnessCardAction) => void) | undefined;
+    const earlier = { ...run, id: '9'.repeat(32), result: { ...run.result!, rows: [{ profit: '900719925474000.09' }] } };
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [earlier, run] }),
+      onHarnessCardAction: (cb) => { tell = cb; return () => { tell = undefined; }; } });
+    render(<Analysis {...props} embedded section="results" />);
+    await screen.findByText('900,719,925,474,099.99');
+    await waitFor(() => expect(tell).toBeDefined());
+    act(() => tell!({ action: 'open', taskId: task.id, kind: 'analysis', runId: earlier.id, analysisId: analysis.id }));
+    expect(await screen.findByText('900,719,925,474,000.09')).toBeTruthy();
+    expect(screen.queryByText('900,719,925,474,099.99')).toBeNull();
+  });
+
   it('keeps the user on drafts when a finance run refresh finishes after they leave results', async () => {
     const refreshGate = deferred<Answer<AnalysisState>>();
     const analysisState = vi.fn(async () => analysisState.mock.calls.length === 1 ? success({ ...initial, datasets: [source, budgetSource] }) : refreshGate.promise);

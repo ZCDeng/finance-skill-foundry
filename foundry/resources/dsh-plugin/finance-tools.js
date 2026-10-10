@@ -309,7 +309,7 @@ export const FINANCE_TOOLS = {
       items: { type: "array", minItems: 2, maxItems: 4, items: { type: "object" }, description: "compare：每项写法同 figure（run_id + select，或 collection_run_id + figure + 可选 group）" },
       order: { type: "string", enum: ["asc", "desc"] },
       limit: { type: "integer", minimum: 1, maximum: 50 },
-      reference: { type: "object", description: "排名条的参考线 {value, label}" },
+      reference: { type: "object", description: "排名条的参考线 {value, label}；收缴率排名的 value 和运行里的率一样写小数（80% 写 0.8）" },
     } } },
     follow_ups: { type: "array", maxItems: 3, items: boundedText(40, "经理接下来可能问的一个问题", 1) },
   }),
