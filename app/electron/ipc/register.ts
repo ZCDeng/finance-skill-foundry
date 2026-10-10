@@ -10,6 +10,7 @@ import type { HarnessHost } from '../harness/host.js';
 import { followupDraft } from '../harness/handoff.js';
 import {
   analysisExportPath,
+  dashboardSnapshotPath,
   deliverablePath,
   galleryRows,
   libraryDetail,
@@ -165,8 +166,8 @@ export function registerIpc(
 
   /**
    * A file 成果库 lists, handed to the default program or shown in Finder.
-   * `file` is a filed export (digest and format) or a 写回 Excel copy (its id);
-   * either way the CLI names the path only after checking the bytes.
+   * `file` is a filed export (digest and format), a 写回 Excel copy or a 看板快照
+   * (its id); either way the CLI names the path only after checking the bytes.
    */
   ipcMain.handle(CHANNELS.libraryFile, (_event, task: unknown, file: unknown, action: unknown) =>
     answer(async () => {
@@ -176,7 +177,9 @@ export function registerIpc(
         ? await analysisExportPath(bound, String(spec.sha ?? ''), String(spec.format ?? ''))
         : spec.kind === 'workbook'
           ? await workbookOutputPath(bound, String(spec.id ?? ''))
-          : (() => { throw new FoundryFailure(`not a library file: ${String(spec.kind)}`, null); })();
+          : spec.kind === 'dashboard'
+            ? await dashboardSnapshotPath(bound, String(spec.id ?? ''))
+            : (() => { throw new FoundryFailure(`not a library file: ${String(spec.kind)}`, null); })();
       if (action === 'reveal') {
         shell.showItemInFolder(found);
         return { shown: found };
@@ -567,6 +570,47 @@ export function registerIpc(
       // The CLI refuses a name without .xlsx rather than this side adding one past the dialog's overwrite check.
       const result = await analysisCall(task, 'workbook-rollforward-export', ['--spec', objectJson({ run_id: run, destination: selected.filePath })]);
       return { exported: true, filename: String(result.filename ?? path.basename(selected.filePath)) };
+    }));
+  /**
+   * 看板快照. The renderer sends what the board shows as data; main checks its shape, asks where to save, draws the
+   * page itself (PDF, or a PNG for the one slide), and hands both to the CLI, which holds the data to the board and
+   * files the bytes in 成果库. The copy the manager chose is the filed bytes.
+   */
+  ipcMain.handle(CHANNELS.dashboardExport, (_e, rawTask: unknown, rawFormat: unknown, rawSnapshot: unknown) =>
+    answer(async () => {
+      const task = taskId(rawTask);
+      const page = await import('../reports/dashboard-snapshot.js');
+      const format = page.SNAPSHOT_FORMATS.find((value) => value === rawFormat);
+      if (!format) throw new Error('unsupported dashboard snapshot format');
+      const snapshot = page.normalizeSnapshot(rawSnapshot, format !== 'xlsx');
+      const kind = { pdf: { name: 'PDF 文件', title: '导出看板一页纸（PDF）' }, pptx: { name: 'PowerPoint 演示文稿', title: '导出看板一页纸（PPT）' },
+        xlsx: { name: 'Excel 工作簿', title: '导出看板快照（Excel）' } }[format];
+      const selected = await dialog.showSaveDialog({ title: kind.title, defaultPath: page.snapshotFileName(snapshot, format),
+        filters: [{ name: kind.name, extensions: [format] }] });
+      if (selected.canceled || !selected.filePath) return { cancelled: true as const };
+      // A name past the dialog's own extension would skip its overwrite check, so one without it is refused, not fixed.
+      if (path.extname(selected.filePath).toLowerCase() !== `.${format}`) throw new FoundryRefusal(`文件名要以 .${format} 结尾。`, REFUSED);
+      const { mkdtemp, writeFile, copyFile, rm } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      let scratch: string | undefined;
+      try {
+        let file: string | undefined;
+        if (format !== 'xlsx') {
+          const { fontData, figureFontData } = await import('../reports/host.js');
+          const html = page.snapshotHtml(snapshot, { sans: await fontData(), figures: await figureFontData() }, page.stampOf(new Date()));
+          const { renderSnapshot } = await import('../reports/dashboard-print.js');
+          const bytes = await renderSnapshot(html, format === 'pdf' ? 'pdf' : 'png', new AbortController().signal);
+          scratch = await mkdtemp(path.join(tmpdir(), 'fa-dashboard-export-'));
+          file = path.join(scratch, format === 'pdf' ? 'page.pdf' : 'page.png');
+          await writeFile(file, bytes, { mode: 0o600 });
+        }
+        const filed = await draftCall(task, 'dashboard-snapshot', { format, model: snapshot, ...(file ? { file } : {}) }) as {
+          snapshot: { id: string }; path: string };
+        await copyFile(filed.path, selected.filePath);
+        return { exported: true as const, format, path: selected.filePath, snapshot_id: filed.snapshot.id };
+      } finally {
+        if (scratch) await rm(scratch, { recursive: true, force: true });
+      }
     }));
   ipcMain.handle(CHANNELS.analysisOpenOutput, (_e, task: unknown, run: unknown, output: unknown) =>
     answer(async () => {

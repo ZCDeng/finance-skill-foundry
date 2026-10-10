@@ -123,7 +123,22 @@ export type GalleryRow =
   | { type: 'export'; key: string; at: string; task: TaskRow; exported: AnalysisExportRow }
   | { type: 'chart'; key: string; at: string; task: TaskRow; chart: ChartRow }
   | { type: 'workbook'; key: string; at: string; task: TaskRow; output: WorkbookOutputRow }
-  | { type: 'collection'; key: string; at: string; task: TaskRow; run: CollectionRunRow };
+  | { type: 'collection'; key: string; at: string; task: TaskRow; run: CollectionRunRow }
+  | { type: 'dashboard'; key: string; at: string; task: TaskRow; snapshot: DashboardSnapshotRow };
+
+/** One 看板快照: the accepted cards it shows, and the ones it left out and why. */
+export interface DashboardSnapshotRow {
+  id: string;
+  format: 'pdf' | 'pptx' | 'xlsx';
+  filename: string;
+  sha256: string;
+  created_at: string;
+  title: string;
+  cards: string[];
+  /** Accepted cards a page had no room for. */
+  beyond: string[];
+  left_out: { pinned: string[]; scenario: string[] };
+}
 
 /** One 归档图: a chart saved from a run, with the names of the files that run read. */
 export interface ChartRow {
@@ -257,7 +272,7 @@ export function listAnalysisDeliverables(binding: Binding, env?: FoundryEnv): Pr
  * keeps the list the same on every read.
  */
 const SAME_SECOND_RANK: Record<GalleryRow['type'], number> = {
-  export: 0, draft: 1, workbook: 2, chart: 3, collection: 4, deliverable: 5,
+  export: 0, draft: 1, workbook: 2, dashboard: 3, chart: 4, collection: 5, deliverable: 6,
 };
 
 /** A row's own sequence inside its kind: the old flow's seq, the draft's seq, the source revision; none for the rest. */
@@ -311,6 +326,13 @@ export async function libraryDetail(binding: Binding, draftId: string, env?: Fou
 export async function workbookOutputPath(binding: Binding, outputId: string, env?: FoundryEnv): Promise<string> {
   if (!/^[0-9a-f]{32}$/.test(outputId)) throw new Error(`not a workbook output id: ${outputId}`);
   const found = await runFoundryJson<{ path: string }>(binding, 'workbook-output-path', ['--output', outputId], env);
+  return found.path;
+}
+
+/** Where a 看板快照 was filed, from its id; the CLI checks its bytes against its record. */
+export async function dashboardSnapshotPath(binding: Binding, snapshotId: string, env?: FoundryEnv): Promise<string> {
+  if (!/^[0-9a-f]{32}$/.test(snapshotId)) throw new Error(`not a dashboard snapshot id: ${snapshotId}`);
+  const found = await runFoundryJson<{ path: string }>(binding, 'dashboard-snapshot-path', ['--snapshot', snapshotId], env);
   return found.path;
 }
 

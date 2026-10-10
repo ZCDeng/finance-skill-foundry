@@ -17,6 +17,7 @@
   "book_operating_cash_flow": "17431.94",
   "report_operating_cost": "266854.5",
   "next_month": {"matched": 10, "auto_apply": 9, "differs": "05·合并资产负债表"},
+  "dashboard": {"cards": 6, "figures": 4, "accepted": 5},
   "billing": {
     "city": "海口城市公司",
     "as_of": "2026-08-31",

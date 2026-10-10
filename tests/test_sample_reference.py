@@ -109,6 +109,47 @@ def test_the_figures_the_guide_quotes_are_the_ones_the_reference_computes(built)
     assert dict(Counter(row["level"] for row in run if row["metric_key"] == "risk_score")) == expected["radar"]
 
 
+def test_the_reference_board_is_the_one_the_guide_describes_and_it_exports(built):
+    """Step 11: the 回款健康 template on the example's run, accepted but its 回款情景; a snapshot of it files."""
+    import json
+
+    from foundry.dashboard_snapshot import accepted, ranked, save
+    from foundry.dashboards import matching_rows
+    from foundry.sample_reference import BOARD_NOTE
+    from foundry.sample_task import pack_dir
+
+    expected = json.loads((pack_dir() / "expected.json").read_text(encoding="utf-8"))["dashboard"]
+    _, task, _ = built
+    board = FinanceStore(task, actor="manager").dashboard_read({})["dashboard"]
+    cards = board["cards"]
+    assert {"cards": len(cards), "figures": sum(card["kind"] == "figure" for card in cards),
+            "accepted": sum(accepted(card) for card in cards)} == expected
+    assert [card["kind"] for card in cards if not accepted(card)] == ["scenario"]
+    assert all(card["note"] == BOARD_NOTE for card in cards if accepted(card))
+
+    run = next(row for row in AnalysisStore(task).state()["runs"] if row["id"] == cards[0]["run_id"])
+    rows, taken = run["result"]["rows"], [card for card in cards if accepted(card)]
+    figures, charts = [], []
+    for number, card in enumerate(taken, start=1):
+        if card["kind"] == "figure":
+            [(_, row)] = matching_rows(rows, card["select"]["match"])
+            figures.append({"card_id": card["id"], "title": card["title"], "subject": row["entity"], "part": "本期",
+                            "value": {"text": row["display_value"], "negative": row["display_value"].startswith("-")},
+                            "level": row.get("level"), "level_label": row.get("level_label") or "", "beside": [], "note": card["note"],
+                            "source": number, "cell": {"column": "value", "value": str(row["value"])}})
+        else:
+            charts.append({"card_id": card["id"], "kind": "rank", "title": card["title"], "unit": "个百分点", "note": card["note"], "source": number,
+                           "items": [{"label": row["entity"], "value": value, "shown": {"text": row["display_value"], "negative": value < 0}, "note": ""}
+                                     for row, value in ranked(card, run)],
+                           "reference": {"value": 0.0, "label": "生死线"}})
+    model = {"version": 1, "board_id": board["id"], "task": task.meta()["title"], "period": "2026 年 8 月", "figures": figures, "charts": charts,
+             "sources": [{"n": number, "card_id": card["id"], "title": card["title"], "run": "A", "lines": []} for number, card in enumerate(taken, start=1)],
+             "runs": [{"key": "A", "run_id": run["id"], "label": "回款健康", "computed": "", "files": []}], "beyond": [],
+             "left_out": {"pinned": [], "scenario": [{"card_id": card["id"], "title": card["title"]} for card in cards if card["kind"] == "scenario"]}}
+    record = save(task, {"format": "xlsx", "model": model}, actor="manager")["snapshot"]
+    assert len(record["cards"]) == expected["accepted"] and record["left_out"] == {"pinned": [], "scenario": ["回款情景：收缴率变了会怎样"]}
+
+
 def test_the_next_month_route_adopts_what_the_practice_task_confirmed(tmp_path):
     """Step 9: confirm the August month-close in the practice task, then make the September one."""
     import json

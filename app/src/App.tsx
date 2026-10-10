@@ -548,7 +548,7 @@ export function App() {
   }, [api, refreshTasks]);
 
   /** Bring an example task up under 进行中, on the tab it is meant to be read from. */
-  const showSampleTask = useCallback((id: string, section: 'materials' | 'results' | 'drafts' | 'close') => {
+  const showSampleTask = useCallback((id: string, section: 'materials' | 'results' | 'dashboard' | 'drafts' | 'close') => {
     setTaskLifecycleView('active');
     currentRef.current = id;
     explicitSelection.current = true;
@@ -1182,6 +1182,6 @@ export function App() {
 }
 
 /** The tab a place in the guide is on. */
-function guideSection(target: GuideTarget): 'materials' | 'results' | 'drafts' | 'close' {
-  return target === 'results' || target === 'drafts' || target === 'close' ? target : 'materials';
+function guideSection(target: GuideTarget): 'materials' | 'results' | 'dashboard' | 'drafts' | 'close' {
+  return target === 'results' || target === 'dashboard' || target === 'drafts' || target === 'close' ? target : 'materials';
 }

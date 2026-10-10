@@ -1,27 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowRight, Check, Pin, RefreshCw, X } from 'lucide-react';
+import { ArrowRight, Check, Download, Pin, RefreshCw, X } from 'lucide-react';
 import { bridge, when, type Answer, type AnalysisRevision, type AnalysisRun, type DatasetSnapshot } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '../../components/ui/empty.js';
 import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '../../components/ui/dropdown-menu.js';
+import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '../../components/ui/alert-dialog.js';
-import { RankBars, type RankItem } from '../../components/charts/RankBars.js';
+import { RankBars } from '../../components/charts/RankBars.js';
 import { Waterfall } from '../../components/charts/Waterfall.js';
-import { groupDigits } from '../../lib/figures.js';
 import { formatPeriod } from '../../lib/period.js';
 import { AskLink } from '../guide/GuideHub.js';
 import { ScenarioCard } from './ScenarioCard.js';
 import { scenarioBase } from './dashboardScenario.js';
 import { FigureSource } from './FigureSource.js';
 import { figureSource, runIsStale, type FigureSourceContext } from './figureSource.js';
-import { isCollectionHealthRun, LevelMark, type HealthRow } from './CollectionHealthView.js';
-import { kpiFor } from './BusinessResultView.js';
+import { LevelMark } from './CollectionHealthView.js';
 import { profitBridges } from './RunPanel.js';
-import { columnSemantics, displayColumns, formatBusinessCell, businessColumnLabel } from './businessResults.js';
-import { cardSignature, matchingRows, splitDisplay, type CardDraft, type CarryOffer, type Dashboard, type DashboardCard, type PinBoard } from './dashboard.js';
+import { cardSignature, type CardDraft, type CarryOffer, type Dashboard, type DashboardCard, type PinBoard } from './dashboard.js';
 import { newerRun, TEMPLATES, type Template } from './dashboardTemplates.js';
+import { drawsOn, figureView, rankItems, sameMatch } from './dashboardViews.js';
+import { acceptedCard, buildSnapshot, type SnapshotTask } from './dashboardSnapshot.js';
+import type { SnapshotFormat } from '../../../electron/reports/dashboard-snapshot.js';
 import { errorText, unwrap } from './shared.js';
 import './Dashboard.css';
 
@@ -145,67 +148,6 @@ const STATE_WORDS: Record<DashboardCard['state'], string> = { explore: '助手�
 /** A scenario card on the board is a what-if, never waiting to be accepted. */
 const stateWord = (card: DashboardCard) => (card.kind === 'scenario' && card.state !== 'explore' ? '情景' : STATE_WORDS[card.state]);
 
-/** What a figure card shows of its row. */
-type FigureView = { subject: string; value: string; part: string; beside: [string, string][]; level: HealthRow['level']; levelLabel: string | null; row: Record<string, unknown>; facts: [string, string][] };
-
-function figureView(card: DashboardCard, run: AnalysisRun): FigureView | null {
-  const rows = run.result?.rows ?? [];
-  const found = matchingRows(rows, card.select.match);
-  const column = card.select.column ?? '';
-  if (found.length !== 1 || !(column in found[0])) return null;
-  const row = found[0];
-  if (isCollectionHealthRun(run)) {
-    const health = row as unknown as HealthRow;
-    // The same measure's other lines: 上年同期 or 年初, and the change.
-    const beside = (rows as unknown as HealthRow[]).filter((item) => item !== health && item.entity === health.entity && item.metric_key === health.metric_key)
-      .map((item): [string, string] => [item.scenario, item.display_value]);
-    return {
-      subject: health.entity, value: health.display_value, part: health.scenario, beside, level: health.level, levelLabel: health.level_label, row,
-      facts: [['主体', health.entity], ['单位', health.unit ?? ''], ['说明', health.note]],
-    };
-  }
-  const kpi = kpiFor(row, displayColumns(run));
-  const value = column === 'actual' ? kpi.actual
-    : formatBusinessCell(row[column], { name: column, label: businessColumnLabel(column), semantics: columnSemantics(column) }, row);
-  const beside: [string, string][] = column === 'actual'
-    ? [[kpi.estimated ? '预算（估算）' : '预算', kpi.budget], ['差异', kpi.difference], [kpi.rateLabel, kpi.rate]].filter(([, text]) => text && text !== '—') as [string, string][]
-    : [];
-  return {
-    subject: [kpi.periodLabel, kpi.unit].join(' · '), value, part: column === 'actual' ? '实际' : businessColumnLabel(column), beside, level: null, levelLabel: null, row,
-    facts: [['期间', kpi.periodLabel], ['单位', kpi.unit], ['依据', kpi.basis]],
-  };
-}
-
-/** The bars of a rank card, worst first as the card orders them, at most its limit. */
-function rankItems(card: DashboardCard, run: AnalysisRun): { items: RankItem[]; unit: string } {
-  const { column = '', label = '', order = 'desc', limit = 10 } = card.select;
-  const health = isCollectionHealthRun(run);
-  const rows = matchingRows(run.result?.rows ?? [], card.select.match)
-    .filter((row) => row[label] != null && row[label] !== '' && row[column] !== '' && row[column] != null && Number.isFinite(Number(row[column])));
-  rows.sort((a, b) => (order === 'asc' ? 1 : -1) * (Number(a[column]) - Number(b[column])));
-  let unit = '';
-  const items = rows.slice(0, limit).map((row) => {
-    // A collection run writes each figure with its unit; the bar takes the figure, the caption the unit.
-    const written = health && typeof row.display_value === 'string' ? splitDisplay(row.display_value) : { figure: groupDigits(String(row[column]).trim()), unit: typeof row.unit === 'string' ? row.unit : '' };
-    unit ||= written.unit;
-    return { label: String(row[label]), value: Number(row[column]), text: written.figure, note: typeof row.level_label === 'string' && row.level_label ? row.level_label : undefined };
-  });
-  return { items, unit };
-}
-
-function sameMatch(left: Record<string, string>, right: Record<string, string>): boolean {
-  const keys = Object.keys(left);
-  return keys.length === Object.keys(right).length && keys.every((key) => right[key] === left[key]);
-}
-
-/** Whether a card still draws on another run: the rows it names are there, as the backend will check. */
-function drawsOn(card: DashboardCard, run: AnalysisRun): boolean {
-  if (card.kind === 'figure') return figureView(card, run) !== null;
-  if (card.kind === 'rank') return rankItems(card, run).items.length >= 2;
-  if (card.kind === 'scenario') return scenarioBase(run, card.select.match) !== null;
-  return profitBridges(run).some((bridge) => sameMatch(bridge.match, card.select.match));
-}
-
 /** A template's cards not on the board yet. */
 function freshCards(template: Template, runs: AnalysisRun[], cards: DashboardCard[]): CardDraft[] {
   const shown = new Set(cards.map(cardSignature));
@@ -219,7 +161,14 @@ type CardActions = {
   onOpenResult?(run: AnalysisRun): void;
 };
 
-export function DashboardView({ state, runs, analyses, datasets, superseded = [], readOnly, onOpenResult }: {
+/** 导出一页纸: what each format is for, as the menu says it. */
+export const EXPORTS: [SnapshotFormat, string, string][] = [
+  ['pdf', 'PDF', '一页 A4 横版'], ['pptx', 'PPT', '一页幻灯片'], ['xlsx', 'Excel', '数字和来源'],
+];
+
+export function DashboardView({ task, state, runs, analyses, datasets, superseded = [], readOnly, onOpenResult }: {
+  /** The task the board is on, as the page names it; without it the board has no export. */
+  task?: SnapshotTask & { id: string };
   state: DashboardState;
   runs: AnalysisRun[];
   analyses: AnalysisRevision[];
@@ -228,7 +177,7 @@ export function DashboardView({ state, runs, analyses, datasets, superseded = []
   readOnly: boolean;
   onOpenResult?(run: AnalysisRun): void;
 }) {
-  const { dashboard, loaded, change, news, dismiss } = state;
+  const { dashboard, loaded, load, change, news, dismiss } = state;
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState('');
   const [error, setError] = useState('');
@@ -250,6 +199,26 @@ export function DashboardView({ state, runs, analyses, datasets, superseded = []
     void change(edit).then(() => setSaid(label), (failure) => setError(errorText(failure))).finally(() => setBusy(false));
   };
   const actions: CardActions = { readOnly, busy, act, onOpenResult };
+  const accepted = board.filter(acceptedCard).length;
+  const canExport = Boolean(task && bridge()?.dashboardExport);
+  const exportAs = (format: SnapshotFormat) => {
+    const api = bridge();
+    if (!task || !api?.dashboardExport || !dashboard) return;
+    setBusy(true); setError(''); setSaid('');
+    void (async () => {
+      // Read once more first: a page is laid out from the board the manager is looking at, never one changed since.
+      const latest = await load();
+      if (!latest || latest.id !== dashboard.id) {
+        setError('看板刚在别处更新过，已重新读取，看过后再导出。');
+        return;
+      }
+      const snapshot = buildSnapshot({ board: latest, runs, contextOf, task, format });
+      const out = unwrap(await api.dashboardExport!(task.id, format, snapshot));
+      if ('cancelled' in out) return;
+      const name = out.path.split(/[\\/]/).pop() ?? out.path;
+      setSaid(`已导出「${name}」，成果库里也存了一份（看板快照）。`);
+    })().catch((failure) => setError(errorText(failure))).finally(() => setBusy(false));
+  };
   const addTemplate = (template: Template) => {
     const drafts = freshCards(template, runs, cards);
     act(`已加上「${template.title}」的 ${drafts.length} 张卡，等你认可。`, (now) => [...now, ...freshCards(template, runs, now)]);
@@ -285,6 +254,7 @@ export function DashboardView({ state, runs, analyses, datasets, superseded = []
             <Check size={14} strokeWidth={1.5} aria-hidden />{`全部认可（${waiting.length} 张）`}</Button>}
           {movable.length > 0 && <Button type="button" variant="outline" disabled={busy} onClick={moveAll}>
             <RefreshCw size={14} strokeWidth={1.5} aria-hidden />{`换成新结果（${movable.length} 张）`}</Button>}
+          {canExport && <ExportMenu accepted={accepted} left={board.length - accepted} busy={busy} onExport={exportAs} />}
         </div>}
       </div>
       {proposed.length > 0 && <section className="dashboard__proposed" aria-labelledby="dashboard-proposed">
@@ -319,6 +289,26 @@ export function DashboardView({ state, runs, analyses, datasets, superseded = []
       </AlertDialogContent>
     </AlertDialog>
   </div>;
+}
+
+/**
+ * 导出一页纸: the accepted cards as one A4 page (PDF, or a slide) or a workbook. What is not accepted stays off it,
+ * and the page says so.
+ */
+function ExportMenu({ accepted, left, busy, onExport }: { accepted: number; left: number; busy: boolean; onExport(format: SnapshotFormat): void }) {
+  return <DropdownMenu>
+    <DropdownMenuTrigger asChild>
+      <Button type="button" variant="outline" disabled={busy || !accepted} title={accepted ? undefined : '先认可要导出的卡'}>
+        <Download size={14} strokeWidth={1.5} aria-hidden />导出一页纸</Button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end" collisionPadding={16}>
+      <DropdownMenuLabel>{`放进已认可的 ${accepted} 张卡`}</DropdownMenuLabel>
+      {left > 0 && <p className="dashboard__export-note">{`另外 ${left} 张待认可或是情景，不放进来，页脚会写明。`}</p>}
+      <DropdownMenuSeparator />
+      {EXPORTS.map(([format, name, what]) => <DropdownMenuItem key={format} disabled={busy} onSelect={() => onExport(format)}>
+        {`${name}（${what}）`}</DropdownMenuItem>)}
+    </DropdownMenuContent>
+  </DropdownMenu>;
 }
 
 /**

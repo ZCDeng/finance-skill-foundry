@@ -14,6 +14,7 @@ import type {
   Bridge,
   ChartRow,
   CollectionRunRow,
+  DashboardSnapshotRow,
   DeliverableRow,
   GalleryRow,
   LibraryDetail,
@@ -68,6 +69,10 @@ const COLLECTION: CollectionRunRow = {
   id: 'r'.repeat(32), created_at: SECOND, run_by: 'manager', as_of: '2026-08-31', group_by: [],
   caliber: { version: null, status: 'trial', differs: [] }, inputs: { receivable: '应收明细' },
   figures: { collection_rate_current: '0.8212', arrears_recovery_rate: '0.3656', collection_rate_total: '0.7316' },
+};
+const SNAPSHOT: DashboardSnapshotRow = {
+  id: 's'.repeat(32), format: 'pdf', filename: '经营看板_华宸物业8月_2026年8月.pdf', sha256: '7'.repeat(64), created_at: SECOND, title: '经营看板 · 华宸物业 8 月',
+  cards: ['距生死线（本年账单收缴率）', '生死线收缴率'], beyond: [], left_out: { pinned: ['应收天数'], scenario: ['回款情景：收缴率变了会怎样'] },
 };
 const LIST = { open: null, onOpenWorkbook: () => {}, busy: null, onBack: () => {} };
 
@@ -453,6 +458,23 @@ describe('the 成果库 side panel', () => {
     expect(panel.querySelector('ins')!.textContent).toContain('毛利率 32.1%。');
     expect(panel.querySelector('del')!.textContent).toContain('毛利率 31.0%。');
     expect(within(panel).getByText(/新增 1 行，删除 1 行/).textContent).toContain('从所选那一版到这一版');
+  });
+
+  it('opens a 看板快照, says what it left out, and points at its task\'s board', () => {
+    const onFile = vi.fn(), onOpenTask = vi.fn();
+    render(<Deliverables rows={[...rows, { type: 'dashboard', key: `dashboard:${SNAPSHOT.id}`, at: SECOND, task: A, snapshot: SNAPSHOT }]} {...LIST}
+      onOpen={() => {}} onExport={() => {}} onFile={onFile} onOpenTask={onOpenTask} />);
+    expect(statusOf(/^看板快照 · PDF 一页纸/).textContent).toBe('2 张已认可的卡');
+    fireEvent.change(screen.getByRole('combobox', { name: '类型' }), { target: { value: 'dashboard' } });
+    expect(screen.queryByRole('button', { name: /^写回 Excel/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^看板快照 · PDF 一页纸/ }));
+    const panel = screen.getByRole('complementary');
+    expect(panel.textContent).toContain('距生死线（本年账单收缴率）、生死线收缴率');
+    expect(panel.textContent).toContain('待认可 1 张；情景 1 张');
+    fireEvent.click(within(panel).getByRole('button', { name: /^打开/ }));
+    expect(onFile).toHaveBeenCalledWith(A, { kind: 'dashboard', id: SNAPSHOT.id }, 'open');
+    fireEvent.click(within(panel).getByRole('button', { name: /去这个任务的看板/ }));
+    expect(onOpenTask).toHaveBeenCalledWith(A, 'dashboard');
   });
 
   it('opens a 写回 Excel copy and points a 收缴率 run at its task', () => {

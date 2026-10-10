@@ -9,6 +9,7 @@ decide nothing of their own: a task's month-close line is finance_close_status's
     library          every version and file the non-trashed tasks produced (成果库), unsorted
     library-detail   one draft's text, the runs and files it rests on, and the task's other versions
     workbook-output-path  where a 写回 Excel copy was filed, by its id, checked against its digest
+    dashboard-snapshot-path  where a 看板快照 was filed, by its id, checked against its digest
 
 Read-only. A task that cannot be read is reported on its own row with its error rather than failing
 the whole page: one broken task must not hide the others' to-dos.
@@ -23,7 +24,7 @@ from typing import Any
 
 from foundry.errors import FoundryError
 
-COMMANDS = {"overview", "library", "library-detail", "workbook-output-path"}
+COMMANDS = {"overview", "library", "library-detail", "workbook-output-path", "dashboard-snapshot-path"}
 
 # What a block's blocking items are, in the overview's words; the page groups to-dos by this.
 BLOCK_KIND = {
@@ -38,11 +39,13 @@ BLOCK_KIND = {
 
 def add_parsers(sub) -> None:
     sub.add_parser("overview", help="总览: every active task's month-close status and what is waiting on the manager")
-    sub.add_parser("library", help="成果库: every draft, export, chart, 写回 Excel copy and 收缴率 run, unsorted")
+    sub.add_parser("library", help="成果库: every draft, export, chart, 写回 Excel copy, 看板快照 and 收缴率 run, unsorted")
     p = sub.add_parser("library-detail", help="one draft's text, what it rests on, and the task's other versions")
     p.add_argument("--draft", required=True)
     p = sub.add_parser("workbook-output-path", help="where a 写回 Excel copy was filed, by its id")
     p.add_argument("--output", required=True)
+    p = sub.add_parser("dashboard-snapshot-path", help="where a 看板快照 was filed, by its id")
+    p.add_argument("--snapshot", required=True)
 
 
 def dispatch(args) -> bool:
@@ -63,6 +66,10 @@ def dispatch(args) -> bool:
         task = store.get(args.task)
         if args.cmd == "library-detail":
             result = library_detail(task, args.draft)
+        elif args.cmd == "dashboard-snapshot-path":
+            from foundry.dashboard_snapshot import snapshot_path
+
+            result = {"path": str(snapshot_path(task, args.snapshot))}
         else:
             result = {"path": str(workbook_output_path(task, args.output))}
     from foundry.analysis_data import json_value
@@ -217,6 +224,12 @@ def library(store) -> list[dict]:
                          "output": {"id": output["id"], "filename": output.get("filename") or "", "sha256": output["sha256"],
                                     "created_at": output["created_at"], "dataset": names.get(output.get("dataset_id"), "资料"),
                                     "applied": _count(output.get("applied")), "kept": _count(output.get("kept"))}})
+        for snapshot in _dashboard_snapshots(task):
+            rows.append({"type": "dashboard", "key": f"dashboard:{snapshot['id']}", "at": snapshot["created_at"], "task": row,
+                         "snapshot": {"id": snapshot["id"], "format": snapshot["format"], "filename": snapshot.get("filename") or "",
+                                      "sha256": snapshot["sha256"], "created_at": snapshot["created_at"], "title": snapshot.get("title") or "经营看板",
+                                      "cards": [card["title"] for card in snapshot.get("cards", [])], "beyond": snapshot.get("beyond", []),
+                                      "left_out": snapshot.get("left_out") or {"pinned": [], "scenario": []}}})
         for run in _collection_runs(task):
             rows.append({"type": "collection", "key": f"collection:{run['id']}", "at": run["created_at"], "task": row,
                          "run": run})
@@ -244,6 +257,12 @@ def _workbook_outputs(task) -> list[dict]:
         return []
     records = [analysis._read(path) for path in sorted(folder.glob("*.json"))]
     return sorted(records, key=lambda record: (record.get("seq", 0), record["created_at"]))
+
+
+def _dashboard_snapshots(task) -> list[dict]:
+    from foundry.dashboard_snapshot import snapshots
+
+    return snapshots(task)
 
 
 def _collection_runs(task) -> list[dict]:

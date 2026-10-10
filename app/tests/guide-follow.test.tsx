@@ -17,8 +17,8 @@ const seen = (id: string) => route.find((row) => row.id === id)!.body
 const money = (value: string) => Number(value).toLocaleString('en-US', { maximumFractionDigits: 2 });
 const yuan = (value: string) => Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-it('walks eleven steps, each saying what the reader should see', () => {
-  expect(route.map((row) => row.id)).toEqual(Array.from({ length: 11 }, (_, index) => `follow-${index + 1}`));
+it('walks twelve steps, each saying what the reader should see', () => {
+  expect(route.map((row) => row.id)).toEqual(Array.from({ length: 12 }, (_, index) => `follow-${index + 1}`));
   for (const row of route) expect(seen(row.id), row.id).not.toBe('');
 });
 
@@ -57,10 +57,14 @@ it('prints the figures the engine computes for the example', () => {
   // The 口径 lines the step quotes are the ones the panel writes for that variant.
   for (const line of caliberLines({ year_start_month: 1, total_method: 'all_receipts', related_owners: ['地产'], exclude_related: false, excluded_fee_items: ['商业租金代收'] })
     .filter((line) => line.startsWith('综合') || line.startsWith('不算'))) expect(seen('follow-8')).toContain(`「${line}」`);
+  const { cards, figures, accepted } = EXPECTED.dashboard;
+  expect(seen('follow-11')).toContain(`加上 ${cards} 张卡：${figures} 个关键数字`);
+  expect(seen('follow-11')).toContain(`「全部认可（${accepted} 张）」`);
+  expect(seen('follow-11')).toContain(`距生死线（本年账单收缴率）${EXPECTED.collection_gap} 个百分点、生死线收缴率 ${EXPECTED.break_even_collection}%`);
   const { matched, auto_apply: auto, differs } = EXPECTED.next_month;
-  expect(seen('follow-11')).toContain(`${matched} 张表`);
-  expect(seen('follow-11')).toContain(`其中 ${auto} 张直接套用`);
-  expect(seen('follow-11')).toContain(`「${differs}」`);
+  expect(seen('follow-12')).toContain(`${matched} 张表`);
+  expect(seen('follow-12')).toContain(`其中 ${auto} 张直接套用`);
+  expect(seen('follow-12')).toContain(`「${differs}」`);
 });
 
 it('opens the reference at the same place, and says a failed build next to the button', async () => {
@@ -74,12 +78,12 @@ it('opens the reference at the same place, and says a failed build next to the b
 
 it('makes the September task from the last step', async () => {
   const nextMonth = vi.fn().mockResolvedValue(undefined);
-  render(<GuideHub article="follow-11" onOpen={() => undefined} onClose={() => undefined} onNextMonth={nextMonth} />);
+  render(<GuideHub article="follow-12" onOpen={() => undefined} onClose={() => undefined} onNextMonth={nextMonth} />);
   fireEvent.click(screen.getByRole('button', { name: '建 9 月练习任务' }));
   await waitFor(() => expect(nextMonth).toHaveBeenCalledOnce());
 });
 
 it('leaves a button out where this build cannot do it', () => {
-  render(<GuideHub article="follow-11" onOpen={() => undefined} onClose={() => undefined} />);
+  render(<GuideHub article="follow-12" onOpen={() => undefined} onClose={() => undefined} />);
   expect(screen.queryByRole('button', { name: '建 9 月练习任务' })).toBeNull();
 });

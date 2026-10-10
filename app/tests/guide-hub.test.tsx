@@ -91,7 +91,7 @@ it('a 「?」 asks the window for its article', () => {
 it('every article names where it applies and every link goes somewhere the workspace has', () => {
   for (const article of GUIDE_ARTICLES) {
     expect(article.appliesTo).toBeTruthy();
-    for (const block of article.body) if (block.kind === 'open') expect(['datasets', 'scope', 'structure', 'billing', 'results', 'drafts', 'close']).toContain(block.target);
+    for (const block of article.body) if (block.kind === 'open') expect(['datasets', 'scope', 'structure', 'billing', 'results', 'dashboard', 'drafts', 'close']).toContain(block.target);
   }
 });
 

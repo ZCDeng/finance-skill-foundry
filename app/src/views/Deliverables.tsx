@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState } from 'react';
-import { ArrowLeft, BarChart3, Eye, FilePen, FileSpreadsheet, FileText, ExternalLink, Percent, Search } from 'lucide-react';
+import { ArrowLeft, BarChart3, Eye, FilePen, FileSpreadsheet, FileText, ExternalLink, LayoutDashboard, Percent, Search } from 'lucide-react';
 
 import { DisclosureSummary } from '../components/Disclosure.js';
 import { NativeSelect } from '../components/ui/native-select.js';
@@ -14,11 +14,13 @@ import {
   type AnalysisExportRow,
   type ChartRow,
   type CollectionRunRow,
+  type DashboardSnapshotRow,
   type DeliverableRow,
   type ExportFormat,
   type GalleryRow,
   type TaskRow,
   type WorkbookOutputRow,
+  SNAPSHOT_FORMAT_WORDS,
   bytes,
   isWorkbook,
   when,
@@ -91,7 +93,8 @@ type OldLine = { kind: 'old'; key: string; at: string; row: DeliverableRow };
 type ChartLine = { kind: 'chart'; key: string; at: string; chart: ChartRow };
 type WorkbookLine = { kind: 'workbook'; key: string; at: string; output: WorkbookOutputRow };
 type CollectionLine = { kind: 'collection'; key: string; at: string; run: CollectionRunRow };
-type Line = RevisionLine | OldLine | ChartLine | WorkbookLine | CollectionLine;
+type DashboardLine = { kind: 'dashboard'; key: string; at: string; snapshot: DashboardSnapshotRow };
+type Line = RevisionLine | OldLine | ChartLine | WorkbookLine | CollectionLine | DashboardLine;
 type TaskGroup = { task: TaskRow; lines: Line[] };
 
 /**
@@ -121,6 +124,10 @@ function groupByTask(rows: GalleryRow[]): TaskGroup[] {
     }
     if (entry.type === 'collection') {
       group.lines.push({ kind: 'collection', key: entry.key, at: entry.at, run: entry.run });
+      continue;
+    }
+    if (entry.type === 'dashboard') {
+      group.lines.push({ kind: 'dashboard', key: entry.key, at: entry.at, snapshot: entry.snapshot });
       continue;
     }
     const source = entry.type === 'draft' ? entry.draft : entry.exported;
@@ -324,14 +331,14 @@ export function Deliverables({
 }
 
 
-type KindFilter = 'all' | 'documents' | 'chart' | 'workbook' | 'collection';
+type KindFilter = 'all' | 'documents' | 'chart' | 'dashboard' | 'workbook' | 'collection';
 type StatusFilter = 'all' | 'unreviewed' | 'reviewed' | 'accepted';
 type ModeFilter = 'all' | 'management' | 'audit';
 type Filters = { query: string; period: string; kind: KindFilter; status: StatusFilter; mode: ModeFilter };
 const NO_FILTERS: Filters = { query: '', period: '', kind: 'all', status: 'all', mode: 'all' };
 
 const KIND_FILTERS: [KindFilter, string][] = [
-  ['all', '全部类型'], ['documents', '文稿与导出件'], ['chart', '归档图'], ['workbook', '写回 Excel'], ['collection', '收缴率计算'],
+  ['all', '全部类型'], ['documents', '文稿与导出件'], ['chart', '归档图'], ['dashboard', '看板快照'], ['workbook', '写回 Excel'], ['collection', '收缴率计算'],
 ];
 const STATUS_FILTERS: [StatusFilter, string][] = [['all', '全部状态'], ['unreviewed', '待复核'], ['reviewed', '已阅'], ['accepted', '经理认可']];
 const MODE_FILTERS: [ModeFilter, string][] = [['all', '全部版本'], ['management', '管理版'], ['audit', '审计版']];
@@ -353,7 +360,8 @@ function passes(line: Line, filters: Filters): boolean {
 /** Search reads the task's name, its period (as written and as shown) and each line's own title. */
 function lineText(line: Line): string {
   return line.kind === 'revision' ? line.title : line.kind === 'chart' ? line.chart.label
-    : line.kind === 'workbook' ? `${line.output.filename} ${line.output.dataset}` : line.kind === 'collection' ? `收缴率 ${line.run.as_of}` : line.row.cause;
+    : line.kind === 'workbook' ? `${line.output.filename} ${line.output.dataset}` : line.kind === 'collection' ? `收缴率 ${line.run.as_of}`
+      : line.kind === 'dashboard' ? `看板快照 经营看板 ${SNAPSHOT_FORMAT_WORDS[line.snapshot.format]} ${line.snapshot.cards.join(' ')}` : line.row.cause;
 }
 function taskText(task: TaskRow): string {
   return [task.title, task.period ?? '', task.period ? formatPeriod(task.period) : ''].join(' ');
@@ -367,6 +375,7 @@ function selectionOf(task: TaskRow, line: Line): LibrarySelection | null {
   if (line.kind === 'chart') return { kind: 'chart', task, chart: line.chart };
   if (line.kind === 'workbook') return { kind: 'workbook', task, output: line.output };
   if (line.kind === 'collection') return { kind: 'collection', task, run: line.run };
+  if (line.kind === 'dashboard') return { kind: 'dashboard', task, snapshot: line.snapshot };
   return null;
 }
 
@@ -591,7 +600,9 @@ function LibraryRow({ task, line, nested, current, selected, onSelect, onOpenExp
       ? [<BarChart3 size={13} strokeWidth={1.5} aria-hidden />, `归档图 · ${line.chart.label || '未命名'}`, '已归档']
       : line.kind === 'workbook'
         ? [<FileSpreadsheet size={13} strokeWidth={1.5} aria-hidden />, `写回 Excel · ${line.output.dataset}`, `写入 ${line.output.applied} 格`]
-        : [<Percent size={13} strokeWidth={1.5} aria-hidden />, `收缴率计算 · 截至 ${line.run.as_of}`, CALIBER_SHORT[line.run.caliber.status]];
+        : line.kind === 'dashboard'
+          ? [<LayoutDashboard size={13} strokeWidth={1.5} aria-hidden />, `看板快照 · ${SNAPSHOT_FORMAT_WORDS[line.snapshot.format]}`, `${line.snapshot.cards.length} 张已认可的卡`]
+          : [<Percent size={13} strokeWidth={1.5} aria-hidden />, `收缴率计算 · 截至 ${line.run.as_of}`, CALIBER_SHORT[line.run.caliber.status]];
   return (
     <tr className={nested ? 'fnd-library__row fnd-library__row--older' : 'fnd-library__row'} data-selected={selected || undefined}>
       <td>

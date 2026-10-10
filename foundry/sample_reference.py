@@ -16,6 +16,8 @@ filled in by the example and not by a manager. The steps are the guide's 跟着�
    back to the board's own cells.
 5. 收费明细：海口城市公司's billing export filed, its columns confirmed, the industry-common 口径
    confirmed as it stands, and the rates run by 房产性质 against the 套表's 本年收缴率 for the city.
+6. 看板：the 回款健康 board over the collection run, its figures and ranking accepted as the example's (each
+   card says so) and its 回款情景 card pinned, since a what-if is never accepted.
 
 Two differences are left 待外部确认 on purpose: the example shows what a close looks like while it
 waits on another department, which is where most real closes stand.
@@ -205,6 +207,30 @@ class Reference:
         })
 
 
+    # -- 6. 看板 ---------------------------------------------------------------------------
+
+    def dashboard(self, run: dict) -> dict:
+        """The 回款健康 template's cards as the app lays them (app/src/views/analysis/dashboardTemplates.ts)."""
+        rows = run["result"]["rows"]
+        accepted = {"state": "accepted", "note": BOARD_NOTE}
+        cards = [{"kind": "figure", "title": row["metric_label"][:60], **accepted, "run_id": run["id"], "template": "collection",
+                  "select": {"match": {"entity": COMPANY, "metric_key": key, "scenario": "本期"}, "column": "value"}}
+                 for key in BOARD_FIGURES for row in rows
+                 if row["entity"] == COMPANY and row["metric_key"] == key and row["scenario"] == "本期"]
+        cards.append({"kind": "rank", "title": "各主体距生死线（从低到高）", **accepted, "run_id": run["id"], "template": "collection",
+                      "select": {"match": {"metric_key": "collection_gap", "scenario": "本期", "entity_origin": "table"},
+                                 "label": "entity", "column": "value", "order": "asc", "limit": 10,
+                                 "reference": {"value": "0", "label": "生死线"}}})
+        cards.append({"kind": "scenario", "title": "回款情景：收缴率变了会怎样", "state": "pinned", "run_id": run["id"],
+                      "template": "collection", "select": {"match": {"entity": COMPANY, "scenario": "本期"}}})
+        return self.manager.dashboard_save({"parent_id": None, "cards": cards})
+
+
+# The 回款健康 template's figures, in its order; the example's run has the first four.
+BOARD_FIGURES = ("collection_gap", "collection_gap_total", "break_even_collection", "dso", "ar_buildup", "cash_collection_ratio")
+BOARD_NOTE = "示例预置的认可，不是经理的认可。"
+
+
 def _decision(label: str) -> dict[str, Any]:
     """What the example decides on each planted difference, with the reason a manager would write."""
     if "台账" in label:
@@ -247,4 +273,5 @@ def build_reference(task) -> dict:
         raise FoundryError(f"the example collection run failed: {run.get('error')}")
     draft = reference.draft(run)
     collection = billing(task)
-    return {"run_id": run["id"], "draft_id": draft["id"], "collection_run_id": collection["id"]}
+    board = reference.dashboard(run)
+    return {"run_id": run["id"], "draft_id": draft["id"], "collection_run_id": collection["id"], "dashboard_id": board["id"]}

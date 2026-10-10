@@ -189,7 +189,24 @@ export type GalleryRow =
   | { type: 'export'; key: string; at: string; task: TaskRow; exported: AnalysisExportRow }
   | { type: 'chart'; key: string; at: string; task: TaskRow; chart: ChartRow }
   | { type: 'workbook'; key: string; at: string; task: TaskRow; output: WorkbookOutputRow }
-  | { type: 'collection'; key: string; at: string; task: TaskRow; run: CollectionRunRow };
+  | { type: 'collection'; key: string; at: string; task: TaskRow; run: CollectionRunRow }
+  | { type: 'dashboard'; key: string; at: string; task: TaskRow; snapshot: DashboardSnapshotRow };
+
+/** One 看板快照 (electron/reads.ts): the accepted cards it shows, and the ones it left out and why. */
+export interface DashboardSnapshotRow {
+  id: string;
+  format: 'pdf' | 'pptx' | 'xlsx';
+  filename: string;
+  sha256: string;
+  created_at: string;
+  title: string;
+  cards: string[];
+  beyond: string[];
+  left_out: { pinned: string[]; scenario: string[] };
+}
+
+/** A 看板快照's format as 成果库 and 总览 name it. */
+export const SNAPSHOT_FORMAT_WORDS: Record<DashboardSnapshotRow['format'], string> = { pdf: 'PDF 一页纸', pptx: 'PPT 一页', xlsx: 'Excel' };
 
 /** One 归档图: a chart saved from a run, with the names of the files that run read. */
 export interface ChartRow {
@@ -285,8 +302,8 @@ export interface LibraryDetail {
 }
 
 
-/** A file 成果库 can hand to the default program: a filed export by digest and format, or a 写回 Excel copy by id. */
-export type LibraryFile = { kind: 'export'; sha: string; format: ExportFormat } | { kind: 'workbook'; id: string };
+/** A file 成果库 can hand to the default program: a filed export by digest and format, a 写回 Excel copy or a 看板快照 by id. */
+export type LibraryFile = { kind: 'export'; sha: string; format: ExportFormat } | { kind: 'workbook'; id: string } | { kind: 'dashboard'; id: string };
 
 export type Intent = 'author' | 'period' | 'followup' | 'analysis';
 
@@ -332,6 +349,9 @@ export interface Bridge {
    * renderer names the run; main picks the place and answers with the file name only.
    */
   rollforwardExport?(task: string, runId: string, name?: string): Promise<Answer<{ cancelled?: boolean; exported?: boolean; filename?: string }>>;
+  /** 看板快照: the board's accepted cards as one page or a workbook, saved where the manager picks and filed in 成果库. */
+  dashboardExport?(task: string, format: import('../electron/reports/dashboard-snapshot').SnapshotFormat,
+    snapshot: import('../electron/reports/dashboard-snapshot').DashboardSnapshot): Promise<Answer<{ cancelled: true } | { exported: true; format: string; path: string; snapshot_id: string }>>;
   /** Write-only: hands one user wait to the local timing log. Absent in a build without it. */
   timingLog?(entry: WaitEntry): Promise<Answer<{ written: true }>>;
   /** The window's appearance (跟随系统 / 浅色 / 深色). Absent in a build without it; the header then shows no switch. */
