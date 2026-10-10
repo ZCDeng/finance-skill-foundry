@@ -136,8 +136,9 @@ function installFoundryEmbeddedBridge(ctx, sessions, inputHub, composerBlocks, p
         if (request.draft !== undefined) {
           if (['adjudicating', 'submitting'].includes(shell.snapshot.phase)) throw new Error('输入正在提交，请稍后重试。');
           const previous = shell.snapshot.draft;
+          // A follow-up already at the end of the unsent text (a second click on the same question) is not added twice.
           const draft = !request.submit && previous && previous !== request.draft
-            ? `${previous}\n\n${request.draft}` : request.draft;
+            ? previous.endsWith(`\n\n${request.draft}`) ? previous : `${previous}\n\n${request.draft}` : request.draft;
           shell.actions.setDraft(draft);
           if (!request.draftReference) saveSessionState(request.sessionId, shell);
         }
@@ -170,6 +171,12 @@ function installFoundryEmbeddedBridge(ctx, sessions, inputHub, composerBlocks, p
         result.then(reply => { if (!reply.submitted) requests.delete(request.requestId); }, () => requests.delete(request.requestId));
       }
       return result;
+    },
+    /** 接着问 on a card: the question after the unsent text of the conversation on screen, focused, never sent. */
+    appendDraft(draft) {
+      const sessionId = sessions.list.getSnapshot().current;
+      if (!sessionId) return Promise.reject(new Error('没有打开的对话。'));
+      return api.dispatch({sessionId, draft});
     },
     snapshot() {
       for (const id of touched) {

@@ -89,7 +89,7 @@ const lastDay = (period: string | null | undefined) => {
   return `${match[1]}-${match[2]}-${String(day).padStart(2, '0')}`;
 };
 
-export function BillingPanel({ taskId, period, practice, readOnly, refreshKey }: {
+export function BillingPanel({ taskId, period, practice, readOnly, refreshKey, show, onShown }: {
   taskId: string;
   /** The task's 期间 (YYYY-MM): its last day is the first 统计截止日 offered. */
   period?: string | null;
@@ -97,6 +97,10 @@ export function BillingPanel({ taskId, period, practice, readOnly, refreshKey }:
   practice?: boolean;
   readOnly?: boolean;
   refreshKey?: unknown;
+  /** A run to show and bring into view: 打开收缴率结果 on a card in the conversation. `count` makes a repeat click count. */
+  show?: { id: string; count: number };
+  /** The run asked for is on screen; the caller lets go of the request, so coming back later does not scroll again. */
+  onShown?(): void;
 }) {
   const [details, setDetails] = useState<BillingDetail[]>([]);
   const [caliber, setCaliber] = useState<CollectionCaliber | null>(null);
@@ -125,7 +129,20 @@ export function BillingPanel({ taskId, period, practice, readOnly, refreshKey }:
     shown.current = pick;
     setRun(pick ? await call<CollectionRun>('collection-run-read', { run: pick }) : null);
   }, [call]);
-  useEffect(() => { seen.current = { signature: '', newest: '' }; shown.current = undefined; setRun(null); void load().catch(() => {}); }, [load, refreshKey]);
+  // A panel opened to show a run starts on it, so its first read does not land on the newest run after it.
+  const asked = useRef(show);
+  asked.current = show;
+  useEffect(() => { seen.current = { signature: '', newest: '' }; shown.current = undefined; setRun(null); void load(asked.current?.id).catch(() => {}); }, [load, refreshKey]);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const shownDone = useRef(onShown);
+  shownDone.current = onShown;
+  useEffect(() => {
+    if (!show) return;
+    void load(show.id).then(() => {
+      heading.current?.scrollIntoView?.({ block: 'start' });
+      shownDone.current?.();
+    }, (failure: unknown) => setError(errorText(failure)));
+  }, [load, show]);
   // The assistant proposes columns and 口径 and runs trials from the conversation beside this page; read again
   // every few seconds while the window is in view, so what it proposed is here to confirm.
   useEffect(() => {
@@ -161,7 +178,7 @@ export function BillingPanel({ taskId, period, practice, readOnly, refreshKey }:
   const confirmed = (kind: BillingKind) => details.filter((row) => row.kind === kind && row.confirmation);
 
   return <section className="analysis-billing" aria-labelledby="analysis-billing-title">
-    <div className="analysis-section-heading"><span className="fnd-with-help"><h3 id="analysis-billing-title">收费明细与收缴率</h3>
+    <div className="analysis-section-heading"><span className="fnd-with-help"><h3 id="analysis-billing-title" ref={heading}>收费明细与收缴率</h3>
       <HelpLink article="billing-detail" label="收费明细与收缴率口径" /></span></div>
     <p className="analysis-note">按户的应收、实收和房产主数据单独导入（CSV，GBK 或 UTF-8，单张最多 500 万行），算当期收缴率、清欠率和综合收缴率，并和套表填报的数对照。</p>
     <div className="analysis-actions">

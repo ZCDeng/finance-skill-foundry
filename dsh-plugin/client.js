@@ -189,6 +189,8 @@ window.__ModuleLoader__.load({
       'dashboard_propose',
       'dashboard-read',
       'dashboard-propose',
+      'answer_cards',
+      'answer-cards',
       'finance_context_save',
       'finance_map_save',
       'run_metric',
@@ -362,6 +364,8 @@ window.__ModuleLoader__.load({
       'dashboard-propose': 'save',
       'dashboard_read': 'read',
       'dashboard-read': 'read',
+      'answer_cards': 'present',
+      'answer-cards': 'present',
       'finance-completion-recoveries': 'read',
       'finance-background-list': 'read',
       'finance-adjustment-list': 'read',
@@ -414,6 +418,7 @@ window.__ModuleLoader__.load({
       calc: '计算指标',
       verify: '检查依据',
       save: '保存结果',
+      present: '画卡片',
       other: '处理记录',
     };
     const DRAFT_REF_SOURCE = 'foundry-draft';
@@ -513,6 +518,519 @@ window.__ModuleLoader__.load({
         ],
       });
     }
+
+    /*
+     * Cards under the assistant's answer.
+     *
+     * `answer_cards` draws the cards the assistant named, and `dashboard_propose`
+     * draws the card it just proposed for the board. Every figure arrives
+     * written: the server read it from a stored run and wrote it as the board
+     * writes it (foundry/answer_cards.py), so nothing here formats or computes a
+     * number -- the row lays out text it was handed, and draws bars and lines
+     * from the plain values beside that text.
+     *
+     * Stateless on purpose. The page's React is not this bundle's to import, and
+     * a card has nothing to remember: 看来源 is a native disclosure, and the two
+     * clicks that leave the page are told to the window and forgotten.
+     *
+     * Those two -- 打开结果 and 钉到看板 -- travel as one console line stamped
+     * with the nonce the window put in this page (app/electron/harness/cardAction.ts).
+     * The window checks the task and the card, and pins through the board's own
+     * save, as the manager's own click. 接着问 never leaves the page: it puts the
+     * question in the composer through the embedded bridge, for the manager to
+     * edit and send.
+     */
+    const CARD_ACTION = '__foundry_card_action__';
+    const INK = 'var(--foundry-native-ink, currentColor)';
+    const MUTED = 'var(--foundry-native-muted, currentColor)';
+    const RULE = 'var(--foundry-native-line, rgba(127, 127, 127, 0.25))';
+    const NEGATIVE = 'var(--foundry-native-negative, #94463d)';
+    const POSITIVE = 'var(--foundry-native-level-ok, #4f7553)';
+    const ACCENT = 'var(--foundry-native-selected, #8a6729)';
+    const FIGURE_FACE = {
+      fontFamily: 'var(--foundry-native-figure, ui-monospace, monospace)',
+      fontVariantNumeric: 'tabular-nums',
+    };
+    const LEVELS = {
+      red: ['var(--foundry-native-warning, #a3372b)', '!'],
+      orange: ['var(--foundry-native-warning-line, #c96a5c)', '!'],
+      yellow: ['var(--foundry-native-level-watch, #a35f1f)', '−'],
+      green: [POSITIVE, '✓'],
+      unknown: ['var(--foundry-native-mark-absent, #6b6b6b)', '?'],
+    };
+    const CARD = {
+      display: 'grid',
+      gap: 6,
+      minWidth: 0,
+      padding: '10px 12px',
+      border: '1px solid ' + RULE,
+      borderRadius: 8,
+      background: 'var(--foundry-native-surface, transparent)',
+      color: INK,
+    };
+    const SMALL = { fontSize: 12, color: MUTED };
+    const BUTTON = {
+      font: 'inherit',
+      fontSize: 12,
+      padding: '2px 10px',
+      borderRadius: 6,
+      border: '1px solid ' + RULE,
+      background: 'transparent',
+      color: INK,
+      cursor: 'pointer',
+    };
+    const ASK = Object.assign({}, BUTTON, { borderRadius: 999, borderColor: ACCENT, textAlign: 'left' });
+    const MAX_ARG_TITLES = 3;
+    const CARD_ROWS = {};
+
+    function presentedOf(block) {
+      const meta = block && block.meta;
+      const presented = meta && typeof meta === 'object' ? meta.presented : null;
+      return presented && typeof presented === 'object' && !Array.isArray(presented) ? presented : null;
+    }
+
+    const list = (value) => (Array.isArray(value) ? value : []);
+    const words = (value) => (typeof value === 'string' ? value : value == null ? '' : String(value));
+    const number = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : null);
+
+    /** When a run was calculated, as the result page writes it (bridge.ts `when`). */
+    function calculatedAt(iso) {
+      const at = new Date(words(iso));
+      if (Number.isNaN(at.getTime())) return words(iso);
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
+    }
+
+    /** Tell the window about a click. Without the window's nonce there is no window to tell, and nothing happens. */
+    function tellWindow(action) {
+      const nonce = window.__foundryCardNonce;
+      if (typeof nonce !== 'string' || !nonce) return false;
+      try {
+        console.info(CARD_ACTION + JSON.stringify(Object.assign({ nonce: nonce }, action)));
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    /** 接着问: into the composer of the conversation on screen, after whatever is already there; never sent. */
+    function askNext(text) {
+      const embedded = window.__foundryEmbedded;
+      if (!embedded || typeof embedded.appendDraft !== 'function') return;
+      Promise.resolve()
+        .then(() => embedded.appendDraft(text))
+        .catch(() => {});
+    }
+
+    function LevelMark(props) {
+      const level = LEVELS[props.level];
+      if (!level) return null;
+      return jsx.jsxs('span', {
+        style: { display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 8, fontSize: 12, color: level[0], whiteSpace: 'nowrap' },
+        children: [
+          jsx.jsx('span', {
+            'aria-hidden': true,
+            style: {
+              display: 'inline-grid', placeItems: 'center', width: 13, height: 13, borderRadius: 999,
+              border: '1.5px solid currentColor', fontSize: 9, lineHeight: 1, fontWeight: 700,
+            },
+            children: level[1],
+          }),
+          words(props.label),
+        ],
+      });
+    }
+
+    function Figure(props) {
+      const value = props.value || {};
+      return jsx.jsx('span', {
+        style: Object.assign({}, FIGURE_FACE, {
+          fontSize: props.size || 22, fontWeight: 600, letterSpacing: 0,
+          color: value.negative ? NEGATIVE : INK,
+        }),
+        children: words(value.text),
+      });
+    }
+
+    function Beside(props) {
+      const rows = list(props.rows).filter((row) => Array.isArray(row) && row.length === 2);
+      if (!rows.length) return null;
+      return jsx.jsx('dl', {
+        style: { display: 'flex', flexWrap: 'wrap', gap: '2px 16px', margin: 0, fontSize: 12 },
+        children: rows.map((row, index) => jsx.jsxs('div', {
+          style: { display: 'flex', gap: 6, minWidth: 0 },
+          children: [
+            jsx.jsx('dt', { style: { color: MUTED }, children: words(row[0]) }),
+            jsx.jsx('dd', { style: Object.assign({ margin: 0 }, FIGURE_FACE), children: words(row[1]) }),
+          ],
+        }, String(index))),
+      });
+    }
+
+    /** One figure: what it is, the figure with its light, and the board's other lines beside it. */
+    function FigureBody(props) {
+      const view = props.view || {};
+      return jsx.jsxs('div', {
+        style: { display: 'grid', gap: 4, minWidth: 0 },
+        children: [
+          jsx.jsx('div', { style: SMALL, children: [words(view.subject), words(view.part)].filter(Boolean).join(' · ') }),
+          jsx.jsxs('div', {
+            style: { display: 'flex', alignItems: 'baseline', flexWrap: 'wrap' },
+            children: [
+              jsx.jsx(Figure, { value: view.value, size: props.size }),
+              view.level ? jsx.jsx(LevelMark, { level: view.level, label: view.level_label }) : null,
+            ],
+          }),
+          jsx.jsx(Beside, { rows: view.beside }),
+        ],
+      });
+    }
+
+    /** Bars from zero, or across it when the figures change sign; the reference line where the card puts it. */
+    function RankBody(props) {
+      const card = props.card || {};
+      const items = list(card.items).filter((item) => number(item && item.value) !== null);
+      const reference = card.reference && number(card.reference.value) !== null ? card.reference : null;
+      const values = items.map((item) => item.value).concat(reference ? [reference.value] : []);
+      const lo = Math.min(0, ...values);
+      const hi = Math.max(0, ...values);
+      const span = hi - lo || 1;
+      const at = (value) => ((value - lo) / span) * 100;
+      const unit = words(card.unit);
+      return jsx.jsxs('div', {
+        style: { display: 'grid', gap: 4 },
+        children: [
+          card.subject || card.part ? jsx.jsx('div', { style: SMALL, children: [words(card.subject), words(card.part)].filter(Boolean).join(' · ') }) : null,
+          ...items.map((item, index) => jsx.jsxs('div', {
+            style: { display: 'grid', gridTemplateColumns: 'minmax(4em, 30%) 1fr auto', alignItems: 'center', gap: 8, fontSize: 12 },
+            children: [
+              jsx.jsx('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: words(item.label), children: words(item.label) }),
+              jsx.jsxs('span', {
+                style: { position: 'relative', height: 10 },
+                children: [
+                  jsx.jsx('span', {
+                    style: {
+                      position: 'absolute', top: 1, bottom: 1, borderRadius: 2,
+                      left: at(Math.min(0, item.value)) + '%',
+                      width: Math.max(Math.abs(item.value) / span * 100, 0.5) + '%',
+                      background: item.value < 0 ? NEGATIVE : ACCENT,
+                    },
+                  }),
+                  reference ? jsx.jsx('span', {
+                    style: { position: 'absolute', top: -2, bottom: -2, width: 0, left: at(reference.value) + '%', borderLeft: '1px dashed ' + MUTED },
+                  }) : null,
+                ],
+              }),
+              jsx.jsxs('span', {
+                style: Object.assign({ whiteSpace: 'nowrap', textAlign: 'right' }, FIGURE_FACE),
+                children: [
+                  words(item.text),
+                  item.note ? jsx.jsx('span', { style: { marginLeft: 6, fontFamily: 'inherit', color: MUTED }, children: words(item.note) }) : null,
+                ],
+              }),
+            ],
+          }, String(index))),
+          unit || reference ? jsx.jsx('div', {
+            style: SMALL,
+            children: [unit ? `单位：${unit}` : '', reference ? `虚线：${words(reference.label)}` : ''].filter(Boolean).join('　'),
+          }) : null,
+        ],
+      });
+    }
+
+    /** The profit bridge as rows: each step floats from where the last one ended, totals stand on zero. */
+    function BridgeBody(props) {
+      const card = props.card || {};
+      const steps = list(card.steps).filter((step) => number(step && step.value) !== null);
+      let level = 0;
+      const spans = steps.map((step) => {
+        if (step.kind === 'delta') {
+          const from = level;
+          level += step.value;
+          return [from, level];
+        }
+        level = step.value;
+        return [0, step.value];
+      });
+      const ends = spans.flat();
+      const lo = Math.min(0, ...ends);
+      const hi = Math.max(0, ...ends);
+      const range = hi - lo || 1;
+      const at = (value) => ((value - lo) / range) * 100;
+      return jsx.jsxs('div', {
+        style: { display: 'grid', gap: 4 },
+        children: [
+          card.subject ? jsx.jsx('div', { style: SMALL, children: words(card.subject) }) : null,
+          ...steps.map((step, index) => {
+            const [from, to] = spans[index];
+            const total = step.kind !== 'delta';
+            return jsx.jsxs('div', {
+              style: { display: 'grid', gridTemplateColumns: 'minmax(4em, 34%) 1fr auto', alignItems: 'center', gap: 8, fontSize: 12 },
+              children: [
+                jsx.jsx('span', { style: { fontWeight: total ? 600 : 400 }, children: words(step.label) }),
+                jsx.jsx('span', {
+                  style: { position: 'relative', height: 10 },
+                  children: jsx.jsx('span', {
+                    style: {
+                      position: 'absolute', top: 1, bottom: 1, borderRadius: 2,
+                      left: at(Math.min(from, to)) + '%',
+                      width: Math.max(Math.abs(to - from) / range * 100, 0.5) + '%',
+                      background: total ? MUTED : step.value < 0 ? NEGATIVE : POSITIVE,
+                      opacity: total ? 0.55 : 1,
+                    },
+                  }),
+                }),
+                jsx.jsx('span', {
+                  style: Object.assign({ whiteSpace: 'nowrap', textAlign: 'right', color: !total && step.value < 0 ? NEGATIVE : INK }, FIGURE_FACE),
+                  children: words(step.text),
+                }),
+              ],
+            }, String(index));
+          }),
+          card.unit ? jsx.jsx('div', { style: SMALL, children: `单位：${words(card.unit)}` }) : null,
+        ],
+      });
+    }
+
+    /** One line across its periods, oldest first; the first and last figure under it, every period in the fold. */
+    function TrendBody(props) {
+      const card = props.card || {};
+      const points = list(card.points).filter((point) => number(point && point.value) !== null);
+      if (points.length < 2) return null;
+      const width = 280;
+      const height = 64;
+      const values = points.map((point) => point.value);
+      const lo = Math.min(...values);
+      const hi = Math.max(...values);
+      const range = hi - lo || 1;
+      const x = (index) => 4 + (index / (points.length - 1)) * (width - 8);
+      const y = (value) => 6 + (1 - (value - lo) / range) * (height - 12);
+      const path = points.map((point, index) => `${x(index).toFixed(1)},${y(point.value).toFixed(1)}`).join(' ');
+      const first = points[0];
+      const last = points[points.length - 1];
+      return jsx.jsxs('div', {
+        style: { display: 'grid', gap: 4 },
+        children: [
+          jsx.jsx('div', { style: SMALL, children: [words(card.subject), words(card.part)].filter(Boolean).join(' · ') }),
+          jsx.jsxs('svg', {
+            viewBox: `0 0 ${width} ${height}`,
+            width: '100%',
+            height: height,
+            role: 'img',
+            'aria-label': `${words(card.title)}：${words(first.label)} ${words(first.text)} 到 ${words(last.label)} ${words(last.text)}`,
+            preserveAspectRatio: 'none',
+            children: [
+              lo < 0 && hi > 0 ? jsx.jsx('line', { x1: 0, x2: width, y1: y(0), y2: y(0), stroke: MUTED, strokeDasharray: '3 3', strokeWidth: 1, vectorEffect: 'non-scaling-stroke' }) : null,
+              jsx.jsx('polyline', { points: path, fill: 'none', stroke: ACCENT, strokeWidth: 1.5, vectorEffect: 'non-scaling-stroke' }),
+              jsx.jsx('circle', { cx: x(points.length - 1), cy: y(last.value), r: 2.5, fill: ACCENT }),
+            ],
+          }),
+          jsx.jsxs('div', {
+            style: { display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12 },
+            children: [
+              jsx.jsxs('span', { children: [jsx.jsx('span', { style: { color: MUTED }, children: words(first.label) + ' ' }), jsx.jsx('span', { style: Object.assign({ color: first.value < 0 ? NEGATIVE : INK }, FIGURE_FACE), children: words(first.text) })] }),
+              jsx.jsxs('span', { children: [jsx.jsx('span', { style: { color: MUTED }, children: words(last.label) + ' ' }), jsx.jsx('span', { style: Object.assign({ color: last.value < 0 ? NEGATIVE : INK }, FIGURE_FACE), children: words(last.text) })] }),
+            ],
+          }),
+          jsx.jsxs('details', {
+            style: { fontSize: 12 },
+            children: [
+              jsx.jsx('summary', { style: { cursor: 'pointer', color: MUTED }, children: `逐期 ${points.length} 个数` }),
+              jsx.jsx('dl', {
+                style: { display: 'grid', gridTemplateColumns: 'auto auto', justifyContent: 'start', gap: '0 16px', margin: '4px 0 0' },
+                children: points.map((point, index) => [
+                  jsx.jsx('dt', { style: { color: MUTED }, children: words(point.label) }, 't' + index),
+                  jsx.jsx('dd', { style: Object.assign({ margin: 0, color: point.value < 0 ? NEGATIVE : INK }, FIGURE_FACE), children: words(point.text) }, 'd' + index),
+                ]).flat(),
+              }),
+              card.unit ? jsx.jsx('div', { style: SMALL, children: `单位：${words(card.unit)}` }) : null,
+            ],
+          }),
+        ],
+      });
+    }
+
+    /** Where a card's figures came from: as the result page's 来源 card says it, folded. */
+    function SourceFold(props) {
+      const source = props.source;
+      if (!source || typeof source !== 'object') return null;
+      const lines = list(source.lines).filter((line) => Array.isArray(line) && line.length === 2);
+      const files = list(source.files);
+      const at = source.at ? `${calculatedAt(source.at)} 计算` : '';
+      return jsx.jsxs('details', {
+        style: { fontSize: 12 },
+        children: [
+          jsx.jsx('summary', { style: { cursor: 'pointer', color: MUTED }, children: props.label || '看来源' }),
+          jsx.jsxs('div', {
+            style: { display: 'grid', gap: 2, marginTop: 4 },
+            children: [
+              ...lines.map((line, index) => jsx.jsxs('div', {
+                children: [jsx.jsx('span', { style: { color: MUTED }, children: words(line[0]) + '：' }), words(line[1])],
+              }, 'l' + index)),
+              ...files.map((file, index) => jsx.jsxs('div', {
+                children: [
+                  jsx.jsx('span', { style: { color: MUTED }, children: '资料：' }),
+                  words(file && file.name),
+                  file && file.digest ? jsx.jsx('span', { style: Object.assign({ color: MUTED, marginLeft: 6 }, FIGURE_FACE), children: '摘要 ' + words(file.digest) }) : null,
+                ],
+              }, 'f' + index)),
+              jsx.jsxs('div', {
+                style: { color: MUTED },
+                children: [[at, words(source.computed)].filter(Boolean).join(' · '), source.run_id ? jsx.jsx('span', { style: Object.assign({ marginLeft: 6 }, FIGURE_FACE), children: '计算编号 ' + words(source.run_id) }) : null],
+              }),
+            ],
+          }),
+        ],
+      });
+    }
+
+    function Actions(props) {
+      const card = props.card || {};
+      const taskId = props.taskId;
+      const source = card.source || (list(card.items)[0] || {}).source;
+      const buttons = [];
+      if (taskId && source && source.run_id && card.kind !== 'compare') {
+        buttons.push(jsx.jsx('button', {
+          type: 'button', style: BUTTON,
+          onClick: () => tellWindow({ action: 'open', task_id: taskId, kind: source.kind, run_id: source.run_id, analysis_id: source.analysis_id || null }),
+          children: source.kind === 'collection' ? '打开收缴率结果' : '打开结果',
+        }, 'open'));
+      }
+      if (taskId && card.pin && typeof card.pin === 'object') {
+        buttons.push(jsx.jsx('button', {
+          type: 'button', style: Object.assign({}, BUTTON, { borderColor: ACCENT }),
+          onClick: () => tellWindow({ action: 'pin', task_id: taskId, card: card.pin }),
+          children: '钉到看板',
+        }, 'pin'));
+      }
+      if (!buttons.length) return null;
+      return jsx.jsx('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 }, children: buttons });
+    }
+
+    /** One card, whatever its kind; a kind this bundle does not know draws its title and nothing it would guess at. */
+    function AnswerCard(props) {
+      const card = props.card || {};
+      let body = null;
+      if (card.kind === 'figure') body = jsx.jsx(FigureBody, { view: card });
+      else if (card.kind === 'compare') {
+        body = jsx.jsx('div', {
+          style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10 },
+          children: list(card.items).map((item, index) => jsx.jsxs('div', {
+            style: { display: 'grid', gap: 4, minWidth: 0, paddingLeft: index ? 10 : 0, borderLeft: index ? '1px solid ' + RULE : 'none' },
+            children: [jsx.jsx(FigureBody, { view: item, size: 18 }), jsx.jsx(SourceFold, { source: item && item.source })],
+          }, String(index))),
+        });
+      } else if (card.kind === 'rank') body = jsx.jsx(RankBody, { card: card });
+      else if (card.kind === 'bridge') body = jsx.jsx(BridgeBody, { card: card });
+      else if (card.kind === 'trend') body = jsx.jsx(TrendBody, { card: card });
+      else if (card.kind === 'scenario') {
+        body = jsx.jsxs('div', {
+          style: { display: 'grid', gap: 4 },
+          children: [
+            jsx.jsx('div', { style: SMALL, children: [words(card.subject), '情景，不是实际数'].filter(Boolean).join(' · ') }),
+            jsx.jsx(Beside, { rows: card.lines }),
+          ],
+        });
+      }
+      const trial = card.source && card.source.trial;
+      return jsx.jsxs('article', {
+        style: CARD,
+        'aria-label': words(card.title),
+        children: [
+          jsx.jsxs('header', {
+            style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 },
+            children: [
+              jsx.jsx('strong', { style: { fontSize: 13, fontWeight: 600 }, children: words(card.title) }),
+              props.badge ? jsx.jsx('span', { style: Object.assign({ whiteSpace: 'nowrap' }, SMALL), children: props.badge }) : trial ? jsx.jsx('span', { style: { fontSize: 12, whiteSpace: 'nowrap', color: LEVELS.yellow[0] }, children: '试算' }) : null,
+            ],
+          }),
+          body,
+          props.note ? jsx.jsx('div', { style: SMALL, children: props.note }) : null,
+          card.kind === 'compare' ? null : jsx.jsx(SourceFold, { source: card.source }),
+          jsx.jsx(Actions, { card: card, taskId: props.taskId }),
+        ],
+      });
+    }
+
+    function FollowUps(props) {
+      const questions = list(props.questions).filter((text) => typeof text === 'string' && text.trim());
+      if (!questions.length) return null;
+      return jsx.jsxs('div', {
+        style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, fontSize: 12 },
+        children: [
+          jsx.jsx('span', { style: { color: MUTED }, children: '接着问' }),
+          ...questions.map((text, index) => jsx.jsx('button', {
+            type: 'button', style: ASK, title: '填进对话框，改好再发送', onClick: () => askNext(text), children: text,
+          }, String(index))),
+        ],
+      });
+    }
+
+    /** The titles the assistant is still writing, read off the streaming arguments as far as they go. */
+    function pendingTitles(block) {
+      const raw = block && typeof block.argsRaw === 'string' ? block.argsRaw : '';
+      if (!raw) return [];
+      try {
+        const parsed = JSON.parse(raw);
+        const cards = parsed && parsed.spec && Array.isArray(parsed.spec.cards) ? parsed.spec.cards : [];
+        return cards.map((card) => words(card && card.title)).filter(Boolean).slice(0, MAX_ARG_TITLES);
+      } catch {
+        const found = [];
+        const pattern = /"title"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+        let match;
+        while ((match = pattern.exec(raw)) && found.length < MAX_ARG_TITLES) {
+          try { found.push(JSON.parse(`"${match[1]}"`)); } catch { /* A title cut mid-escape waits for the next chunk. */ }
+        }
+        return found;
+      }
+    }
+
+    function AnswerCardsRow(props) {
+      const block = (props && props.block) || null;
+      const settled = Boolean(block) && 'kind' in block;
+      if (!settled) {
+        const titles = pendingTitles(block);
+        return jsx.jsx('div', {
+          style: { display: 'grid', gap: 8, fontSize: 13 },
+          children: (titles.length ? titles : ['']).map((title, index) => jsx.jsxs('div', {
+            style: Object.assign({}, CARD, { opacity: 0.7 }),
+            children: [
+              title ? jsx.jsx('strong', { style: { fontSize: 13, fontWeight: 600 }, children: title }) : null,
+              jsx.jsx('span', { style: SMALL, children: '正在从计算结果取数…' }),
+            ],
+          }, String(index))),
+        });
+      }
+      const presented = block.isError ? null : presentedOf(block);
+      if (!presented) return FinanceStageRow(props);
+      return jsx.jsxs('div', {
+        style: { display: 'grid', gap: 8, fontSize: 13, lineHeight: 1.6 },
+        children: [
+          ...list(presented.cards).map((card, index) => jsx.jsx(AnswerCard, { card: card, taskId: presented.task_id }, String(index))),
+          jsx.jsx(FollowUps, { questions: presented.follow_ups }),
+        ],
+      });
+    }
+
+    function ProposedCardRow(props) {
+      const block = (props && props.block) || null;
+      const settled = Boolean(block) && 'kind' in block;
+      const presented = settled && !block.isError ? presentedOf(block) : null;
+      const card = presented && presented.proposed;
+      if (!card || typeof card !== 'object') return FinanceStageRow(props);
+      return jsx.jsx('div', {
+        style: { fontSize: 13, lineHeight: 1.6 },
+        children: jsx.jsx(AnswerCard, {
+          card: card,
+          taskId: presented.task_id,
+          badge: '助手提议',
+          note: '已放进看板的「助手提议」，到「看板」页点「钉住」才算。',
+        }),
+      });
+    }
+
+    for (const toolName of ['answer_cards', 'answer-cards']) CARD_ROWS[toolName] = AnswerCardsRow;
+    for (const toolName of ['dashboard_propose', 'dashboard-propose']) CARD_ROWS[toolName] = ProposedCardRow;
 
     function registerDraftReferenceSource(ctx) {
       const source = {
@@ -796,7 +1314,11 @@ window.__ModuleLoader__.load({
           yield ctx.slots.register({ name: 'tool.call.toolview', key: toolName }, FoundryRow);
         }
         for (const toolName of FINANCE_STAGE_TOOLS) {
+          if (CARD_ROWS[toolName]) continue;
           yield ctx.slots.register({ name: 'tool.call.toolview', key: toolName }, FinanceStageRow);
+        }
+        for (const toolName of Object.keys(CARD_ROWS)) {
+          yield ctx.slots.register({ name: 'tool.call.toolview', key: toolName }, CARD_ROWS[toolName]);
         }
       });
       collapseOnce(ctx);

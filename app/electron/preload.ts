@@ -103,6 +103,14 @@ const api = {
       ipcRenderer.off('harness:exited', relay);
     };
   },
+  /** A click on a card in the assistant's answer, already checked by the host. */
+  onHarnessCardAction: (cb: (action: unknown) => void) => {
+    const relay = (_event: unknown, action: unknown) => cb(action);
+    ipcRenderer.on('harness:card-action', relay);
+    return () => {
+      ipcRenderer.off('harness:card-action', relay);
+    };
+  },
 };
 
 export type PreloadAPI = typeof api;

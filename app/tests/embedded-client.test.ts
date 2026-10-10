@@ -51,6 +51,15 @@ describe('resident native input handoff',()=>{
     expect(get('a').actions.submit).toHaveBeenCalledOnce();
     expect(get('a').snapshot.draft).toBe('');
   });
+  it('puts a card question after the open conversation draft without sending it',async()=>{
+    const {bridge,get}=fixture();
+    await expect(bridge.appendDraft('按城市公司拆开')).rejects.toThrow('没有打开的对话');
+    await bridge.dispatch({sessionId:'a',draft:'未发送'});
+    await bridge.appendDraft('按城市公司拆开');
+    await bridge.appendDraft('按城市公司拆开');
+    expect(get('a').snapshot.draft).toBe('未发送\n\n按城市公司拆开');
+    expect(get('a').actions.submit).not.toHaveBeenCalled();
+  });
   it('preserves every task draft on passive selection',async()=>{
     const {bridge,get}=fixture();
     await bridge.dispatch({sessionId:'a',draft:'未发送 A'});

@@ -165,3 +165,20 @@ it('puts a newer assistant proposal in front of the old confirmation, and finds 
     vi.useRealTimers();
   }
 });
+
+it('opens on the run a card in the conversation asked for, not the newest, and lets go of the request once shown', async () => {
+  const older = run('2', 'confirmed');
+  const newest = { ...run('3', 'trial'), created_at: '2026-10-10T08:00:00Z' };
+  const billingCall = mount({ details: [table('receivable', 'a', true)], caliber: { defaults, confirmed: null, proposed: null, effective: defaults, versions: [] },
+    runs: [older, newest] });
+  const onShown = vi.fn();
+  const scroll = vi.fn();
+  const before = HTMLElement.prototype.scrollIntoView;
+  HTMLElement.prototype.scrollIntoView = scroll;
+  render(<BillingPanel taskId="t" show={{ id: older.id, count: 1 }} onShown={onShown} />);
+  await waitFor(() => expect(onShown).toHaveBeenCalledOnce());
+  const reads = billingCall.mock.calls.filter(([, command]) => command === 'collection-run-read').map(([, , spec]) => spec?.run);
+  expect(new Set(reads)).toEqual(new Set([older.id]));
+  expect(scroll).toHaveBeenCalledWith({ block: 'start' });
+  HTMLElement.prototype.scrollIntoView = before;
+});

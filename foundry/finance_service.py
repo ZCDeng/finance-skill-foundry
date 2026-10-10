@@ -2903,6 +2903,7 @@ class FinanceStore:
             return self._write("dashboards", parent_id=current["id"] if current else None, bindings={}, cards=cards)
 
     def dashboard_propose(self, spec):
+        from foundry.answer_cards import proposed_card
         from foundry.dashboards import propose
 
         if not isinstance(spec, dict) or not isinstance(spec.get("card"), dict):
@@ -2912,7 +2913,14 @@ class FinanceStore:
             cards = propose(spec["card"], current.get("cards", []) if current else [], run_of=self._dashboard_runs())
             written = self._write("dashboards", parent_id=current["id"] if current else None, bindings={}, cards=cards)
         # A session is answered with what it may read, as dashboard_read answers it; the stored board keeps every card.
-        return self._dashboard_in_view(written) if self.allowed is not None else written
+        board = self._dashboard_in_view(written) if self.allowed is not None else written
+        # The proposed card as the conversation draws it under the call (dsh-plugin/client.js).
+        return {**board, "presented": {"task_id": self.task.id, "proposed": proposed_card(self, cards[-1])}}
+
+    def answer_cards(self, spec):
+        from foundry.answer_cards import answer_cards
+
+        return answer_cards(self, spec)
 
     def analysis_circle_select(self, spec):
         from foundry.circle_select import authorize_workbook, match_draft_table, reject_forbidden_spec

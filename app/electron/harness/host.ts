@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 
@@ -18,6 +19,7 @@ import {
   rpcValue,
 } from './boot.js';
 import { followupDraft, residentHandoffScript, snapshotDraftsScript, restoreDraftsScript, type EmbeddedDraftReference, type EmbeddedReply } from './handoff.js';
+import { cardNonceScript, readCardAction, type CardAction } from './cardAction.js';
 import { noticePatch, readNotice } from './notice.js';
 import { Pane } from './pane.js';
 import { HARNESS_SKIN } from './skin.js';
@@ -37,6 +39,10 @@ export interface HostOptions {
   bundledSkillDir?: string;
   /** Switches a bundled companion is not allowed to run without. See `resources.ts`. */
   companionEnv?: Record<string, string>;
+  /** This window's figure face (IBM Plex Mono) as data URLs, for the figures on the assistant's cards. */
+  figureFonts?: () => Promise<{ weight: number; url: string }[]>;
+  /** 打开结果 or 钉到看板 on a card in the assistant's answer, as the page told it (`cardAction.ts`). */
+  onCardAction?: (action: CardAction) => void;
   /**
    * A runtime that had come up has gone away on its own. Not called for `stop()`
    * or for a start that never printed its URL; those already reach a caller.
@@ -59,7 +65,15 @@ export interface OpenedSession {
  */
 export class HarnessHost {
   private child: ChildProcess | null = null;
-  private readonly pane = new Pane();
+  /** Put in the page after every load; a card click that does not carry it is not one. */
+  private readonly cardNonce = randomBytes(16).toString('hex');
+  private readonly pane = new Pane({
+    script: () => cardNonceScript(this.cardNonce),
+    console: (message) => {
+      const action = readCardAction(message, this.cardNonce);
+      if (action) this.opts.onCardAction?.(action);
+    },
+  });
   private paneOrigin: string | null = null;
   private restoredOrigin: string | null = null;
   private draftSnapshotTimer: ReturnType<typeof setInterval> | null = null;
@@ -347,6 +361,13 @@ export class HarnessHost {
     if (this.opts.root) {
       const bytes = readFileSync(join(this.opts.root, 'assets/fonts/NotoSansSC-variable.woff2'));
       font = `@font-face{font-family:'Noto Sans SC';src:url(data:font/woff2;base64,${bytes.toString('base64')}) format('woff2');font-style:normal;font-weight:100 900;font-display:swap;}`;
+    }
+    try {
+      for (const face of await this.opts.figureFonts?.() ?? []) {
+        font += `@font-face{font-family:'IBM Plex Mono';src:url(${face.url}) format('woff2');font-style:normal;font-weight:${face.weight};font-display:swap;}`;
+      }
+    } catch {
+      // Without it a card's figures fall back to the text face; nothing else depends on it.
     }
     this.pane.skin(font + HARNESS_SKIN);
     const origin = await this.start();

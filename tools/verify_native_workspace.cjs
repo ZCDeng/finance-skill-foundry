@@ -247,8 +247,8 @@ const captureContext = `(() => {
       await app.evaluate(({nativeTheme},value)=>{nativeTheme.themeSource=value;},scheme);
       await until(()=>native(()=>document.body.hasAttribute('data-ds-dark-theme')),value=>value===(scheme==='dark'),'resolved DSH theme');
       const expected=scheme==='dark'
-        ? {background:'rgb(17, 17, 17)',card:'rgb(31, 31, 31)',border:'rgba(255, 255, 255, 0.14)',tab:'rgb(249, 250, 251)',send:'rgb(226, 193, 128)',sendText:'rgb(31, 31, 31)'}
-        : {background:'rgb(255, 255, 255)',card:'rgb(255, 255, 255)',border:'rgba(31, 31, 31, 0.14)',tab:'rgba(0, 0, 0, 0.88)',send:'rgb(138, 103, 41)',sendText:'rgb(249, 250, 251)'};
+        ? {background:'rgb(15, 17, 23)',card:'rgb(26, 29, 38)',border:'rgba(255, 255, 255, 0.12)',tab:'rgb(243, 244, 247)',send:'rgb(226, 193, 128)',sendText:'rgb(26, 29, 38)'}
+        : {background:'rgb(245, 246, 248)',card:'rgb(255, 255, 255)',border:'rgba(32, 41, 76, 0.12)',tab:'rgb(28, 34, 50)',send:'rgb(138, 103, 41)',sendText:'rgb(249, 250, 251)'};
       const palette=await until(()=>native(()=>{
         const styleOf=selector=>getComputedStyle(document.querySelector(selector));
         const card=styleOf('[data-composer-card]'),tab=styleOf('.wSkVaW_tabActive'),send=styleOf('.uV2eYG_trailing > button.uV2eYG_primary');
