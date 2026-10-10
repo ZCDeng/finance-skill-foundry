@@ -40,7 +40,7 @@ export function assumptionSummary(assumptions?: unknown[]): string {
   // Each item may end on its own 。 or ；; joined with ； that reads 。；, so all but the last lose it. ASCII full stops stay.
   return parts.map((part, index) => index < parts.length - 1 ? part.trimEnd().replace(/[。；;]+$/, '') : part).join('；') || '—';
 }
-type TableColumn = {
+export type TableColumn = {
   name: string;
   type?: string;
   /** How a cell shows; without one the cell is its text. */
@@ -146,7 +146,7 @@ function useOverflow(enabled: boolean): [(node: HTMLDivElement | null) => void, 
   return [setNode, enabled && overflowing];
 }
 
-export function Table({ columns, rows, caption, groupBy, groupFallback = '', scrollHint = false, exact = false }: {
+export function Table({ columns, rows, caption, groupBy, groupFallback = '', scrollHint = false, exact = false, figure }: {
   columns: TableColumn[];
   rows: Record<string, unknown>[];
   caption: string;
@@ -159,6 +159,9 @@ export function Table({ columns, rows, caption, groupBy, groupFallback = '', scr
   /** Values that are, or will be, cell contents as written (a workbook read, a write-back preview): set as figures
    * but never reformatted, rounded or put in parentheses. */
   exact?: boolean;
+  /** Draws a figure cell another way (a figure that opens its source); without one, or when it gives nothing back,
+   * the cell is the plain figure. */
+  figure?(row: Record<string, unknown>, column: TableColumn, text: string, hang: boolean): ReactNode | undefined;
 }) {
   const [page, setPage] = useState(0);
   const [measured, overflowing] = useOverflow(scrollHint);
@@ -174,7 +177,7 @@ export function Table({ columns, rows, caption, groupBy, groupFallback = '', scr
     return <tr key={index} className={rowWeight(cells[0])}>{columns.map((column, at) => {
       const cell = cells[at];
       return <td className={figures[at] ? 'analysis-number' : undefined} key={column.name} title={cell.raw}>
-        {figures[at] && cell.text != null ? <Figure text={cell.text} hang={hangs[at]} exact={exact} /> : cell.node}</td>;
+        {figures[at] && cell.text != null ? figure?.(item, column, cell.text, hangs[at]) ?? <Figure text={cell.text} hang={hangs[at]} exact={exact} /> : cell.node}</td>;
     })}</tr>;
   };
   const body = groupBy == null

@@ -613,10 +613,19 @@ class AnalysisStore:
             # Only the records on files it may read: the caller leaves out the rest, which no view need read.
             analyses = [self.analysis_in_view(row, allowed, cache=cache) if readable(row) else row for row in analyses]
             runs = [self.run_in_view(run, allowed, cache=cache) if readable(run) else run for run in runs]
+        from foundry.finance_controls import superseded_snapshots
+
+        datasets = self.published_datasets()
         return {
             "schema_version": 1,
             "task_id": self.task.id,
-            "datasets": self.published_datasets(),
+            "datasets": datasets,
+            # Snapshots a newer file or a published source refresh has replaced: a result that read one is out of
+            # date until it is calculated again. The rule the controls and the close status use.
+            "superseded_datasets": sorted(superseded_snapshots(
+                self.task, datasets, allowed=allowed,
+                # A reader's batches come from the listing its drafts and runs share (_batches_in_view).
+                batches=None if allowed is None else self._batches_in_view(set(allowed), cache))),
             "analyses": analyses,
             # Row declarations are read as the workbench shows them: recomputed when stored under older
             # rules, and with the latest requirements' estimates added. Stored records are never rewritten.

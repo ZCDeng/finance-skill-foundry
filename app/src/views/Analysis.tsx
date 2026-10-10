@@ -444,7 +444,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               <AskLink ask="readiness" label="让助手做资料体检" disabled={busy} />
               <AskLink ask="collection-health" label="让助手做回款健康分析" disabled={busy} />
             </> : undefined} /> : <>
-            <RunPanel key={task.id} analysis={analysis} analyses={view.analyses} runs={view.runs} drafts={view.drafts} datasets={view.datasets} busy={busy}
+            <RunPanel key={task.id} analysis={analysis} analyses={view.analyses} runs={view.runs} drafts={view.drafts} datasets={view.datasets} superseded={view.superseded_datasets} busy={busy}
               question={task.title}
               versionPicker={<SearchableSelect label="分析版本" compact value={analysis.id}
                 triggerText={`第 ${view.analyses.findIndex((row) => row.id === analysis.id) + 1} 版（共 ${view.analyses.length} 版）· ${when(analysis.created_at)}`}

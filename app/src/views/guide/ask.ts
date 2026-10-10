@@ -32,3 +32,8 @@ export function askText(id: AskId, about?: string) {
 export function askAssistant(id: AskId, about?: string) {
   window.dispatchEvent(new CustomEvent(ASK_EVENT, { detail: askText(id, about) }));
 }
+
+/** Put a question the page wrote (about one figure, say) into the open task's conversation, unsent like the rest. */
+export function askWith(text: string) {
+  window.dispatchEvent(new CustomEvent(ASK_EVENT, { detail: text }));
+}

@@ -491,7 +491,7 @@ def refreshed_snapshots(task: Any, allowed: set[str] | None = None, *, before: A
 
 
 def superseded_snapshots(task: Any, datasets: list[dict[str, Any]] | None = None, *,
-                         allowed: set[str] | None = None) -> set[str]:
+                         allowed: set[str] | None = None, batches: list[dict[str, Any]] | None = None) -> set[str]:
     """Snapshots a newer one has replaced: by a published source refresh, or by a later upload under the same name.
 
     A month pack is updated by adding the corrected file again. The old snapshot stays in
@@ -499,14 +499,15 @@ def superseded_snapshots(task: Any, datasets: list[dict[str, Any]] | None = None
 
     ``allowed`` is a session's snapshot ceiling: only the replacements it may read count, as in
     finance_readiness._supersessions, so a newer file outside the session replaces nothing it reads, and a refresh
-    it may read replaces the prior it reads it with (refreshed_snapshots).
+    it may read replaces the prior it reads it with (refreshed_snapshots). ``batches``, as for refreshed_snapshots:
+    the refresh batches as that reader reads them, when the caller has listed them already.
     """
     from foundry.analysis import AnalysisStore
 
     def visible(dataset_id: Any) -> bool:
         return allowed is None or dataset_id in allowed
 
-    replaced = {prior for prior, newers in refreshed_snapshots(task, allowed).items()
+    replaced = {prior for prior, newers in refreshed_snapshots(task, allowed, batches=batches).items()
                 if any(visible(newer) for newer in newers)}
     rows = AnalysisStore(task).state()["datasets"] if datasets is None else datasets
     latest: dict[str, dict[str, Any]] = {}

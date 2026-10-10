@@ -1121,6 +1121,18 @@ def test_superseded_snapshots_counts_only_the_replacements_a_reader_may_read(tmp
     assert superseded_snapshots(task, allowed={first["id"]}) == set()
 
 
+def test_task_state_names_the_snapshots_a_newer_file_replaced(tmp_path):
+    """A result card reads 资料已更新，待重算 from this list: the rule the controls use, read for the reader."""
+    task = TaskStore(tmp_path / "var").create(title="新版本")
+    analysis = AnalysisStore(task)
+    first = analysis.add_dataset(_csv(tmp_path / "v1.csv", [("revenue", "2026-08", "O1", "1", "CNY", "元")]), name="总账")
+    assert analysis.state()["superseded_datasets"] == []
+    second = analysis.add_dataset(_csv(tmp_path / "v2.csv", [("revenue", "2026-08", "O1", "2", "CNY", "元")]), name="总账")
+    assert analysis.state()["superseded_datasets"] == [first["id"]]
+    assert analysis.state(allowed={first["id"]})["superseded_datasets"] == []
+    assert analysis.state(allowed={first["id"], second["id"]})["superseded_datasets"] == [first["id"]]
+
+
 # --- export registration ----------------------------------------------------------------------------------------------
 
 

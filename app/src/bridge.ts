@@ -747,6 +747,8 @@ export interface AnalysisMethod extends AnalysisObject {
 export interface AnalysisState {
   task_id: string;
   datasets: DatasetSnapshot[];
+  /** Snapshots a newer file or a published source refresh has replaced; a run that read one waits to be recalculated. */
+  superseded_datasets?: string[];
   analyses: AnalysisRevision[];
   runs: AnalysisRun[];
   drafts: AnalysisDraft[];

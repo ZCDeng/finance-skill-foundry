@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { TriangleAlert, X } from 'lucide-react';
 import { when, type AnalysisDraft, type AnalysisRevision, type AnalysisRun, type DatasetSnapshot, type FinanceDrilldown, type ResultContractWarning } from '../../bridge.js';
 import { readCopy, writeCopy } from './workingCopy.js';
@@ -8,6 +8,7 @@ import { Input } from '../../components/ui/input.js';
 import { BusinessResultView } from './BusinessResultView.js';
 import { CollectionHealthView, isCollectionHealthRun } from './CollectionHealthView.js';
 import { RevisionDiff } from './RevisionDiff.js';
+import { runFiles, type FigureSourceContext } from './figureSource.js';
 import { TechnicalInfo, type TechnicalRow } from './TechnicalInfo.js';
 import { businessColumnLabel, runPresentationRole, selectBusinessResult } from './businessResults.js';
 import { errorText } from './shared.js';
@@ -17,8 +18,10 @@ import { DisclosureSummary } from '../../components/Disclosure.js';
 import { formatPeriod } from '../../lib/period.js';
 import { decimalToFixed, groupDigits } from '../../lib/figures.js';
 
-export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy, question, versionPicker, versionNote, onPick, onChat, onOpen, onSource, onSaveMethod, onDrilldown, onAdjustScope }: {
+export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, superseded = [], busy, question, versionPicker, versionNote, onPick, onChat, onOpen, onSource, onSaveMethod, onDrilldown, onAdjustScope }: {
   analysis: AnalysisRevision; analyses: AnalysisRevision[]; runs: AnalysisRun[]; drafts?: AnalysisDraft[]; datasets: DatasetSnapshot[]; busy: boolean;
+  /** Snapshots a newer file has replaced (analysis-state superseded_datasets): a result that read one says 待重算. */
+  superseded?: string[];
   onPick(id: string): void; onChat(question: string): void; onOpen(run: AnalysisRun, path: string): void;
   onSource(source: DatasetSnapshot): void; onSaveMethod(id: string, name: string): void;
   onDrilldown?(run: AnalysisRun, row: number, column?: string, section?: SourceDrilldownSection): Promise<FinanceDrilldown>;
@@ -44,6 +47,8 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
   const latest = runs.at(-1);
   const compared = runs.find((row) => row.id === comparison && row.id !== run?.id);
   const assumptions = run?.assumptions ?? analysis.assumptions;
+  const replaced = useMemo(() => new Set(superseded), [superseded]);
+  const source: FigureSourceContext | undefined = run ? { run, analysis: analyses.find((row) => row.id === run.analysis_id) ?? analysis, datasets, superseded: replaced } : undefined;
   useEffect(() => { if (evidence) closeButton.current?.focus({ preventScroll: true }); }, [evidence]);
   // Another version from the picker: the comparison and the evidence panel described the one before.
   useEffect(() => { setComparing(false); setEvidence(false); }, [analysis.id]);
@@ -90,11 +95,12 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
         })}</div></>}
       </section>}
       <header className="analysis-result-head"><h3 className="sr-only">{heading}</h3>
-        <p className="analysis-note" title={run.id}>{when(run.created_at)} · 第 {revisionLabel(run, runs)} 次计算 · {runRoleLabel(run)}</p><RunStatus run={run} /></header>
+        <p className="analysis-note" title={run.id}>{when(run.created_at)} · 第 {revisionLabel(run, runs)} 次计算 · {runRoleLabel(run)}</p><RunStatus run={run} />
+        {source && <Freshness source={source} />}</header>
       {run.error && <p role="alert" className="analysis-message analysis-message--error">{errorText(run.error)}</p>}
       {isFinanceVarianceRun(run) && <FinanceVarianceHeadline run={run} />}
       {Boolean(run.row_declarations?.warnings?.length) && <ContractWarnings warnings={run.row_declarations!.warnings!} />}
-      {run.result && run.result.columns.length > 0 ? <RunResultTable run={run} actions={resultActions} technical={technical} />
+      {run.result && run.result.columns.length > 0 ? <RunResultTable run={run} actions={resultActions} technical={technical} source={source} />
         : <>{resultActions}<TechnicalInfo rows={technical}>{run.result?.diagnostics?.length ? <RawDiagnostics items={run.result.diagnostics} /> : null}</TechnicalInfo></>}
       {(run.engine === 'finance' || isStructuredAggregateRun(run)) && <SourceTraceDetails run={run} busy={busy} onDrilldown={onDrilldown} />}
       {run.stdout && <details className="analysis-details"><DisclosureSummary tone="quiet">脚本输出 · {run.stdout.trimEnd().split('\n').length} 行</DisclosureSummary>
@@ -218,16 +224,32 @@ function rendersBusinessView(run: AnalysisRun): boolean {
 }
 
 /** The result, with the run's next steps right after what a manager reads first and one 技术信息 fold. */
-function RunResultTable({ run, actions, technical }: { run: AnalysisRun; actions: ReactNode; technical: TechnicalRow[] }) {
+function RunResultTable({ run, actions, technical, source }: { run: AnalysisRun; actions: ReactNode; technical: TechnicalRow[]; source?: FigureSourceContext }) {
   if (isCollectionHealthRun(run)) return <CollectionHealthView run={run} actions={actions} technical={technical} />;
   if (isFinanceVarianceRun(run)) return <FinanceVarianceTable run={run} actions={actions} technical={technical} />;
   if (isStructuredAggregateRun(run)) return <StructuredAggregateTable run={run} actions={actions} technical={technical} />;
   if (isScriptSummaryRun(run)) return <ScriptSummaryTable run={run} actions={actions} technical={technical} />;
-  if (rendersBusinessView(run)) return <BusinessResultView run={run} actions={actions} technicalRows={technical} diagnostics={run.result?.diagnostics ?? []} />;
+  if (rendersBusinessView(run)) return <BusinessResultView run={run} actions={actions} technicalRows={technical} diagnostics={run.result?.diagnostics ?? []} source={source} />;
   const diagnostics = run.result!.diagnostics ?? [];
   return <><Table key={run.id} columns={run.result!.columns} rows={run.result!.rows} caption="计算结果" />
     <p className="analysis-note">{run.result!.row_count} 行{run.result!.truncated ? ' · 当前为截断预览' : ''}</p>
     {actions}<TechnicalInfo rows={technical}>{diagnostics.length > 0 ? <RawDiagnostics items={diagnostics} /> : null}</TechnicalInfo></>;
+}
+
+/**
+ * Which files the result read, under its heading: the 「数据截至」 of the result. When a newer file has replaced one
+ * of them the result says so and that it waits to be calculated again; its figures stay on screen, quieter.
+ */
+function Freshness({ source }: { source: FigureSourceContext }) {
+  const files = runFiles(source);
+  if (!files.length) return null;
+  const names = files.map((file) => file.name);
+  const shown = names.length > 2 ? `${names.slice(0, 2).join('、')} 等 ${names.length} 份资料` : names.join('、');
+  const stale = files.some((file) => file.replaced);
+  return <p className="analysis-freshness" aria-label="计算依据的资料">
+    <span>依据：{shown}</span>
+    {stale && <span className="analysis-freshness__stale">资料已更新，待重算</span>}
+  </p>;
 }
 
 /** The engine's diagnostics as recorded, for the one 技术信息 fold of a result. */
