@@ -419,7 +419,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         value={task?.id ?? ''} disabled={busy} options={tasks.map((row) => ({ value: row.id, label: row.title, meta: when(row.created_at) }))}
         onChange={onPick} placeholder="搜索任务" />{task && <Button variant="outline" type="button" disabled={busy} onClick={() => onPick('')}>新建分析任务</Button>}</div>}
     </header>}
-    {(!embedded || !task || question) && <form className="analysis-composer" onSubmit={(event) => {
+    {(!embedded || !task || question) && <form className="analysis-composer fnd-fold-inset" onSubmit={(event) => {
       event.preventDefault(); if ((!task && !question.trim()) || busy) return;
       if (task) void chat(question.trim() || undefined); else void create();
     }}>

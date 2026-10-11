@@ -78,7 +78,7 @@ export function EvidencePostureSummary({ posture, labels, stale = false, listed 
   const drivers = (posture.drivers ?? []).filter((driver) => driver.text);
   const summary = countSummary(posture.counts);
   const rows = (labels ?? []).filter((entry) => !listed || listed(entry));
-  return <section className="analysis-evidence-posture" data-level={posture.level} aria-label="证据等级">
+  return <section className="analysis-evidence-posture fnd-fold-inset" data-level={posture.level} aria-label="证据等级">
     <p className="analysis-evidence-posture-line">
       <PostureIcon level={posture.level} />
       <strong>证据等级：{text}{stale ? '（改稿前的分类，重检后更新）' : ''}</strong>

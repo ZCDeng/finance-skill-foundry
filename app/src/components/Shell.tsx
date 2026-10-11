@@ -11,15 +11,13 @@ export interface ShellProps {
   strip?: ReactNode;
   onGuide?(): void;
   covered?: boolean;
-  /** What waits on the manager across every task, shown on the 总览 tab; nothing at 0. */
-  todoCount?: number;
   /** False in a build whose bridge cannot read 总览: the tab is left out rather than opening an empty page. */
   overview?: boolean;
   children: ReactNode;
 }
 export const APP_NAME = 'FA Foundry';
 
-export function Shell({ screen, onScreen, strip, onGuide, covered, todoCount = 0, overview = true, children }: ShellProps) {
+export function Shell({ screen, onScreen, strip, onGuide, covered, overview = true, children }: ShellProps) {
   const workspace = screen === 'analysis' || screen === 'workbench';
   const embedded = covered === true || workspace || screen === 'formulator';
   return (
@@ -31,20 +29,20 @@ export function Shell({ screen, onScreen, strip, onGuide, covered, todoCount = 0
         </span>
         <nav className="fnd-head__nav" aria-label="主导航">
           {overview ? <button type="button" className="fnd-head__tab" aria-current={screen === 'overview' ? 'page' : undefined}
-            onClick={() => onScreen('overview')}>总览{todoCount > 0 ? <><span className="fnd-head__count" aria-hidden>{todoCount}</span><span className="sr-only">，{todoCount} 项等你处理</span></> : null}</button> : null}
+            onClick={() => onScreen('overview')}>总览</button> : null}
           <button type="button" className="fnd-head__tab" aria-current={workspace ? 'page' : undefined}
             onClick={() => onScreen('analysis')}>工作区</button>
           <button type="button" className="fnd-head__tab" aria-current={screen === 'deliverables' ? 'page' : undefined}
             onClick={() => onScreen('deliverables')}>成果库</button>
         </nav>
         <span className="fnd-head__end">
-          <ThemeSwitch />
           {/* Neutral at rest, gold on hover (R14); the ghost variant's own hover would win over components.css. Below 620px only the icon stays. */}
           {onGuide ? <Button type="button" variant="ghost" size="sm"
             className="fnd-head__help enabled:hover:bg-transparent enabled:hover:text-[var(--fnd-selected)] max-[620px]:w-(--fnd-button-height) max-[620px]:px-0"
             onClick={onGuide} title="使用指南（⌘/Ctrl + ?）" aria-keyshortcuts="Meta+? Control+?">
             <BookOpen size={16} strokeWidth={1.5} aria-hidden /><span className="fnd-head__help-label">使用指南</span>
           </Button> : null}
+          <ThemeSwitch />
         </span>
       </header>
       {strip}

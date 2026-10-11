@@ -1166,7 +1166,7 @@ export function ReportEditor({
           <aside
             ref={outlineRef}
             id={outlineId}
-            className="report-outline"
+            className="report-outline fnd-fold-inset"
             aria-label="文稿目录"
             tabIndex={-1}
             onKeyDown={(event) => {
@@ -1206,7 +1206,7 @@ export function ReportEditor({
 
           {reflowPreview && (
             <section
-              className="report-reflow-preview"
+              className="report-reflow-preview fnd-fold-inset"
               aria-label="段落整理预览"
             >
               <div className="analysis-section-heading">
@@ -1552,10 +1552,10 @@ export function ReportEditor({
                 </Button>
               </div>
               {visualEditor?.taskId === taskId && <ReportVisualComposer key={`${taskId}:${visualEditor.position ?? 'new'}`} taskId={taskId} runs={runs} initial={visualEditor.initial} onApply={applyVisual} onCancel={() => setVisualEditor(null)} />}
-              {structuredBackup && !sourceMode && <div className="report-source-recovery"><p className="analysis-note">当前显示源码转换后的内容。之前的结构版仍保留在本次编辑中；恢复会替换当前正文。</p><Button type="button" variant="outline" onClick={restoreStructuredDocument}>恢复结构版</Button></div>}
+              {structuredBackup && !sourceMode && <div className="report-source-recovery fnd-fold-inset"><p className="analysis-note">当前显示源码转换后的内容。之前的结构版仍保留在本次编辑中；恢复会替换当前正文。</p><Button type="button" variant="outline" onClick={restoreStructuredDocument}>恢复结构版</Button></div>}
               {linkOpen && (
                 <div
-                  className="report-inline-popover"
+                  className="report-inline-popover fnd-fold-inset"
                   role="group"
                   aria-label="链接设置"
                 >
@@ -1583,7 +1583,7 @@ export function ReportEditor({
               )}
               {noteOpen && (
                 <div
-                  className="report-inline-popover"
+                  className="report-inline-popover fnd-fold-inset"
                   role="group"
                   aria-label="附注设置"
                 >
@@ -1623,7 +1623,7 @@ export function ReportEditor({
                     onChange={(event) => setSourceText(event.target.value)}
                   />
                   <div
-                    className="report-source-preview"
+                    className="report-source-preview fnd-fold-inset"
                     aria-label="源码降级预览"
                   >
                     <ReportReading
@@ -2135,7 +2135,7 @@ export function PdfComparison({ dataUrl, page: initialPage }: { dataUrl: string;
   }, [page, pages]);
 
   return (
-    <div className="report-pdf-compare">
+    <div className="report-pdf-compare fnd-fold-inset">
       <div className="analysis-section-heading">
         <h4>PDF 原页对照</h4>
         <div className="analysis-actions">

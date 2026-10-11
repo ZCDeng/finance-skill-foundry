@@ -114,7 +114,7 @@ export function ExplanationQualityPanel({ taskId, quality, state, facts, citedFa
     <EvidenceQuality key={taskId} taskId={taskId} dimensions={quality?.status_dimensions} issues={quality?.issues ?? []} stale={stale} showDimensions={false} requirements={quality?.requirements?.items} />
     {!(quality?.issues?.length) && <p className="analysis-note">{state === 'passed' ? '当前文稿数字、单位和引用未发现问题。' : '检查只提示风险，不会阻止你保存经理判断。'}</p>}
     {facts.length > 0 && <details className="analysis-details"><DisclosureSummary>可引用事实 · {facts.length} 条</DisclosureSummary>
-      <div className="analysis-fact-list">{facts.map((fact) => <article key={fact.id} className="analysis-fact-card" aria-label={`事实 ${fact.id}`}>
+      <div className="analysis-fact-list">{facts.map((fact) => <article key={fact.id} className="analysis-fact-card fnd-fold-inset" aria-label={`事实 ${fact.id}`}>
         <p><strong>{factLabel(fact)}</strong>{citedFactIds.includes(fact.id) ? <span className="analysis-note"> · 已引用</span> : null}</p>
         <EvidenceLabelChip entry={evidenceFor(fact.id)} />
         <p className="analysis-note">计算结果第 {Number(fact.row ?? 0) + 1} 行{fact.column ? ` · ${fact.column}` : ''}{fact.scope ? ` · ${scopeSummary(fact.scope)}` : ''}</p>

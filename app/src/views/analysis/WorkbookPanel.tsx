@@ -174,7 +174,7 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
     {readResult && Array.isArray(readResult.rows) && <Table columns={Object.keys(readResult.rows[0] ?? {}).map((name) => ({ name, type: 'VARCHAR' }))} rows={readResult.rows as Record<string, unknown>[]} caption="绑定区域读取结果" exact />}
     {cells.length > 0 && <Table columns={[{ name: '单元格', type: 'VARCHAR' }, { name: '字段', type: 'VARCHAR' }, { name: '原值', type: 'VARCHAR' }, { name: '新值', type: 'VARCHAR' }, { name: '冲突', type: 'VARCHAR' }]}
       rows={cells.map((cell) => ({ 单元格: cell.cell, 字段: cell.field, 原值: cell.old_value, 新值: cell.new_value, 冲突: cell.conflict === true ? '是' : '否' }))} caption="写回预览" exact />}
-    {conflictCells.length > 0 && <div className="analysis-workbook-conflicts" aria-label="写回冲突处理">
+    {conflictCells.length > 0 && <div className="analysis-workbook-conflicts fnd-fold-inset" aria-label="写回冲突处理">
       <strong>冲突处理</strong>
       {conflictCells.map((cell) => {
         const cellId = String(cell.cell);

@@ -164,7 +164,7 @@ function OpenBlock({ block, number, onOpen }: { block: CloseBlock; number: numbe
   const rows = blocked ? block.items.filter((item) => item.blocking) : block.items;
   const notes = blocked ? block.items.filter((item) => !item.blocking) : [];
   const target = rows.find((item) => item.blocking && item.target)?.target;
-  return <li value={number} className={`analysis-close-block analysis-close-block--${block.state}`} aria-label={`${number} ${block.label}：${STATE_WORDS[block.state]}`}>
+  return <li value={number} className={`analysis-close-block analysis-close-block--${block.state} fnd-fold-inset`} aria-label={`${number} ${block.label}：${STATE_WORDS[block.state]}`}>
     <div className="analysis-close-block-head">
       <Icon size={16} strokeWidth={1.5} aria-hidden />
       <h4>{number} {block.label}</h4>

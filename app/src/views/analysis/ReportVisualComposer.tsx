@@ -99,7 +99,7 @@ export function ReportVisualComposer({ taskId, runs, initial, onApply, onCancel 
   function updateStep(index: number, key: keyof Step, value: string) { setSteps((previous) => previous.map((step, at) => at === index ? { ...step, [key]: value } : step)); }
   function removeStep(index: number) { setSteps((previous) => previous.filter((_, at) => at !== index).map((step, at, all) => ({ ...step, connector: at === all.length - 1 ? '' : step.connector }))); }
 
-  return <section className="report-visual-composer" aria-label={initial ? '编辑文稿图表' : '插入文稿图表'} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onCancel(); } }}>
+  return <section className="report-visual-composer fnd-fold-inset" aria-label={initial ? '编辑文稿图表' : '插入文稿图表'} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onCancel(); } }}>
     <div className="report-visual-composer__heading"><div><h3>{initial ? '编辑图表' : '插入图表'}</h3><p>先选适合问题的图型，再核对数据、单位和图题。</p></div><Button type="button" variant="ghost" onClick={onCancel}>取消图表</Button></div>
     <div className="report-visual-composer__fields">
       <label>图表类型<NativeSelect aria-label="图表类型" value={kind} onChange={(event) => setKind(event.target.value as ReportVisual['kind'])}><option value="bar">条形图 · 比较大小</option><option value="line">折线图 · 展示趋势</option><option value="flow">流程图 · 解释关系</option></NativeSelect></label>

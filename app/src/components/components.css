@@ -74,13 +74,6 @@
   background: transparent;
 }
 
-/* The number of to-dos on the 总览 tab. Hidden at 0 by not being drawn. */
-.fnd-head__count {
-  display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 4px;
-  border-radius: var(--fnd-radius-pill); background: var(--fnd-warning-fill); color: var(--fnd-warning); font-size: var(--fnd-size-label); line-height: 1; font-weight: 600;
-  font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums;
-}
-
 .fnd-head .fnd-head__tab:focus-visible {
   outline: 1px solid var(--fnd-focus);
   outline-offset: -1px;
@@ -1295,24 +1288,35 @@ details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary)::d
 }
 
 /*
- * Inside a bordered card with less than a 24px gutter, a hanging chevron would
- * cross the border, so there the fold keeps its chevron inside: the words start
- * 24px in, as a list item in the card, and a nested fold's rule still falls
- * under its chevron. Full-page panes keep the hanging chevron above.
+ * Inside a bordered card, a table cell, or anything else with less than a
+ * 24px gutter, a hanging chevron would cross the edge. There the fold keeps
+ * its chevron inside: the words start 24px in, as a list item in the card, and
+ * what the fold opens starts on the same 24px line as its words. A nested
+ * fold's chevron then sits under those words and its rule under its chevron.
+ * A container opts in with .fnd-fold-inset (a <details> may carry it itself);
+ * every table cell does. tools/verify_ui_workspace.cjs measures each chevron
+ * against the edge around it, so a card that forgets the class shows up there.
  */
-:is(.analysis-close-block, .analysis-composer, .analysis-evidence-posture, .analysis-fact-card,
-  .analysis-report-review-status, .analysis-structure-sheet, .analysis-workbook-conflicts,
-  .report-outline, .report-inline-popover, .report-pdf-compare, .report-reflow-preview, .report-source-preview,
-  .report-source-recovery, .report-visual-composer) .fnd-disclosure-summary {
+:is(.fnd-fold-inset, td, th) .fnd-disclosure-summary,
+.fnd-fold-inset > .fnd-disclosure-summary {
   margin-inline-start: 0;
   max-width: 100%;
 }
 
-:is(.analysis-close-block, .analysis-composer, .analysis-evidence-posture, .analysis-fact-card,
-  .analysis-report-review-status, .analysis-structure-sheet, .analysis-workbook-conflicts,
-  .report-outline, .report-inline-popover, .report-pdf-compare, .report-reflow-preview, .report-source-preview,
-  .report-source-recovery, .report-visual-composer) details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary)::details-content {
+:is(.fnd-fold-inset, td, th) details:has(> .fnd-disclosure-summary)::details-content,
+details.fnd-fold-inset:has(> .fnd-disclosure-summary)::details-content {
+  padding-inline-start: 24px;
+}
+
+:is(.fnd-fold-inset, td, th) details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary),
+details.fnd-fold-inset details:has(> .fnd-disclosure-summary) {
+  margin-inline-start: 0;
+}
+
+:is(.fnd-fold-inset, td, th) details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary)::details-content,
+details.fnd-fold-inset details:has(> .fnd-disclosure-summary)::details-content {
   margin-inline-start: 12px;
+  padding-inline-start: 11px;
 }
 
 /* A row that opens something says so before it is clicked. */

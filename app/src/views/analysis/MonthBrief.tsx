@@ -66,7 +66,7 @@ export function MonthBrief({ taskId, refreshKey, board, runs, analyses, datasets
   const contextOf = (run: AnalysisRun): FigureSourceContext => ({ run, analysis: analyses.find((row) => row.id === run.analysis_id), datasets, superseded: replaced });
   const sources: Sources = { cards: board?.cards ?? [], runs, contextOf, onOpen, onOpenResult };
   const worded = brief.worded && !original ? brief.worded.lines : {};
-  return <details className="analysis-details analysis-brief" open>
+  return <details className="analysis-details analysis-brief fnd-fold-inset" open>
     <DisclosureSummary>本月三句话</DisclosureSummary>
     <ol className="analysis-brief__lines">
       {brief.lines.map((line) => <li key={line.key} data-failed={line.failed ? '' : undefined}>
