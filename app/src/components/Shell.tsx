@@ -1,15 +1,17 @@
 import type { ReactNode } from 'react';
-import { BookOpen } from 'lucide-react';
+import { BookOpen, Settings } from 'lucide-react';
 import './components.css';
 import { Button } from './ui/button.js';
 import { ThemeSwitch } from './ThemeSwitch.js';
 
-export type Screen = 'overview' | 'analysis' | 'workbench' | 'formulator' | 'tasks' | 'deliverables';
+export type Screen = 'overview' | 'analysis' | 'workbench' | 'formulator' | 'tasks' | 'deliverables' | 'settings';
 export interface ShellProps {
   screen: Screen;
   onScreen(screen: Screen): void;
   strip?: ReactNode;
   onGuide?(): void;
+  /** 设置 opens from the gear at the far right; a build without settings shows no gear. */
+  onSettings?(): void;
   covered?: boolean;
   /** False in a build whose bridge cannot read 总览: the tab is left out rather than opening an empty page. */
   overview?: boolean;
@@ -17,7 +19,7 @@ export interface ShellProps {
 }
 export const APP_NAME = 'FA Foundry';
 
-export function Shell({ screen, onScreen, strip, onGuide, covered, overview = true, children }: ShellProps) {
+export function Shell({ screen, onScreen, strip, onGuide, onSettings, covered, overview = true, children }: ShellProps) {
   const workspace = screen === 'analysis' || screen === 'workbench';
   const embedded = covered === true || workspace || screen === 'formulator';
   return (
@@ -43,6 +45,12 @@ export function Shell({ screen, onScreen, strip, onGuide, covered, overview = tr
             <BookOpen size={16} strokeWidth={1.5} aria-hidden /><span className="fnd-head__help-label">使用指南</span>
           </Button> : null}
           <ThemeSwitch />
+          {onSettings ? <Button type="button" variant="ghost" size="sm"
+            className="fnd-head__help fnd-head__settings enabled:hover:bg-transparent enabled:hover:text-[var(--fnd-selected)] aria-[current=page]:text-[var(--fnd-selected)]"
+            aria-current={screen === 'settings' ? 'page' : undefined} onClick={onSettings}
+            aria-label="设置" title="设置（⌘/Ctrl + ,）" aria-keyshortcuts="Meta+, Control+,">
+            <Settings size={16} strokeWidth={1.5} aria-hidden />
+          </Button> : null}
         </span>
       </header>
       {strip}

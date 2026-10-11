@@ -698,6 +698,17 @@ textarea.fnd-field {
   outline-offset: -1px;
 }
 
+/* 设置: the same pill, as wide as it is tall; gold while its page is on, as a current tab is (Shell.tsx passes the
+ * same colour as a class, for the reason given above). */
+.fnd-head__settings {
+  width: var(--fnd-button-height);
+  padding: 0;
+}
+
+.fnd-head__settings[aria-current='page'] {
+  color: var(--fnd-selected);
+}
+
 /*
  * The tabs stay on the window's centre line: the bar is three columns, the two
  * sides always equal. When zoom leaves too little room, the sides give way

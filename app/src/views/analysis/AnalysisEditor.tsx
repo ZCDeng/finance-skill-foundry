@@ -8,6 +8,7 @@ import { Input } from '../../components/ui/input.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { datasetOptions, metricLabel } from './shared.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
+import { Technical } from '../../components/Preferences.js';
 
 export type AnalysisEdit = Pick<AnalysisRevision, 'parameters' | 'assumptions' | 'bindings'> & { sql: string };
 
@@ -96,8 +97,8 @@ export function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, 
       <p className="analysis-note">参数会传入计算，假设说明用于记录依据；改变计算方式可请助手更新表达式。</p>
       <Button variant="outline" type="button" disabled={busy} onClick={() => onChat(changed ? spec() : undefined)}>与助手调整计算方式</Button>
     </section>
-    <details className="analysis-details"><DisclosureSummary>高级：查看或编辑计算 SQL</DisclosureSummary>
-      <Textarea className="analysis-code" aria-label="计算 SQL" rows={7} value={sql} disabled={busy} onChange={(event) => updateSql(event.target.value)} /></details>
+    <Technical><details className="analysis-details"><DisclosureSummary>高级：查看或编辑计算 SQL</DisclosureSummary>
+      <Textarea className="analysis-code" aria-label="计算 SQL" rows={7} value={sql} disabled={busy} onChange={(event) => updateSql(event.target.value)} /></details></Technical>
     <div className="analysis-actions"><Button type="button" disabled={busy || !sql.trim()} onClick={() => void finishAndClose(() => onSave(spec()))}>保存新版并重跑</Button><Button variant="outline" type="button" disabled={busy} onClick={() => void finishAndClose(onRun)}>重跑当前已保存版本</Button></div>
   </div>;
 }

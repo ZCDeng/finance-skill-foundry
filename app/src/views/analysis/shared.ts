@@ -49,6 +49,16 @@ export const accountMapOptions = (finance: FinanceContextState | null): SelectOp
   value: String(item.id ?? ''),
   label: textValue(item.name ?? '管理科目映射'),
 })).filter((item) => item.value) ?? [];
+/**
+ * A binding's name in words: 实际 or 预算 where the alias says so, else the file it is bound to. An alias such as
+ * `city` is the analysis's own key and means nothing on screen.
+ */
+export function aliasWords(alias: string, context?: FinanceContext, datasets: DatasetSnapshot[] = []): string {
+  const known = scenarioLabel(alias);
+  if (known !== alias) return known;
+  const bound = context?.bindings[alias];
+  return (bound && datasets.find((source) => source.id === bound)?.name) || alias;
+}
 export const aliasOptions = (aliases: string[], context?: FinanceContext, datasets: DatasetSnapshot[] = []): SelectOption[] => aliases.map((alias) => {
   const bound = context?.bindings[alias];
   return { value: alias, label: scenarioLabel(alias), meta: bound ? datasets.find((source) => source.id === bound)?.name ?? '已绑定资料' : '' };

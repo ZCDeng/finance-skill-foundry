@@ -1,4 +1,4 @@
-import { type BrowserWindow, type OpenDialogOptions, ipcMain, shell, dialog } from 'electron';
+import { type BrowserWindow, type OpenDialogOptions, app, ipcMain, shell, dialog } from 'electron';
 
 import type { Binding } from '../foundry.js';
 import { FoundryFailure, FoundryRefusal, REFUSED, runFoundry } from '../foundry.js';
@@ -28,6 +28,7 @@ import { CHANNELS, type WaitKind } from './contract.js';
 import { appendWait, waitEntry } from '../timing.js';
 import { type Appearance, appearanceOf, readAppearance, writeAppearance } from '../appearance.js';
 import { readFirstLook, writeFirstLook } from '../firstLook.js';
+import { preferencesPatchOf, readPreferences, writePreferences } from '../preferences.js';
 import * as path from 'node:path';
 import type { ReportHost } from '../reports/host.js';
 import { withDraftSpec } from '../reports/input.js';
@@ -769,6 +770,25 @@ export function registerIpc(
       if (!appearance) throw new Error('the first look is not available in this build');
       writeFirstLook(appearance.folder());
       return { done: true };
+    }));
+  // 设置 keeps its choices in the same folder too (preferences.ts); the data folder is the store this window binds.
+  ipcMain.handle(CHANNELS.preferencesGet, () =>
+    answer(async () => {
+      if (!appearance) throw new Error('settings are not available in this build');
+      return readPreferences(appearance.folder());
+    }));
+  ipcMain.handle(CHANNELS.preferencesSet, (_e, raw: unknown) =>
+    answer(async () => {
+      if (!appearance) throw new Error('settings are not available in this build');
+      return writePreferences(appearance.folder(), preferencesPatchOf(raw));
+    }));
+  ipcMain.handle(CHANNELS.appInfo, () =>
+    answer(async () => ({ version: app.getVersion(), data_folder: binding.varRoot })));
+  ipcMain.handle(CHANNELS.appRevealData, () =>
+    answer(async () => {
+      const trouble = await shell.openPath(binding.varRoot);
+      if (trouble) throw new Error(trouble);
+      return { revealed: true as const };
     }));
 
   if (!panes) return { shutdown };

@@ -57,6 +57,12 @@ export const CHANNELS = {
   /** 60 秒看看它能做什么: whether 总览 still offers it, and the one way to stop it. See `firstLook.ts`. */
   firstLookGet: 'first-look:get',
   firstLookDone: 'first-look:done',
+  /** 设置: the app-wide choices (technical details shown, 本月三句话 open, the start screen). See `preferences.ts`. */
+  preferencesGet: 'preferences:get',
+  preferencesSet: 'preferences:set',
+  /** 设置 › 关于 and 数据与存储: this build's version and where its data lives, and the one way to show that folder. */
+  appInfo: 'app:info',
+  appRevealData: 'app:reveal-data',
   tasks: 'foundry:tasks',
   task: 'foundry:task',
   gallery: 'foundry:gallery',

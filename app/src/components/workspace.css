@@ -40,6 +40,9 @@
 .workspace-sample > p { flex: 1 1 360px; min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .workspace-sample__tag { flex-shrink: 0; padding: 0 8px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-pill); color: var(--fnd-muted); font-size: var(--fnd-size-label); line-height: 20px; }
 .workspace-sample > .workspace-sample__error { flex-basis: 100%; color: var(--fnd-warning); }
+.workspace-sample--folded { padding-block: 4px; }
+button.workspace-sample__tag { background: transparent; font: inherit; font-size: var(--fnd-size-label); cursor: pointer; }
+button.workspace-sample__tag:hover { border-color: var(--fnd-line-hover); color: var(--fnd-ink); }
 .workspace-panes { display: flex; flex: 1; min-height: 0; min-width: 0; }
 .workspace-conversation { width: var(--chat-width); flex: 0 0 var(--chat-width); display: flex; flex-direction: column; min-height: 0; }
 .workspace-native { position: relative; flex: 1; min-height: 0; overflow: auto; }

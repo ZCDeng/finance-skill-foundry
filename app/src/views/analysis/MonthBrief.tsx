@@ -4,6 +4,7 @@ import {
 } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
+import { usePreferences } from '../../components/Preferences.js';
 import { Figure } from '../../components/Figure.js';
 import { formatPeriod } from '../../lib/period.js';
 import { AskLink } from '../guide/GuideHub.js';
@@ -18,7 +19,7 @@ import { errorText } from './shared.js';
  * 本月三句话 (foundry/month_brief.py): what moved most on the board, the biggest risk on the 风险雷达 and what waits on
  * the manager, at the top of the task. A rule picks every figure from results the task already holds; each opens to its
  * source as it does on the board. The assistant may have reworded a line: the figures and links are the rule's, word
- * for word, and the rule's own line is a click away.
+ * for word, and the rule's own line is a click away. It opens expanded or folded as 设置 says.
  */
 export function MonthBrief({ taskId, refreshKey, board, runs, analyses, datasets, superseded, readOnly = false, onOpen, onOpenResult }: {
   taskId: string;
@@ -36,6 +37,7 @@ export function MonthBrief({ taskId, refreshKey, board, runs, analyses, datasets
   onOpen(target: string): void;
   onOpenResult(run: AnalysisRun): void;
 }) {
+  const { preferences } = usePreferences();
   const [brief, setBrief] = useState<Brief | null>(null);
   const [error, setError] = useState('');
   const [original, setOriginal] = useState(false);
@@ -66,7 +68,7 @@ export function MonthBrief({ taskId, refreshKey, board, runs, analyses, datasets
   const contextOf = (run: AnalysisRun): FigureSourceContext => ({ run, analysis: analyses.find((row) => row.id === run.analysis_id), datasets, superseded: replaced });
   const sources: Sources = { cards: board?.cards ?? [], runs, contextOf, onOpen, onOpenResult };
   const worded = brief.worded && !original ? brief.worded.lines : {};
-  return <details className="analysis-details analysis-brief fnd-fold-inset" open>
+  return <details className="analysis-details analysis-brief fnd-fold-inset" open={preferences.brief_open}>
     <DisclosureSummary>本月三句话</DisclosureSummary>
     <ol className="analysis-brief__lines">
       {brief.lines.map((line) => <li key={line.key} data-failed={line.failed ? '' : undefined}>

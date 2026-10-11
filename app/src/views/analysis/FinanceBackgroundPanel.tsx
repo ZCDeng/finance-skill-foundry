@@ -10,6 +10,7 @@ import { ScopeSummary } from './ScopeSummary.js';
 import { PeriodWords } from '../../components/PeriodWords.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
+import { Technical } from '../../components/Preferences.js';
 
 export interface FinanceBackground {
   id?: string; label?: string; text?: string; paragraph?: string; basis?: string; scope?: Record<string, unknown>; effective_from?: string; effective_to?: string; dataset_id?: string; created_at?: string;
@@ -52,7 +53,7 @@ export function FinanceBackgroundPanel({ background, scope, scopeJson, backgroun
           onChange={(value) => onScope({ ...scope, currency: value })} allowEmptyLabel="待确认" clearable placeholder="选择币种" />
         <TextField label="账簿" ariaLabel="背景账簿" value={scope.ledger ?? ''} onChange={(value) => onScope({ ...scope, ledger: value })} />
       </div>
-      <details className="analysis-details"><DisclosureSummary>高级：补充范围 JSON</DisclosureSummary><Textarea aria-label="补充范围 JSON" className="analysis-code" rows={4} value={scopeJson} onChange={(event) => onScopeJson(event.target.value)} /></details>
+      <Technical><details className="analysis-details"><DisclosureSummary>高级：补充范围 JSON</DisclosureSummary><Textarea aria-label="补充范围 JSON" className="analysis-code" rows={4} value={scopeJson} onChange={(event) => onScopeJson(event.target.value)} /></details></Technical>
     </details></fieldset>
     <div className="analysis-actions"><Button variant="outline" type="button" disabled={busy || !background.text.trim()} onClick={onSave}>保存背景</Button>
       <Button variant="outline" type="button" disabled={busy} onClick={onList}>刷新适用背景</Button></div>

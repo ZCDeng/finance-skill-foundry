@@ -11,6 +11,7 @@ import { ScopeSummary } from './ScopeSummary.js';
 import { TechnicalInfo } from './TechnicalInfo.js';
 import { Checkbox } from '../../components/ui/checkbox.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
+import { Technical } from '../../components/Preferences.js';
 
 type RequirementScope = {
   ledger?: string;
@@ -577,10 +578,10 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, anal
       </div> : <p className="analysis-note">尚未登记必答指标。至少添加一项，才能让文稿覆盖检查有明确对象。</p>}
       {removedExisting.length ? <TextField label="删除要求的变更原因" value={changeReason} onChange={setChangeReason}
         error={changeReason.trim() ? undefined : '删要求必须写明变更原因。'} placeholder="例如：经理改为只核对范围，不再要求费用下钻。" /> : null}
-      <details className="analysis-details"><DisclosureSummary>高级：绑定与历史版本</DisclosureSummary>
+      <Technical><details className="analysis-details"><DisclosureSummary>高级：绑定与历史版本</DisclosureSummary>
         <p className="analysis-note">Excel 区域随当前范围一起保存；有已保存的财务范围时，系统会自动核对并补齐。</p>
         <pre className="analysis-source-text">{JSON.stringify({ context_id: contextId ?? current?.context_id ?? null, bindings, versions: records.map((record) => record.id) }, null, 2)}</pre>
-      </details>
+      </details></Technical>
     </fieldset>
     {duplicateIds ? <p role="alert" className="analysis-message analysis-message--error">要求项 ID 重复，请保留每项稳定且唯一的 ID。</p> : null}
     {hasInvalidDimensions ? <p role="alert" className="analysis-message analysis-message--error">请先修正维度 JSON，再保存要求新版。</p> : null}
@@ -683,10 +684,10 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
         {scenarios.map((scenario) => <Button variant="outline" key={scenario} type="button" title={scenario} onClick={() => removeScenario(scenario)}>{scenarioLabel(scenario)} ×</Button>)}
       </div> : <p className="analysis-note">只在同一指标要同时给出多个结果情景（如累计实际、累计预算、达成率）时填写；每个组织、期间和情景都须有对应结果。</p>}
     </FieldShell>
-    <details className="analysis-details"><DisclosureSummary>高级：精确结果键</DisclosureSummary>
+    <Technical><details className="analysis-details"><DisclosureSummary>高级：精确结果键</DisclosureSummary>
       <TextField label={`精确结果键 ${index + 1}`} value={exactMetricKey} onChange={setExactMetricKey} placeholder="例如：operating_profit、revenue" />
-      <p className="analysis-note">与结果页指标名悬停时显示的指标键一致（技术信息原始结果里的 metric_key）；指定后，毛利不会代替营业利润，收入达成率不会代替利润达成率。</p>
-    </details>
+      <p className="analysis-note">指定后，毛利不会代替营业利润，收入达成率不会代替利润达成率。</p>
+    </details></Technical>
     <label>维度 JSON<Textarea aria-label={`维度 JSON ${index + 1}`} className="analysis-code" rows={3} value={dimensionsText}
       onChange={(event) => {
         const next = event.target.value;

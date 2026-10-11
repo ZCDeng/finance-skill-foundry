@@ -186,13 +186,30 @@ const assert = require('node:assert/strict');
         conclusion: box(pane.querySelector('.analysis-result .analysis-headline')), card: box(pane.querySelector('.analysis-result .analysis-kpi-card')), settings: box(pane.querySelector('.analysis-finance-setup-body')),
         cardNotes: [...pane.querySelectorAll('.analysis-kpi-card')].map(card => ({ notes: card.querySelector('.analysis-kpi-notes')?.textContent ?? '', inferred: card.textContent.includes('推断') })), hits };
     }, forbidden);
+    // 设置 › 显示技术信息 is off by default: ids, digests and raw results stay off the page. The checks of exact ids
+    // below turn it on once, from the 设置 page that ⌘, opens, and leave it on.
+    let technicalShown = false;
+    const showTechnical = async () => {
+      if (technicalShown) return;
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Comma' : 'Control+Comma');
+      const toggle = page.getByRole('switch', { name: '显示技术信息' });
+      await toggle.waitFor();
+      assert.equal(await page.getByRole('button', { name: '设置', exact: true }).getAttribute('aria-current'), 'page', '⌘, opens 设置 and marks its gear');
+      assert.equal(await toggle.getAttribute('aria-checked'), 'false', '显示技术信息 starts off');
+      await capture('app-settings-light-1280', 1280, 800); await capture('app-settings-dark-1280', 1280, 800, true);
+      await toggle.click();
+      await page.waitForFunction(() => document.querySelector('[role="switch"][aria-checked="true"]') !== null);
+      technicalShown = true;
+      await openWorkspace();
+      checks.push('⌘, opens 设置 with 显示技术信息 off; turning it on there brings the technical folds back');
+    };
     if (phases.includes('first-screen')) for (const [kind, seeded] of Object.entries(firstScreen)) {
       await app.evaluate(({ BrowserWindow, nativeTheme }) => { nativeTheme.themeSource = 'light'; BrowserWindow.getAllWindows()[0].setContentSize(1280, 800); });
       await openTask(seeded.title);
       const resultsTab = page.getByRole('tab', { name: /分析结果/ });
       if (await resultsTab.getAttribute('aria-selected') !== 'true') await resultsTab.click();
-      // The run heading carries the run id as its title: wait for this task's run, not the previous task's cards.
-      await page.locator(`.analysis-result [title="${seeded.run}"]`).waitFor({ timeout: 30000 });
+      // The result carries its run id as data-run: wait for this task's run, not the previous task's cards.
+      await page.locator(`.analysis-result[data-run="${seeded.run}"]`).waitFor({ timeout: 30000 });
       await page.locator(kind === 'finance' ? '.analysis-result .analysis-headline' : '.analysis-result .analysis-kpi-card').first().waitFor({ timeout: 30000 });
       const forbidden = rawNames(seeded);
       for (const dark of [false, true]) {
@@ -216,6 +233,9 @@ const assert = require('node:assert/strict');
       }
       checks.push(`first screen at 1280 × 800, light and dark: ${seeded.title} shows its ${kind === 'finance' ? 'conclusion bar' : 'key figures'} unscrolled, above any settings, with no technical names${kind === 'legacy' ? ', cards marked 推断' : kind === 'declared' ? ', no card marked 推断' : ''}`);
       if (kind === 'finance') {
+        assert.equal(await page.locator('.analysis-finance-variance > details.analysis-technical').count(), 0, 'raw technical information stays off the page until 设置 turns it on');
+        await showTechnical();
+        await page.locator(`.analysis-result[data-run="${seeded.run}"]`).waitFor({ timeout: 30000 });
         const raw = page.locator('.analysis-finance-variance > details.analysis-technical');
         assert.equal(await raw.count(), 1, 'variance has one raw technical information block');
         assert.equal(await raw.getAttribute('open'), null, 'raw information starts closed');
@@ -251,6 +271,7 @@ const assert = require('node:assert/strict');
       }
     }
     if (!phases.includes('workspace')) { console.log(JSON.stringify(writeEvidence({}))); return; }
+    await showTechnical();
     await openTask('华东八月经营分析');
     await page.getByRole('table', { name: '业务结果' }).waitFor({ timeout: 30000 });
     await page.getByRole('tab', { name: /资料/ }).click();

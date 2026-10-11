@@ -10,7 +10,8 @@ import { CollectionHealthView, isCollectionHealthRun } from './CollectionHealthV
 import { RevisionDiff } from './RevisionDiff.js';
 import { runFiles, type FigureSourceContext } from './figureSourceInfo.js';
 import { Waterfall, bridgeCloses, type BridgeStep } from '../../components/charts/Waterfall.js';
-import { TechnicalInfo, type TechnicalRow } from './TechnicalInfo.js';
+import { CopyDiagnostics, TechnicalInfo, type TechnicalRow } from './TechnicalInfo.js';
+import { useTechnical } from '../../components/Preferences.js';
 import { PinButton } from './PinButton.js';
 import { businessColumnLabel, runPresentationRole, selectBusinessResult } from './businessResults.js';
 import { errorText } from './shared.js';
@@ -63,13 +64,14 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, supe
   const heading = question?.trim() || analysis.question;
   // The version's own question is written for the assistant; it stays reachable under 技术信息.
   const technical: TechnicalRow[] = [['版本问题', analysis.question]];
+  const showTechnical = useTechnical();
   const compareButton = run && runs.length > 1 ? <Button variant="outline" type="button" aria-expanded={comparing} onClick={() => setComparing(!comparing)}>比较版本</Button> : null;
   // Only the run the latest draft cites is that run; once another is picked the sentence no longer holds.
   const draftReference = Boolean(run && selection.reason === 'draft_reference' && run.id === selection.primary?.id);
   const versionBlock = versionPicker || compareButton || versionNote || draftReference ? <div className="analysis-version">
     {versionPicker || compareButton ? <div className="analysis-version-row">{versionPicker}{compareButton}</div> : null}
     {versionNote ? <p className="analysis-version-note">{versionNote}</p> : null}
-    {draftReference && <p className="analysis-version-note">当前结果是最新文稿引用的那次计算；之后的探查和重试保留在「中间步骤」里。</p>}
+    {draftReference && <p className="analysis-version-note">当前结果是最新文稿引用的那次计算{showTechnical ? '；之后的探查和重试保留在「中间步骤」里' : ''}。</p>}
   </div> : null;
   const resultActions = run ? <div className="analysis-actions">
     <Button variant={runPresentationRole(run) === 'business' ? 'default' : 'outline'} type="button" disabled={busy} onClick={() => onChat(`请把分析「${analysis.question}」的计算 ${run.id} 整理成可编辑的经营分析文稿，区分计算结果、假设与专业判断。`)}>整理成文稿</Button>
@@ -77,7 +79,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, supe
     {onAdjustScope && run.engine === 'finance' && <Button variant="outline" type="button" disabled={busy} onClick={() => onAdjustScope(run)}>调整范围</Button>}
   </div> : null;
   return <div className="analysis-result-area" data-evidence-open={evidence || undefined}>
-    {!run ? <>{versionBlock}<NotRunYet runs={runs} onPick={(next) => pick(next)} /></> : <article className="analysis-result">
+    {!run ? <>{versionBlock}<NotRunYet runs={runs} onPick={(next) => pick(next)} /></> : <article className="analysis-result" data-run={run.id}>
       {versionBlock}
       {latest && latest.id !== run.id && latest.execution_status === 'failed' && <p className="analysis-message analysis-message--error">
         最近一次计算没有完成，当前保留的是上一次成功的结果。<Button variant="outline" type="button" onClick={() => pick(latest)}>查看未完成的计算</Button></p>}
@@ -97,15 +99,16 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, supe
         })}</div></>}
       </section>}
       <header className="analysis-result-head"><h3 className="sr-only">{heading}</h3>
-        <p className="analysis-note" title={run.id}>{when(run.created_at)} · 第 {revisionLabel(run, runs)} 次计算 · {runRoleLabel(run)}</p><RunStatus run={run} />
+        <p className="analysis-note" title={showTechnical ? run.id : undefined}>{when(run.created_at)} · 第 {revisionLabel(run, runs)} 次计算 · {runRoleLabel(run)}</p><RunStatus run={run} />
         {source && <Freshness source={source} />}</header>
-      {run.error && <p role="alert" className="analysis-message analysis-message--error">{errorText(run.error)}</p>}
+      {run.error && <p role="alert" className="analysis-message analysis-message--error">{errorText(run.error)}
+        <CopyDiagnostics rows={[['计算编号', run.id], ['分析', analysis.question], ['错误', run.error], ['诊断', run.result?.diagnostics?.length ? run.result.diagnostics : undefined]]} /></p>}
       {isFinanceVarianceRun(run) && <FinanceVarianceHeadline run={run} />}
       {Boolean(run.row_declarations?.warnings?.length) && <ContractWarnings warnings={run.row_declarations!.warnings!} />}
       {run.result && run.result.columns.length > 0 ? <RunResultTable run={run} actions={resultActions} technical={technical} source={source} />
         : <>{resultActions}<TechnicalInfo rows={technical}>{run.result?.diagnostics?.length ? <RawDiagnostics items={run.result.diagnostics} /> : null}</TechnicalInfo></>}
       {(run.engine === 'finance' || isStructuredAggregateRun(run)) && <SourceTraceDetails run={run} busy={busy} onDrilldown={onDrilldown} />}
-      {run.stdout && <details className="analysis-details"><DisclosureSummary tone="quiet">脚本输出 · {run.stdout.trimEnd().split('\n').length} 行</DisclosureSummary>
+      {showTechnical && run.stdout && <details className="analysis-details"><DisclosureSummary tone="quiet">脚本输出 · {run.stdout.trimEnd().split('\n').length} 行</DisclosureSummary>
         <pre className="analysis-source-text" aria-label="脚本计算输出">{run.stdout}</pre></details>}
       {Boolean(run.outputs?.length) && <details className="analysis-details analysis-output-list"><DisclosureSummary>生成的文件 · {run.outputs!.length} 个</DisclosureSummary>
         {run.outputs?.map((output) => <div key={output.path} className="analysis-actions">
@@ -140,7 +143,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, supe
     </div></aside></div>}
     <details className="analysis-details analysis-history"><DisclosureSummary>计算历史 · 结果 {selection.businessRuns.length}{selection.failedRuns.length ? ` · 未完成 ${selection.failedRuns.length}` : ''}</DisclosureSummary>
       <HistoryRows rows={[...runs].reverse().filter((row) => runPresentationRole(row) !== 'activity')} runs={runs} analyses={analyses} current={run} onPick={pick} />
-      {selection.activityRuns.length > 0 && <details className="analysis-details analysis-history-steps"><DisclosureSummary tone="quiet">中间步骤 · {selection.activityRuns.length}</DisclosureSummary>
+      {showTechnical && selection.activityRuns.length > 0 && <details className="analysis-details analysis-history-steps"><DisclosureSummary tone="quiet">中间步骤 · {selection.activityRuns.length}</DisclosureSummary>
         <p className="analysis-note">助手在得到结果前做的探查和重试。它们不是结论，文稿也不会引用它们。</p>
         <HistoryRows rows={[...selection.activityRuns].reverse()} runs={runs} analyses={analyses} current={run} onPick={pick} />
       </details>}

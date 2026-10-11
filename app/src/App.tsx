@@ -27,6 +27,8 @@ import { Overview, type OverviewTarget } from './views/Overview.js';
 import { PreviewBar } from './views/Preview.js';
 import { TaskDetail } from './views/TaskDetail.js';
 import { Tasks } from './views/Tasks.js';
+import { Settings } from './views/Settings.js';
+import { usePreferences } from './components/Preferences.js';
 import { DataBar, Formulator } from './views/Formulator.js';
 import { Analysis } from './views/Analysis.js';
 import { materialsAnchor } from './views/analysis/MaterialsFileList.js';
@@ -70,6 +72,15 @@ export function App() {
   const api = bridge();
   // 总览 is the first screen where the build can read it; a build without it opens on the workspace as before.
   const [screen, setScreen] = useState<Screen>(() => (api?.overview ? 'overview' : 'analysis'));
+  // 设置 › 打开应用时进入: once the saved choice is read, a manager who starts in the workspace goes there,
+  // unless they already went somewhere in the moment it took.
+  const { preferences, loaded: preferencesLoaded, available: settingsAvailable } = usePreferences();
+  const startApplied = useRef(false);
+  useEffect(() => {
+    if (!preferencesLoaded || startApplied.current) return;
+    startApplied.current = true;
+    if (preferences.start === 'workspace') setScreen((now) => (now === 'overview' ? 'analysis' : now));
+  }, [preferencesLoaded, preferences.start]);
   /** The task every session opened here binds to. Survives a screen change. */
   const [current, setCurrent] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -146,6 +157,17 @@ export function App() {
     window.addEventListener('keydown', key);
     return () => { window.removeEventListener(GUIDE_EVENT, open); window.removeEventListener('keydown', key); };
   }, [openGuideAt, closeGuide]);
+  // ⌘/Ctrl + , opens 设置 from any screen, as it does in every Mac app.
+  useEffect(() => {
+    if (!settingsAvailable) return;
+    const key = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !(event.metaKey || event.ctrlKey) || event.key !== ',') return;
+      event.preventDefault();
+      setScreen('settings');
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [settingsAvailable]);
   const [conversationFocus, setConversationFocus] = useState(0);
   const [conversationProblem, setConversationProblem] = useState<string | null>(null);
   const [nativeRect, setNativeRect] = useState<WorkspaceRect | null>(null);
@@ -1070,6 +1092,7 @@ export function App() {
         if (next !== 'deliverables') setOpened(null);
         setScreen(next);
       }}
+      onSettings={settingsAvailable ? () => { setOpened(null); setScreen('settings'); } : undefined}
       onGuide={inWorkspace || screen === 'overview' ? () => { const from = screen; firstRunShown.current = true; setScreen('analysis'); openGuideAt(from === 'overview' ? 'overview' : ''); } : undefined}
       overview={Boolean(api?.overview)}
       covered={preview !== null && (screen === 'deliverables' || screen === 'tasks' || locatorPreview)}
@@ -1198,6 +1221,7 @@ export function App() {
           onLibrary={() => setScreen('deliverables')}
           firstLook={firstLookOffered ? { busy: firstLookBusy, error: firstLookError, onStart: startFirstLook, onDismiss: endFirstLook } : undefined} />
       ) : null}
+      {screen === 'settings' ? <Settings onWorkspace={() => setScreen('analysis')} /> : null}
       {screen === 'formulator' ? <Formulator running={formulator} /> : null}
       {screen === 'deliverables' ? (
         <Deliverables
