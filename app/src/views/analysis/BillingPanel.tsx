@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { Calculator, FilePlus2, Sparkles } from 'lucide-react';
+import { Calculator, FilePlus2, ReceiptText, Sparkles } from 'lucide-react';
 import {
   bridge, timeWait, when,
   type BillingCommand, type BillingDetail, type BillingKind, type CollectionCaliber, type CollectionCaliberParams,
@@ -17,6 +17,7 @@ import { decimalToFixed, formatAmount } from '../../lib/figures.js';
 import { HelpLink } from '../guide/GuideHub.js';
 import { BillingDrill } from './BillingDrill.js';
 import { errorText, unwrap } from './shared.js';
+import { SectionIcon } from '../../components/SectionIcon.js';
 
 /**
  * 收费明细: the household-level 应收、实收 and 房产主数据 (foundry/billing_detail.py), and the collection
@@ -179,7 +180,7 @@ export function BillingPanel({ taskId, period, practice, readOnly, refreshKey, s
   const confirmed = (kind: BillingKind) => details.filter((row) => row.kind === kind && row.confirmation);
 
   return <section className="analysis-billing" aria-labelledby="analysis-billing-title">
-    <div className="analysis-section-heading"><span className="fnd-with-help"><h3 id="analysis-billing-title" ref={heading}>收费明细与收缴率</h3>
+    <div className="analysis-section-heading"><span className="fnd-with-help"><h3 id="analysis-billing-title" ref={heading}><SectionIcon icon={ReceiptText} segment="operations" />收费明细与收缴率</h3>
       <HelpLink article="billing-detail" label="收费明细与收缴率口径" /></span></div>
     <p className="analysis-note">按户的应收、实收和房产主数据单独导入（CSV，GBK 或 UTF-8，单张最多 500 万行），算当期收缴率、清欠率和综合收缴率，并和套表填报的数对照。</p>
     <div className="analysis-actions">

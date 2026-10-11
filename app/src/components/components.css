@@ -182,6 +182,55 @@
 }
 .fnd-column { width: 100%; max-width: var(--fnd-container); margin: 0 auto; padding: 24px 24px 64px; }
 
+/*
+ * Section-title icons (DESIGN.md 分区标题图标). A tile in the part's colour at
+ * 12% behind a line icon in the full colour. In a column that leaves a gutter
+ * for it (.fnd-hang, with --fnd-hang-tile the tile's size) the tile hangs in
+ * the gutter 8px before the words, so the title, its note and the content keep
+ * one left edge; anywhere else, or inside a framed card (.fnd-fold-inset), it
+ * sits before the words.
+ */
+.fnd-section-icon {
+  --fnd-section-tile: 28px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: var(--fnd-section-tile);
+  height: var(--fnd-section-tile);
+  margin-inline-end: 8px;
+  vertical-align: middle;
+  border-radius: var(--fnd-radius-mark);
+  color: var(--fnd-seg-close);
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.fnd-section-icon[data-segment='finance'] { color: var(--fnd-seg-finance); }
+.fnd-section-icon[data-segment='operations'] { color: var(--fnd-seg-operations); }
+.fnd-section-icon[data-segment='report'] { color: var(--fnd-seg-report); }
+
+.fnd-section-icon > svg {
+  width: calc(var(--fnd-section-tile) * 0.64);
+  height: calc(var(--fnd-section-tile) * 0.64);
+}
+
+.fnd-hang :is(h2, h3, h4):has(> .fnd-section-icon) {
+  position: relative;
+}
+
+.fnd-hang :is(h2, h3, h4) > .fnd-section-icon {
+  --fnd-section-tile: var(--fnd-hang-tile, 28px);
+  position: absolute;
+  left: calc(-8px - var(--fnd-section-tile));
+  top: calc((1lh - var(--fnd-section-tile)) / 2);
+  margin: 0;
+}
+
+.fnd-hang .fnd-fold-inset :is(h2, h3, h4) > .fnd-section-icon {
+  --fnd-section-tile: 28px;
+  position: static;
+  margin-inline-end: 8px;
+}
+
 /* -- the five words ------------------------------------------------------- */
 
 .fnd-marks {

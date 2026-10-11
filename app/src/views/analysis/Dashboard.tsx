@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowRight, Check, Download, Pin, Presentation, RefreshCw, X } from 'lucide-react';
+import { ArrowRight, Check, Download, LayoutDashboard, Pin, Presentation, RefreshCw, X } from 'lucide-react';
 import { bridge, when, type Answer, type AnalysisRevision, type AnalysisRun, type DatasetSnapshot } from '../../bridge.js';
 import { useSigner } from '../../components/Preferences.js';
 import { Button } from '../../components/ui/button.js';
@@ -31,6 +31,7 @@ import { acceptedCard, buildSnapshot, type SnapshotTask } from './dashboardSnaps
 import type { SnapshotFormat } from '../../../electron/reports/dashboard-snapshot.js';
 import { errorText, unwrap } from './shared.js';
 import './Dashboard.css';
+import { SectionIcon } from '../../components/SectionIcon.js';
 
 type Edit = (cards: DashboardCard[]) => (DashboardCard | CardDraft)[];
 
@@ -282,7 +283,7 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
   const charts = board.filter((card) => card.kind !== 'figure');
   return <div className="dashboard" ref={root}>
     {tour ? <TourHint at={tourAt} onStep={setTourAt} onEnd={tour.onEnd} /> : null}
-    <div className="analysis-section-heading"><h3>看板</h3></div>
+    <div className="analysis-section-heading"><h3><SectionIcon icon={LayoutDashboard} segment="report" />看板</h3></div>
     <p className="analysis-note">每张卡都读自这个任务已经算好的结果，看过没问题就点「认可」。</p>
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
     {said && <p role="status" className="analysis-message">{said}</p>}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Archive, MessageSquare } from 'lucide-react';
+import { Archive, ListChecks, MessageSquare } from 'lucide-react';
 import { bridge, when, type Answer, type AnalysisDraft, type AnalysisRun, type DatasetSnapshot, type FinanceDrilldown } from '../../bridge.js';
 import { TechnicalInfo } from './TechnicalInfo.js';
 import { RunStatus, draftStateText, textValue } from './presentation.js';
@@ -18,6 +18,7 @@ import { MaterialityFields, materialityScopeSummary, materialityToEdit, material
 import { unwrap, errorText } from './shared.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
 import { findReadingParagraph } from './readabilityLocation.js';
+import { SectionIcon } from '../../components/SectionIcon.js';
 
 export type DraftEdit = { title: string; body: string; limitations: string; review: string; document?: ReportDraftDocument; materiality?: MaterialityEdit; recovery?: FinanceCompletionRecovery | null };
 type ReportMode = 'read' | 'edit' | 'print';
@@ -391,7 +392,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, analy
       evidence={{ affected_claims: affectedClaims, unresolved_issues: quality?.issues ?? [] }} />}
     {/* Everything that decides whether this version can go out, after the text it checks. */}
     <section className="analysis-prepublish" aria-label="发布前检查">
-    <div><h3>发布前检查</h3><p className="analysis-note">质量检查、重要性阈值、引用的计算和经理判断背景。</p></div>
+    <div><h3><SectionIcon icon={ListChecks} segment="report" />发布前检查</h3><p className="analysis-note">质量检查、重要性阈值、引用的计算和经理判断背景。</p></div>
     {(draft || recovery) && <ExplanationQualityPanel taskId={taskId} quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} locatorNotice={locatorNotice} locatorPdf={locatorPdf} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} onOpenLocator={(fact) => void openLocator(fact)}
       body={body} onLocateParagraph={locateParagraph} paragraphLocateNotice={paragraphLocateNotice} />}
     {draft && importedSources(draft).length > 0 && <section className="analysis-report-review-draft" aria-label="复核外部报告数字">
