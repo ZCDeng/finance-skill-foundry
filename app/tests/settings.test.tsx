@@ -95,3 +95,21 @@ it('folds the example note to its 示例 tag once read, for every task of that k
   expect(screen.getByText(/参考结果没有生成完/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: '知道了' })).toBeNull();
 });
+
+it('keeps another kind of example open after one kind was read, and folds again on the next task', async () => {
+  const api = install();
+  const banner = (task: TaskRow) => <PreferencesProvider><SampleBanner task={task} building={false} error="" onReference={() => {}} /></PreferencesProvider>;
+  const { rerender } = render(banner(practice));
+  await waitFor(() => expect(api.preferencesGet).toHaveBeenCalled());
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '知道了' })); });
+  // The same banner moves on to the next-month task: that kind was never read.
+  rerender(banner({ id: 't2', title: '示例：华宸物业 9 月', sample: 'next_month' } as TaskRow));
+  expect(screen.getByText(/这是 9 月的练习任务/)).toBeTruthy();
+  rerender(banner(practice));
+  expect(screen.queryByText(/这是练习用的示例任务/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '示例' }));
+  expect(screen.getByText(/这是练习用的示例任务/)).toBeTruthy();
+  // Opened on one task, the note stays folded on another task of the same kind.
+  rerender(banner({ ...practice, id: 't3' }));
+  expect(screen.queryByText(/这是练习用的示例任务/)).toBeNull();
+});

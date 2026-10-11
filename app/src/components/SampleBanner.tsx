@@ -22,8 +22,9 @@ export function SampleBanner({ task, building, error, onRebuild, onReference }: 
 }) {
   const kind = task.sample;
   const { preferences, set } = usePreferences();
-  const [unfolded, setUnfolded] = useState(false);
-  const [readHere, setReadHere] = useState(false);
+  // The banner stays mounted from one task to the next: what was read is kept by kind, what was opened by task.
+  const [unfolded, setUnfolded] = useState<string | null>(null);
+  const [readHere, setReadHere] = useState<string[]>([]);
   if (!kind) return null;
   const newer = task.sample_outdated && kind !== 'legacy'
     ? <> 示例资料已有新版本，可在使用指南「第一次使用」里换成新版示例。</> : null;
@@ -52,17 +53,17 @@ export function SampleBanner({ task, building, error, onRebuild, onReference }: 
   } else {
     text = <>这是旧版的 6 月示例任务。新版示例换成了华宸物业 8 月资料，可在使用指南「第一次使用」里换成新版示例。</>;
   }
-  const read = readHere || preferences.samples_read.includes(kind);
-  if (steady && read && !unfolded && !error) {
+  const read = readHere.includes(kind) || preferences.samples_read.includes(kind);
+  if (steady && read && unfolded !== task.id && !error) {
     return <div className="workspace-sample workspace-sample--folded" role="note" aria-label="示例任务说明">
       <button type="button" className="workspace-sample__tag" aria-expanded={false} title="这是示例任务，点开看说明"
-        onClick={() => setUnfolded(true)}>示例</button>
+        onClick={() => setUnfolded(task.id)}>示例</button>
       {action}
     </div>;
   }
   const markRead = () => {
-    setReadHere(true);
-    setUnfolded(false);
+    setReadHere((current) => current.includes(kind) ? current : [...current, kind]);
+    setUnfolded(null);
     if (!preferences.samples_read.includes(kind)) void set({ samples_read: [...preferences.samples_read, kind] }).catch(() => {});
   };
   return <div className="workspace-sample" role="note" aria-label="示例任务说明">
