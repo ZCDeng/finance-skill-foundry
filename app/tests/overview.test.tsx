@@ -8,9 +8,10 @@ import { App } from '../src/App.js';
 import { PreferencesProvider } from '../src/components/Preferences.js';
 
 vi.mock('../src/views/Analysis.js', () => ({
-  Analysis: ({ task, tour }: { task: TaskRow | null; tour?: { onEnd(): void } }) => {
+  Analysis: ({ task, tour, section }: { task: TaskRow | null; tour?: { onEnd(): void }; section?: string }) => {
     const [shown] = useState(task?.title ?? '');
-    return <><p>{task ? `本地成果：${task.title}` : `从问题开始${shown}`}</p>{tour ? <button type="button" onClick={tour.onEnd}>看完了</button> : null}</>;
+    return <><p>{task ? `本地成果：${task.title}` : `从问题开始${shown}`}</p>{task && section ? <p>{`在这一步：${section}`}</p> : null}
+      {tour ? <button type="button" onClick={tour.onEnd}>看完了</button> : null}</>;
   },
 }));
 
@@ -35,7 +36,7 @@ const data: OverviewData = {
   ],
 };
 const noop = () => undefined;
-const props = { data, loading: false, error: '', fresh: false, recent: [], onRefresh: noop, onOpen: vi.fn(), onOpenClose: vi.fn(),
+const props = { data, loading: false, error: '', fresh: false, recent: [], onRefresh: noop, onOpen: vi.fn(), onOpenStep: vi.fn(),
   onNewQuestion: vi.fn(), onChecklist: vi.fn(), onGuide: vi.fn(), onLibrary: vi.fn() };
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); delete (globalThis as unknown as { foundry?: Bridge }).foundry; });
@@ -48,16 +49,35 @@ describe('总览', () => {
     expect(groups).toEqual(['差异待处置 · 1', '表结构待确认 · 1', '分析范围未确认 · 1']);
     fireEvent.click(screen.getByRole('button', { name: /去处理：华东 7 月月结，应收滚动/ }));
     expect(props.onOpen).toHaveBeenCalledWith(july, 'controls');
+    // Each says which step it is handled on.
+    const steps = Array.from(document.querySelectorAll('.fnd-overview__todos .fnd-overview__tag')).map((node) => node.textContent);
+    expect(steps).toEqual(['3 勾稽', '1 资料', '2 范围']);
   });
 
-  it('shows each task\'s close line and six block states in words as well as colour', () => {
-    render(<Overview {...props} />);
+  it('shows each task\'s six steps in words as well as colour, and opens the first that waits on someone', () => {
+    const work = { runs: [], cards: [], drafts: 0, datasets: 2 };
+    render(<Overview {...props} data={{ ...data, tasks: data.tasks.map((row) => ({ ...row, work })) }} />);
+    expect(screen.getByRole('heading', { name: '本月进度（进行中 2 个任务）' })).toBeTruthy();
     const row = screen.getByRole('button', { name: /^华东 8 月月结/ });
-    expect(within(row).getByRole('img').getAttribute('aria-label')).toBe('范围待处理，来源已就绪，结构待处理，控制已就绪，异常已就绪，复核尚未开始');
+    // 资料 waits on 结构, 范围 on itself; 勾稽 reads 控制 and 异常; nothing is calculated yet.
+    expect(within(row).getByRole('img').getAttribute('aria-label'))
+      .toBe('1 资料待处理，2 范围待处理，3 勾稽已完成，4 财务分析未开始，5 经营分析未开始，6 汇报未开始');
     expect(row.textContent).toContain('尚未准备：还有 2 项待处理');
     expect(screen.getByText('账：带保留可用')).toBeTruthy();
     fireEvent.click(row);
-    expect(props.onOpenClose).toHaveBeenCalledWith(august);
+    expect(props.onOpenStep).toHaveBeenCalledWith(august, 'materials');
+    fireEvent.click(screen.getByRole('button', { name: /^华东 7 月月结/ }));
+    expect(props.onOpenStep).toHaveBeenCalledWith(july, 'close');
+  });
+
+  it('places 财务分析, 经营分析 and 汇报 by the same rules as the task\'s steps', () => {
+    const run = (extra: Record<string, unknown>) => ({ execution_status: 'succeeded', engine: 'finance', role: '', columns: ['actual'], rows: true, outputs: false, ...extra });
+    const work = { runs: [run({}), run({ scenario_kind: 'collection_health' }), run({ rows: false })],
+      cards: [{ state: 'pinned', kind: 'figure' }, { state: 'pinned', kind: 'scenario' }], drafts: 1, datasets: 1 };
+    render(<Overview {...props} data={{ ...data, tasks: [{ ...data.tasks[1], work }] }} />);
+    const label = within(screen.getByRole('button', { name: /^华东 7 月月结/ })).getByRole('img').getAttribute('aria-label');
+    // A pinned card waits on 认可; a what-if card never does.
+    expect(label).toBe('1 资料已完成，2 范围已完成，3 勾稽待处理，4 财务分析已完成，5 经营分析已完成，6 汇报待处理');
   });
 
   it('says in one line what the boards were recomputed on this month, and opens a task\'s board', () => {
@@ -162,6 +182,21 @@ describe('总览 in the app', () => {
     expect(screen.getByRole('button', { name: '工作区' }).getAttribute('aria-current')).toBe('page');
   });
 
+  it('做一次经营分析 makes a task and opens it on 经营分析, since 月结 is not the only use', async () => {
+    const api = mount();
+    const made = task('d', '经营分析', '');
+    const rows = [july, august];
+    Object.assign(api, {
+      tasks: vi.fn(async () => ok(rows)),
+      task: vi.fn(async (id: string) => ok({ task: [...rows].find((row) => row.id === id)!, windows: [], deliverables: [], sessions: [] })),
+      taskNew: vi.fn(async (title: string) => { rows.push({ ...made, title }); return ok({ id: made.id }); }),
+    });
+    fireEvent.click(await screen.findByRole('button', { name: '做一次经营分析' }));
+    await waitFor(() => expect((api as unknown as { taskNew: ReturnType<typeof vi.fn> }).taskNew).toHaveBeenCalledWith('经营分析', ''));
+    await screen.findByText('本地成果：经营分析');
+    expect(screen.getByText('在这一步：operations')).toBeTruthy();
+  });
+
   it('reads 总览 again on coming back to it, not on a timer', async () => {
     const api = mount();
     await screen.findByRole('heading', { name: '等你处理（3）' });
@@ -264,7 +299,7 @@ describe('总览 in the app', () => {
   });
 
   it('opens on the workspace when 设置 says so, and ⌘, opens 设置 from there', async () => {
-    const preferences = { technical: false, brief_open: true, start: 'workspace' as const, samples_read: [], skipped_steps: {} };
+    const preferences = { technical: false, brief_open: true, start: 'workspace' as const, samples_read: [], skipped_steps: {}, people: [], current_person: '' };
     const api = {
       tasks: vi.fn(async () => ok([july, august])),
       task: vi.fn(async (id: string) => ok({ task: id === august.id ? august : july, windows: [], deliverables: [], sessions: [] })),

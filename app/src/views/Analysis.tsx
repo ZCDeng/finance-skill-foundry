@@ -66,8 +66,8 @@ type Props = {
 };
 /** Each place's own 使用指南 article, opened from the 「?」 beside 刷新. */
 const PAGE_ARTICLES: Partial<Record<AnalysisSection, [article: string, label: string]>> = {
-  materials: ['page-datasets', '「资料」这一步有什么'], scope: ['scope', '分析范围与期间'], close: ['page-close', '「勾稽」这一步有什么'],
-  results: ['page-results', '「财务分析」这一步有什么'], operations: ['collection-health', '回款与现金：生死线、应收天数和风险雷达'],
+  materials: ['page-datasets', '「资料」这一步有什么'], scope: ['scope', '「范围」这一步有什么'], close: ['page-close', '「勾稽」这一步有什么'],
+  results: ['page-results', '「财务分析」这一步有什么'], operations: ['page-operations', '「经营分析」这一步有什么'],
   dashboard: ['page-dashboard', '看板：经营看板、一页纸与汇报模式'], drafts: ['page-drafts', '「文稿」有什么'], workbook: ['excel-writeback', '写回 Excel：预览后生成新工作簿'],
 };
 const EXAMPLES = ['本月利润为什么没有达到预算？', '哪些客户需要优先跟进回款？', '回款晚两周，现金余额会怎样？'];
@@ -579,6 +579,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
             {view.datasets.length && !readOnly ? <AskLink ask="collection-health" label={operationsAnalysis ? '让助手重算回款健康' : '让助手做回款健康分析'} disabled={busy} /> : null}</div>
           {operationsAnalysis ? resultOf(operationsAnalysis, operationsAnalyses) : null}
           {operationsAnalysis && dataset ? sourcePreview : null}
+          {!view.datasets.length ? <AnalysisEmpty title="先把资料加进来" body="回款健康读月结套表里的收入、毛利率、费用率和应收；加进来后，这里一键把问题交给助手。收缴率也可以直接在下面导入收费明细来算。"
+            onAddFiles={embedded && !readOnly ? () => void perform(addFiles) : undefined} onChat={() => void chat(question.trim() || undefined)} /> : null}
           {bridge()?.billingCall ? <BillingPanel taskId={task.id} period={task.period} refreshKey={materialsRefresh} show={billingShow} onShown={() => setBillingShow(undefined)}
             practice={task.sample === 'practice' || task.sample === 'next_month'} readOnly={readOnly} /> : null}
         </>}

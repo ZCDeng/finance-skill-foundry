@@ -295,10 +295,20 @@ export interface OverviewTask {
   todo: OverviewTodo[];
   /** The board's cards last run again on newer files or carried from another task, with what changed. */
   dashboard?: { recomputed: OverviewRecomputed[] };
+  /** What the steps after 勾稽 read of the task (overview.py _step_work), so 总览 places them as the task's steps do. */
+  work?: OverviewWork;
   /** The example reference task is still being built. */
   building?: boolean;
   /** This task could not be read; the others still are. */
   error?: string;
+}
+
+/** Each run as much as the step rules read of it, the board's cards, the drafts and files counted. */
+export interface OverviewWork {
+  runs: { execution_status: string; engine?: string | null; role: string; columns: string[]; rows: boolean; outputs: boolean; scenario_kind?: string | null }[];
+  cards: { state?: string; kind?: string }[];
+  drafts: number;
+  datasets: number;
 }
 
 /** What `overview` answers. */

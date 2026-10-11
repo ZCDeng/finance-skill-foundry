@@ -33,6 +33,18 @@ def test_a_task_with_no_files_says_so_and_points_at_the_materials_page(tmp_path,
     assert {"kind": "source", "text": "还没有资料", "target": "datasets"} in row["todo"]
     assert {"kind": "scope", "text": "期间未确认", "target": "scope"} in row["todo"]
     assert result["todo_count"] == len(row["todo"])
+    # What the steps after 勾稽 read (steps.ts): nothing yet.
+    assert row["work"] == {"runs": [], "cards": [], "drafts": 0, "datasets": 0}
+
+
+def test_the_work_digest_carries_what_the_step_rules_read_of_each_run():
+    from foundry.overview import _role
+
+    assert _role({"result_role": "Activity", "result": {"role": "business"}}) == "activity"
+    assert _role({"result": {"result_role": None, "role": "Business"}}) == "business"
+    assert _role({"result": {}}) == ""
+    # The first one set wins, even when it is empty, as `??` reads it.
+    assert _role({"run_role": "", "activity_role": "activity"}) == ""
 
 
 def test_only_active_tasks_newest_period_first(tmp_path, capsys):

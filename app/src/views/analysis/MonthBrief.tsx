@@ -158,8 +158,8 @@ function BriefWords({ part, sources }: { part: BriefPart; sources: Sources }) {
 }
 
 const OPENS: Record<string, string> = {
-  close: '到月结页处理', controls: '到月结页的勾稽控制', dashboard: '到看板', scope: '到资料页的分析范围', datasets: '到资料页',
-  structure: '到资料页的表结构', billing: '到资料页的收费明细', results: '到分析结果', drafts: '到文稿', rollforward: '到滚动到下月',
+  close: '到「勾稽」处理', controls: '到「勾稽」的勾稽控制', dashboard: '到看板', scope: '到「范围」', datasets: '到「资料」',
+  structure: '到「资料」的表结构', billing: '到「经营分析」的收费明细', results: '到「财务分析」', drafts: '到文稿', rollforward: '到滚动到下月',
 };
 
 /** What the card showed before it was run again: the run it read then, when this task holds it, and where it came from. */

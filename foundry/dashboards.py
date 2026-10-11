@@ -52,6 +52,8 @@ PROPOSERS = frozenset({"manager", "assistant"})
 MAX_CARDS = 40
 MAX_TITLE = 60
 MAX_NOTE = 200
+# A 署名, as long as a disposition's decided_by_name (finance_controls.py).
+MAX_SIGNER = 80
 MAX_MATCH = 8
 MAX_SELECT_BYTES = 4096
 MAX_RANK = 50
@@ -245,7 +247,10 @@ def normalize_card(card: Any, *, run_of, previous: dict | None, proposer: str, s
     }
     if state == "accepted":
         kept = previous.get("accepted") if previous and previous.get("state") == "accepted" else None
-        stored["accepted"] = kept if kept and kept.get("run_id") == run["id"] else {"run_id": run["id"], "at": now_iso()}
+        # Who accepted: the 署名 the desktop fills in from 设置 › 使用者. A name on the record, not a permission.
+        by = _text(card.get("accepted_by"), "accepted_by", maximum=MAX_SIGNER, required=False)
+        stored["accepted"] = kept if kept and kept.get("run_id") == run["id"] else {
+            "run_id": run["id"], "at": now_iso(), **({"by": by} if by else {})}
     # What a recompute said of the card (dashboard_recompute) holds while the card stays on that run; no caller writes it.
     same_run = previous is not None and previous.get("run_id") == run["id"]
     stored["recomputed"] = previous.get("recomputed") if same_run else None

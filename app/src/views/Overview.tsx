@@ -1,5 +1,5 @@
 import { useId, type ReactNode } from 'react';
-import { ArrowRight, BookOpen, CircleAlert, CircleCheck, CircleDashed, CircleSlash, ClipboardList, FlaskConical, MessageSquarePlus, RefreshCw, Repeat, Sparkles } from 'lucide-react';
+import { ArrowRight, BookOpen, ChartNoAxesCombined, CircleCheck, ClipboardList, FlaskConical, MessageSquarePlus, RefreshCw, Repeat, Sparkles } from 'lucide-react';
 
 import { SNAPSHOT_FORMAT_WORDS, type GalleryRow, type Overview as OverviewData, type OverviewTask, type OverviewTodo, type TaskRow, when } from '../bridge.js';
 import { Button } from '../components/ui/button.js';
@@ -8,6 +8,9 @@ import { DisclosureSummary } from '../components/Disclosure.js';
 import { Loading, SkeletonRows } from '../components/Loading.js';
 import { formatPeriod } from '../lib/period.js';
 import { isWhatIf } from './analysis/dashboardModel.js';
+import { usePreferences } from '../components/Preferences.js';
+import { STEP_ICONS } from './analysis/StepNav.js';
+import { STEPS, STEP_WORDS, overviewStepStates, sectionOf, stepOf, type Step, type StepState } from './analysis/steps.js';
 import './overview.css';
 
 /** Where a to-do is handled, as the workspace names its places. */
@@ -28,8 +31,13 @@ const GROUPS: { kind: OverviewTodo['kind']; title: string; note: string }[] = [
   { kind: 'review', title: '计算与文稿待更新', note: '资料或范围改过以后，要重新计算并按新结果更新文稿。' },
 ];
 
-const BLOCK_WORDS = { done: '已就绪', attention: '请留意', blocked: '待处理', not_started: '尚未开始' } as const;
-const BLOCK_ICONS = { done: CircleCheck, attention: CircleAlert, blocked: CircleSlash, not_started: CircleDashed } as const;
+/** A to-do's step, as 1 资料 … 6 汇报: where its target lands among the six. */
+function stepWords(target: string | undefined): string | null {
+  if (!target) return null;
+  const step = stepOf(sectionOf(target));
+  const index = STEPS.findIndex((item) => item.step === step);
+  return index < 0 ? null : `${index + 1} ${STEPS[index].label}`;
+}
 
 /** A task's name with its period, the way every list in the app writes it. */
 function TaskName({ task }: { task: TaskRow }) {
@@ -63,8 +71,11 @@ export interface OverviewProps {
   recent: GalleryRow[];
   onRefresh(): void;
   onOpen(task: TaskRow, target: OverviewTarget): void;
-  onOpenClose(task: TaskRow): void;
+  /** Opens a task on the step its 本月进度 row points at: the first that waits on someone, else the first not begun. */
+  onOpenStep(task: TaskRow, step: Step): void;
   onNewQuestion(): void;
+  /** 做一次经营分析: a new task, opened on 经营分析. Absent where tasks cannot be made. */
+  onOperations?(): void;
   onSample?(): void;
   onChecklist(): void;
   onGuide(): void;
@@ -90,7 +101,7 @@ export interface FirstLookOffer {
  * adds figures across tasks: two tasks' periods, organisations and 口径 differ, and a total of
  * them would be a number no workbook holds.
  */
-export function Overview({ data, loading, error, fresh, recent, onRefresh, onOpen, onOpenClose, onNewQuestion, onSample, onChecklist, onGuide, onLibrary, firstLook }: OverviewProps) {
+export function Overview({ data, loading, error, fresh, recent, onRefresh, onOpen, onOpenStep, onNewQuestion, onOperations, onSample, onChecklist, onGuide, onLibrary, firstLook }: OverviewProps) {
   const rows = data?.tasks ?? [];
   // No active task is not the same as none at all: everything may be archived. Only the second is a first run.
   const empty = data !== null && rows.length === 0 && fresh;
@@ -109,11 +120,11 @@ export function Overview({ data, loading, error, fresh, recent, onRefresh, onOpe
       {error ? <p role="alert" className="analysis-message analysis-message--error">{error}</p> : null}
       {firstLook ? <FirstLook offer={firstLook} /> : null}
       <Recomputed rows={rows} onOpen={onOpen} />
-      <Start empty={empty} idle={idle} tasks={rows.map((row) => row.task)} onOpen={onOpen} onNewQuestion={onNewQuestion} onSample={onSample} onChecklist={onChecklist} onGuide={onGuide} />
+      <Start empty={empty} idle={idle} tasks={rows.map((row) => row.task)} onOpen={onOpen} onNewQuestion={onNewQuestion} onOperations={onOperations} onSample={onSample} onChecklist={onChecklist} onGuide={onGuide} />
       {data === null && loading ? <Loading label="正在读取各任务的月结状态…"><SkeletonRows rows={4} /></Loading> : null}
       {rows.length ? <div className="fnd-overview__grid">
         <Todos rows={rows} onOpen={onOpen} />
-        <Progress rows={rows} onOpenClose={onOpenClose} />
+        <Progress rows={rows} onOpenStep={onOpenStep} />
       </div> : null}
       {recent.length ? <Recent rows={recent} onLibrary={onLibrary} /> : null}
     </div>
@@ -182,9 +193,9 @@ function Section({ title, note, id, children, className }: { title: string; note
 }
 
 /** The four ways in. With no task at all this is the whole first screen. */
-function Start({ empty, idle, tasks, onOpen, onNewQuestion, onSample, onChecklist, onGuide }: {
+function Start({ empty, idle, tasks, onOpen, onNewQuestion, onOperations, onSample, onChecklist, onGuide }: {
   empty: boolean; idle: boolean; tasks: TaskRow[]; onOpen(task: TaskRow, target: OverviewTarget): void; onNewQuestion(): void;
-  onSample?(): void; onChecklist(): void; onGuide(): void;
+  onOperations?(): void; onSample?(): void; onChecklist(): void; onGuide(): void;
 }) {
   const id = useId();
   // Newest period first: last month's task is nearly always the one to roll forward from.
@@ -197,6 +208,10 @@ function Start({ empty, idle, tasks, onOpen, onNewQuestion, onSample, onChecklis
       <Button type="button" variant={empty ? 'default' : 'outline'} onClick={onNewQuestion}>
         <MessageSquarePlus size={15} strokeWidth={1.5} aria-hidden />问一个新问题
       </Button>
+      {/* 月结 is not the only use: a task can start at 经营分析. */}
+      {onOperations ? <Button type="button" variant="outline" onClick={onOperations}>
+        <ChartNoAxesCombined size={15} strokeWidth={1.5} aria-hidden />做一次经营分析
+      </Button> : null}
       {sources.length ? <label className="fnd-overview__roll">
         <Repeat size={15} strokeWidth={1.5} aria-hidden />
         <NativeSelect aria-label="用上月套表起草本月：选上月的任务" value="" wrapperClassName="fnd-native-select--picker"
@@ -229,7 +244,7 @@ function Todos({ rows, onOpen }: { rows: OverviewTask[]; onOpen(task: TaskRow, t
   const groups = GROUPS.map((group) => ({ ...group, items: all.filter(({ item }) => item.kind === group.kind) }))
     .filter((group) => group.items.length);
   return <Section id={`${id}-todo`} title={all.length ? `等你处理（${all.length}）` : '等你处理'}
-    note={all.length ? '每一条都挡着某个任务的月结。点「去处理」直接到要处理的位置。' : undefined}>
+    note={all.length ? '每一条都等你在某个任务的某一步处理，标签写着是第几步。点「去处理」直接到要处理的位置。' : undefined}>
     {groups.length === 0 ? <p className="fnd-overview__clear"><CircleCheck size={16} strokeWidth={1.5} aria-hidden />没有挡住月结的事项。</p> : null}
     {groups.map((group) => <details key={group.kind} className="analysis-details fnd-overview__group" open>
       <DisclosureSummary>{group.title} · {group.items.length}</DisclosureSummary>
@@ -237,7 +252,7 @@ function Todos({ rows, onOpen }: { rows: OverviewTask[]; onOpen(task: TaskRow, t
       <ul className="fnd-overview__todos">
         {group.items.map(({ task, item }, index) => <li key={`${task.id}:${index}`}>
           <div className="fnd-overview__todo-text">
-            <span className="fnd-overview__todo-task"><TaskName task={task} /></span>
+            <span className="fnd-overview__todo-task"><TaskName task={task} />{stepWords(item.target) ? <span className="fnd-overview__tag">{stepWords(item.target)}</span> : null}</span>
             <span>{item.text}</span>
           </div>
           {item.target ? <Button type="button" size="sm" variant="outline" onClick={() => onOpen(task, item.target as OverviewTarget)}>
@@ -250,29 +265,50 @@ function Todos({ rows, onOpen }: { rows: OverviewTask[]; onOpen(task: TaskRow, t
   </Section>;
 }
 
-function Progress({ rows, onOpenClose }: { rows: OverviewTask[]; onOpenClose(task: TaskRow): void }) {
+/** The step a task's row opens on: the first that waits on someone, else the first not begun, else 汇报. */
+function stepToOpen(states: Record<Step, StepState>): Step {
+  const order = STEPS.map((item) => item.step);
+  return order.find((step) => states[step] === 'todo' || states[step] === 'attention')
+    ?? order.find((step) => states[step] === 'not_started') ?? 'report';
+}
+
+/**
+ * 本月进度: each task's six steps as the task screen shows them, 月结's three then 财务分析, 经营分析 and 汇报, each a mark
+ * in its state's colour and named in words for readers; a step the task marked 本期不做 says so. Then the close line.
+ */
+function Progress({ rows, onOpenStep }: { rows: OverviewTask[]; onOpenStep(task: TaskRow, step: Step): void }) {
   const id = useId();
-  const labels = rows.find((row) => row.blocks)?.blocks?.map((block) => block.label) ?? ['范围', '来源', '结构', '控制', '异常', '复核'];
-  return <Section id={`${id}-progress`} className="fnd-overview__progress-section" title={`月结进度（进行中 ${rows.length} 个任务）`} note="六个点依次是范围、来源、结构、控制、异常和复核。">
+  const { preferences } = usePreferences();
+  return <Section id={`${id}-progress`} className="fnd-overview__progress-section" title={`本月进度（进行中 ${rows.length} 个任务）`}
+    note="六个点依次是月结的 1 资料、2 范围、3 勾稽，4 财务分析，5 经营分析，6 汇报。">
     <ul className="fnd-overview__progress">
-      {rows.map((row) => <li key={row.task.id}>
-        <button type="button" className="fnd-overview__progress-row" onClick={() => onOpenClose(row.task)}>
-          <span className="fnd-overview__progress-name"><TaskName task={row.task} /></span>
-          {row.blocks ? <span className="fnd-overview__dots" role="img"
-            aria-label={row.blocks.map((block) => `${block.label}${BLOCK_WORDS[block.state]}`).join('，')}>
-            {row.blocks.map((block, index) => {
-              const Icon = BLOCK_ICONS[block.state];
-              return <Icon key={block.key} className="fnd-overview__dot" data-state={block.state} size={16} strokeWidth={1.75}
-                aria-hidden><title>{`${labels[index] ?? block.label}：${BLOCK_WORDS[block.state]}`}</title></Icon>;
-            })}
-          </span> : null}
-          <span className="fnd-overview__headline">
-            {row.building ? '参考结果正在生成' : row.error ? `读取失败：${row.error}` : row.headline?.text ?? ''}
-            {row.headline?.detail ? <span className="fnd-muted">（{row.headline.detail}）</span> : null}
-          </span>
-          {row.conclusion ? <span className="fnd-overview__conclusion" data-level={row.conclusion.level}>账：{row.conclusion.text}</span> : null}
-        </button>
-      </li>)}
+      {rows.map((row) => {
+        const read = overviewStepStates(row);
+        const skipped = preferences.skipped_steps[row.task.id] ?? [];
+        const states = read ? { ...read, ...Object.fromEntries(skipped.map((step) => [step, 'skipped' as const])) } : null;
+        return <li key={row.task.id}>
+          <button type="button" className="fnd-overview__progress-row" onClick={() => onOpenStep(row.task, states ? stepToOpen(states) : 'close')}>
+            <span className="fnd-overview__progress-name"><TaskName task={row.task} /></span>
+            {states ? <span className="fnd-overview__dots" role="img"
+              aria-label={STEPS.map(({ step, label }, index) => `${index + 1} ${label}${STEP_WORDS[states[step]]}`).join('，')}>
+              {STEPS.map(({ step, label, group }, index) => {
+                const Icon = STEP_ICONS[states[step]];
+                // A hairline between 月结 and each analysis, as on the task screen.
+                const opensGroup = index > 0 && STEPS[index - 1].group !== group;
+                return <span key={step} className="fnd-overview__step" data-opens-group={opensGroup || undefined}>
+                  <Icon className="fnd-overview__dot" data-state={states[step]} size={16} strokeWidth={1.75}
+                    aria-hidden><title>{`${index + 1} ${label}：${STEP_WORDS[states[step]]}`}</title></Icon>
+                </span>;
+              })}
+            </span> : null}
+            <span className="fnd-overview__headline">
+              {row.building ? '参考结果正在生成' : row.error ? `读取失败：${row.error}` : row.headline?.text ?? ''}
+              {row.headline?.detail ? <span className="fnd-muted">（{row.headline.detail}）</span> : null}
+            </span>
+            {row.conclusion ? <span className="fnd-overview__conclusion" data-level={row.conclusion.level}>账：{row.conclusion.text}</span> : null}
+          </button>
+        </li>;
+      })}
     </ul>
   </Section>;
 }

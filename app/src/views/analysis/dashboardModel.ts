@@ -44,8 +44,10 @@ export type DashboardCard = {
   template: TemplateId | null;
   note: string | null;
   proposed_by: 'manager' | 'assistant';
-  /** Set by the backend when the manager accepts, on the run the card showed then. */
-  accepted: { run_id: string; at: string } | null;
+  /** Set by the backend when the manager accepts, on the run the card showed then, with the 署名 it was accepted under. */
+  accepted: { run_id: string; at: string; by?: string } | null;
+  /** Sent with an acceptance only: the current person's 署名 (设置 › 使用者). The backend keeps it as `accepted.by`. */
+  accepted_by?: string;
   /** Set by the backend when the card was last run again on newer files, or carried from another task's board. */
   recomputed?: Recomputed | null;
   /** The last recompute on the card's newer files did not run, and why; tried again when the files change again. */

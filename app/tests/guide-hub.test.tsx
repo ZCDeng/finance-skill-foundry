@@ -26,8 +26,8 @@ it('finds something for every word on the list', () => {
 });
 
 it('matches every word typed, not any', () => {
-  expect(searchArticles('期间 累计').map((row) => row.id)).toEqual(['collection-health', 'scope']);
-  expect(searchArticles('收缴率 风险雷达').map((row) => row.id)).toEqual(['follow-6', 'assistant-skills', 'collection-health']);
+  expect(searchArticles('期间 累计').map((row) => row.id)).toEqual(['scope', 'collection-health']);
+  expect(searchArticles('收缴率 风险雷达').map((row) => row.id)).toEqual(['follow-6', 'page-operations', 'assistant-skills', 'collection-health']);
   expect(searchArticles('期间 不存在的词')).toEqual([]);
 });
 
@@ -55,7 +55,7 @@ it('says what the assistant can and cannot do in every one of its six areas', ()
 it('opens at the article a 「?」 asked for and shows where it applies', () => {
   render(<GuideHub article="controls" onOpen={vi.fn()} onClose={vi.fn()} />);
   expect(screen.getByRole('heading', { name: '勾稽控制与差异处置' })).toBeTruthy();
-  expect(screen.getByText('适用于：勾稽 · 勾稽控制')).toBeTruthy();
+  expect(screen.getByText('适用于：第 3 步 勾稽 · 勾稽控制')).toBeTruthy();
 });
 
 it('says plainly when a search finds nothing', () => {
@@ -97,7 +97,7 @@ it('every article names where it applies and every link goes somewhere the works
 
 it('moves focus to the article when it opens', () => {
   render(<GuideHub article="scope" onOpen={vi.fn()} onClose={vi.fn()} />);
-  expect(document.activeElement?.textContent).toBe('分析范围与期间');
+  expect(document.activeElement?.textContent).toBe('第 2 步「范围」：分析范围与期间');
 });
 
 it('says why it cannot take you anywhere with no editable task open', () => {
@@ -148,4 +148,19 @@ it('has a map of the workspace and one article per page, found by the words peop
   expect(searchArticles('三个点').map((row) => row.id)).toContain('workspace-map');
   expect(searchArticles('归档 菜单').map((row) => row.id)).toEqual(expect.arrayContaining(['workspace-map', 'tasks-library']));
   expect(searchArticles('考核调整').map((row) => row.id)).toContain('page-results');
+});
+
+it('groups one article per step under 六步, in step order, and tags each 跟着做 lesson with the step it practises', () => {
+  expect(GUIDE_SECTIONS.slice(0, 3)).toEqual(['快速开始', '六步', '跟着做：华宸物业 8 月']);
+  const steps = GUIDE_ARTICLES.filter((row) => row.section === '六步').map((row) => row.title.match(/^第 (\d) 步/)?.[1]);
+  // 汇报 has two: the board and the drafts.
+  expect(steps).toEqual(['1', '2', '3', '4', '5', '6', '6']);
+  const lessons = GUIDE_ARTICLES.filter((row) => row.section === '跟着做：华宸物业 8 月' && row.id !== 'follow-1');
+  expect(lessons).toHaveLength(11);
+  for (const lesson of lessons) expect(lesson.appliesTo, lesson.id).toMatch(/^第 [1-6] 步 /);
+  // A lesson calls another one 第 N 课, so 第 N 步 always means one of the six.
+  for (const lesson of GUIDE_ARTICLES.filter((row) => row.section === '跟着做：华宸物业 8 月')) {
+    const words = lesson.body.flatMap((block) => 'text' in block ? [block.text] : 'items' in block ? block.items : []).join('');
+    expect(words, lesson.id).not.toMatch(/第 \d+ 步/);
+  }
 });

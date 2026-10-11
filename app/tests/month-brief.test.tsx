@@ -65,8 +65,8 @@ describe('本月三句话', () => {
     const source = await screen.findByRole('dialog', { name: '兰州城市公司风险雷达本期的来源' });
     expect(within(source).getByText('兰州城市公司')).toBeTruthy();
     fireEvent.keyDown(source, { key: 'Escape' });
-    fireEvent.click(screen.getByRole('button', { name: '2 件事，到月结页处理' }));
-    fireEvent.click(screen.getByRole('button', { name: '应收滚动：待外部确认，差额 1200，到月结页的勾稽控制' }));
+    fireEvent.click(screen.getByRole('button', { name: '2 件事，到「勾稽」处理' }));
+    fireEvent.click(screen.getByRole('button', { name: '应收滚动：待外部确认，差额 1200，到「勾稽」的勾稽控制' }));
     expect(onOpen.mock.calls).toEqual([['close'], ['controls']]);
     fireEvent.click(screen.getByRole('button', { name: '3 个主体，打开这次计算的结果' }));
     expect(onOpenResult).toHaveBeenCalledWith(health);
@@ -92,7 +92,7 @@ describe('本月三句话', () => {
     const { onOpen } = mount(brief({ lines: { waiting: worded }, by: 'assistant', created_at: '2026-10-10T09:00:00Z' }));
     const item = (await screen.findAllByRole('listitem'))[2];
     expect(item.textContent).toBe(`等你拍板${worded}`);
-    fireEvent.click(within(item).getByRole('button', { name: '2 件事，到月结页处理' }));
+    fireEvent.click(within(item).getByRole('button', { name: '2 件事，到「勾稽」处理' }));
     expect(onOpen).toHaveBeenCalledWith('close');
     expect(screen.getByText(/措辞由助手改过，数和能点开的部分没改。/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '看原句' }));

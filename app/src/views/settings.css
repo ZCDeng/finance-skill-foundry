@@ -15,6 +15,10 @@
 .fnd-settings__path { font-family: var(--fnd-font-figure); overflow-wrap: anywhere; }
 .fnd-settings__control { flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
 .fnd-settings__select { min-width: 128px; }
+/* 使用者: a person's name, role and 署名 in one row of labelled fields, the buttons where a row's control sits. */
+.fnd-settings__person { align-items: flex-end; }
+.fnd-settings__fields { flex: 1; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px 12px; max-width: 420px; }
+.fnd-settings__fields label { font-size: var(--fnd-size-small); color: var(--fnd-muted); }
 @media (max-width: 620px) {
   .fnd-settings__row { flex-direction: column; align-items: flex-start; gap: 12px; }
 }

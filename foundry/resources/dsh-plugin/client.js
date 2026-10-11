@@ -1165,9 +1165,9 @@ window.__ModuleLoader__.load({
      *
      * Upstream's skill source lists the bundled skills by id and English
      * description. A finance manager reads neither, so this source lists the
-     * same skills as the things they are for, grouped the way 使用指南's
-     * 「助手能帮你做什么」 groups them, each as a question in the manager's own
-     * words. Picking one puts the question in the composer and nothing else: it
+     * same skills as the things they are for, grouped by the four parts of a
+     * task's six steps (月结, 财务分析, 经营分析, 汇报), each as a question in the
+     * manager's own words. Picking one puts the question in the composer and nothing else: it
      * is the manager's to edit and send, and the assistant chooses the skill from
      * the question as it does from any other.
      *
@@ -1177,47 +1177,47 @@ window.__ModuleLoader__.load({
      */
     const SHORTCUT_SOURCE = 'foundry-finance';
     const FINANCE_SHORTCUTS = [
-      { id: 'readiness', section: '开始与资料体检', label: '资料体检', skill: 'setup', keywords: ['体检', '能不能', '缺什么', '管理利润表'],
+      { id: 'readiness', section: '月结', label: '资料体检', skill: 'setup', keywords: ['体检', '能不能', '缺什么', '管理利润表'],
         prompt: '这些资料能不能出管理利润表？能算什么，还缺期间、币种还是科目映射？' },
-      { id: 'structure', section: '开始与资料体检', label: '说明表结构', skill: 'setup', keywords: ['表结构', '表头', '合计行'],
+      { id: 'structure', section: '月结', label: '说明表结构', skill: 'setup', keywords: ['表结构', '表头', '合计行'],
         prompt: '说明你把每张表读成了什么：表头在哪一行、金额在哪一列、哪些是合计行。我确认后再算。' },
-      { id: 'close-walk', section: '月结与管理报表', label: '走一遍月结', skill: 'close', keywords: ['月结', '关账', '结账'],
+      { id: 'close-walk', section: '月结', label: '走一遍月结', skill: 'close', keywords: ['月结', '关账', '结账'],
         prompt: '按本期套表走一遍月结：先列出要确认的勾稽控制，和现在还挡住月结的事项。' },
-      { id: 'management-pnl', section: '月结与管理报表', label: '管理利润表', skill: 'financial-statements', keywords: ['利润表', '损益表', '报表', '同比', '环比'],
-        prompt: '按已确认的分析范围出本期管理利润表和控制合计，并和上期、上年同期对比，标出重大变动。' },
-      { id: 'suggest-controls', section: '月结与管理报表', label: '建议勾稽控制', skill: 'close', keywords: ['勾稽', '控制', '合计', '对不上'],
+      { id: 'suggest-controls', section: '月结', label: '建议勾稽控制', skill: 'close', keywords: ['勾稽', '控制', '合计', '对不上'],
         prompt: '根据套表里的合计行建议需要确认的勾稽控制，说明每一条检查什么。' },
-      { id: 'budget-bridge', section: '预算与差异分析', label: '利润为什么没达预算', skill: 'bva', keywords: ['预算', '差异', '利润桥', '没达到'],
-        prompt: '本月利润为什么没有达到预算？给出利润桥，每一段都对得上总差异。' },
-      { id: 'price-volume', section: '预算与差异分析', label: '收入价量分解', skill: 'variance-analysis', keywords: ['价量', '量差', '价差', '收入'],
-        prompt: '把本月收入对预算的差异拆成量差和价差，并说明主要驱动。' },
-      { id: 'prior-period', section: '预算与差异分析', label: '和上月比', skill: 'variance-analysis', keywords: ['上月', '环比', '变化'],
-        prompt: '本月和上月相比，利润的变化主要来自哪些项目？' },
-      { id: 'bank-rec', section: '对账', label: '银行对账', skill: 'reconciliation', keywords: ['银行', '未达', '调节表', '存款'],
+      { id: 'bank-rec', section: '月结', label: '银行对账', skill: 'reconciliation', keywords: ['银行', '未达', '调节表', '存款'],
         prompt: '把本期银行存款余额和银行对账单核对一下，列出未达项，编一张余额调节表。' },
-      { id: 'subledger-rec', section: '对账', label: '总账对明细账', skill: 'reconciliation', keywords: ['明细账', '总账', '应收', '应付'],
+      { id: 'subledger-rec', section: '月结', label: '总账对明细账', skill: 'reconciliation', keywords: ['明细账', '总账', '应收', '应付'],
         prompt: '把应收账款总账余额和明细账核对一下，列出差异和可能的原因。' },
-      { id: 'intercompany-rec', section: '对账', label: '内部往来核对', skill: 'reconciliation', keywords: ['内部往来', '关联方', '往来', '抵销'],
+      { id: 'intercompany-rec', section: '月结', label: '内部往来核对', skill: 'reconciliation', keywords: ['内部往来', '关联方', '往来', '抵销'],
         prompt: '核对内部往来，列出两边对不上的公司和金额。' },
-      { id: 'accrual-je', section: '凭证草稿', label: '计提凭证草稿', skill: 'journal-entry', keywords: ['凭证', '分录', '计提', '预提'],
+      { id: 'accrual-je', section: '月结', label: '计提凭证草稿', skill: 'journal-entry', keywords: ['凭证', '分录', '计提', '预提'],
         prompt: '起草本期的费用计提凭证草稿，写明每笔的计算依据。只出草稿，不过账。' },
-      { id: 'depreciation-je', section: '凭证草稿', label: '折旧摊销草稿', skill: 'journal-entry', keywords: ['折旧', '摊销', '待摊', '预付'],
+      { id: 'depreciation-je', section: '月结', label: '折旧摊销草稿', skill: 'journal-entry', keywords: ['折旧', '摊销', '待摊', '预付'],
         prompt: '起草本期的折旧和摊销凭证草稿，附计算表。只出草稿，不过账。' },
-      { id: 'collection-health', section: '回款与现金', label: '回款健康分析', skill: 'cash', keywords: ['回款', '收缴率', '生死线', '应收天数', '风险雷达'],
-        prompt: '做一次回款健康分析：收缴率对生死线、应收天数和风险雷达，集团带上毛利率和收缴率的敏感性表。' },
-      { id: 'backsolve', section: '回款与现金', label: '倒推还要收多少', skill: 'cash', keywords: ['倒推', '目标', '还要收', '全年预算', '每月'],
-        prompt: '倒推一下：收缴率回到生死线，一年还要多收多少？全年收入预算还差多少，剩下几个月每月要做到多少？' },
-      { id: 'sensitivity-grid', section: '回款与现金', label: '毛利率和收缴率一起变', skill: 'cash', keywords: ['敏感性', '如果', '毛利率', '收缴率'],
-        prompt: '毛利率和收缴率一起变，距生死线会怎样？用敏感性表回答，框出现在的位置。' },
-      { id: 'aging', section: '回款与现金', label: '应收账龄', skill: 'cash', keywords: ['账龄', '催收', '跟进', '客户'],
+      { id: 'management-pnl', section: '财务分析', label: '管理利润表', skill: 'financial-statements', keywords: ['利润表', '损益表', '报表', '同比', '环比'],
+        prompt: '按已确认的分析范围出本期管理利润表和控制合计，并和上期、上年同期对比，标出重大变动。' },
+      { id: 'budget-bridge', section: '财务分析', label: '利润为什么没达预算', skill: 'bva', keywords: ['预算', '差异', '利润桥', '没达到'],
+        prompt: '本月利润为什么没有达到预算？给出利润桥，每一段都对得上总差异。' },
+      { id: 'price-volume', section: '财务分析', label: '收入价量分解', skill: 'variance-analysis', keywords: ['价量', '量差', '价差', '收入'],
+        prompt: '把本月收入对预算的差异拆成量差和价差，并说明主要驱动。' },
+      { id: 'prior-period', section: '财务分析', label: '和上月比', skill: 'variance-analysis', keywords: ['上月', '环比', '变化'],
+        prompt: '本月和上月相比，利润的变化主要来自哪些项目？' },
+      { id: 'aging', section: '财务分析', label: '应收账龄', skill: 'cash', keywords: ['账龄', '催收', '跟进', '客户'],
         prompt: '做应收账龄分析，列出需要优先跟进回款的客户。' },
-      { id: 'cash-13-weeks', section: '回款与现金', label: '13 周现金', skill: 'cash', keywords: ['现金', '13 周', '资金', '延迟'],
+      { id: 'cash-13-weeks', section: '财务分析', label: '13 周现金', skill: 'cash', keywords: ['现金', '13 周', '资金', '延迟'],
         prompt: '回款晚两周，未来 13 周现金够不够？' },
-      { id: 'dashboard-cards', section: '看板', label: '提议看板卡', skill: 'financial-statements', keywords: ['看板', '卡片', '钉住', '只看', '拆开', '排名'],
+      { id: 'collection-health', section: '经营分析', label: '回款健康分析', skill: 'cash', keywords: ['回款', '收缴率', '生死线', '应收天数', '风险雷达'],
+        prompt: '做一次回款健康分析：收缴率对生死线、应收天数和风险雷达，集团带上毛利率和收缴率的敏感性表。' },
+      { id: 'backsolve', section: '经营分析', label: '倒推还要收多少', skill: 'cash', keywords: ['倒推', '目标', '还要收', '全年预算', '每月'],
+        prompt: '倒推一下：收缴率回到生死线，一年还要多收多少？全年收入预算还差多少，剩下几个月每月要做到多少？' },
+      { id: 'sensitivity-grid', section: '经营分析', label: '毛利率和收缴率一起变', skill: 'cash', keywords: ['敏感性', '如果', '毛利率', '收缴率'],
+        prompt: '毛利率和收缴率一起变，距生死线会怎样？用敏感性表回答，框出现在的位置。' },
+      { id: 'dashboard-cards', section: '汇报', label: '提议看板卡', skill: 'financial-statements', keywords: ['看板', '卡片', '钉住', '只看', '拆开', '排名'],
         prompt: '看看这个任务已经算好的结果，提议几张值得放上看板的卡，说明每张看什么。先放在「助手提议」里，我钉住才算。' },
-      { id: 'dashboard-by-city', section: '看板', label: '按城市公司排名', skill: 'cash', keywords: ['城市公司', '排名', '从低到高', '生死线'],
+      { id: 'dashboard-by-city', section: '汇报', label: '按城市公司排名', skill: 'cash', keywords: ['城市公司', '排名', '从低到高', '生死线'],
         prompt: '在看板上提议一张按城市公司排的卡：距生死线从低到高，标出生死线。先放在「助手提议」里。' },
-      { id: 'collection-scenario', section: '看板', label: '回款情景卡', skill: 'cash', keywords: ['情景', '假如', '滑块', '生死线'],
+      { id: 'collection-scenario', section: '汇报', label: '回款情景卡', skill: 'cash', keywords: ['情景', '假如', '滑块', '生死线'],
         prompt: '在看板上加一张回款情景卡：拖收缴率看距生死线、现金经营利润和一年回款怎么变。' },
     ];
 

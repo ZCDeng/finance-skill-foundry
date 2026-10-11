@@ -1,79 +1,96 @@
 import { useEffect, useState } from 'react';
-import { bridge, type Answer } from '../../bridge.js';
+import { bridge, type OverviewTask } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
-import type { CloseStatus } from '../analysis/MonthCloseControlCenter.js';
+import { usePreferences } from '../../components/Preferences.js';
+import { STEP_ICONS } from '../analysis/StepNav.js';
+import { STEPS, STEP_WORDS, overviewStepStates, sectionOf, stepOf, type Step, type StepState } from '../analysis/steps.js';
 import { errorText } from '../analysis/shared.js';
 import type { GuideTarget } from './articles.js';
 import { Loading, SkeletonRows } from '../../components/Loading.js';
 
-type StepState = 'done' | 'todo' | 'not_started';
-type Step = { label: string; state: StepState; detail: string; target: GuideTarget };
+type Row = { step: Step; label: string; state: StepState; detail: string; target: GuideTarget };
 
-const WORDS: Record<StepState, string> = { done: '已完成', todo: '待处理', not_started: '尚未开始' };
+/** Where each step opens when no to-do names a closer place. */
+const STEP_TARGETS: Record<Step, GuideTarget> = {
+  materials: 'datasets', scope: 'scope', close: 'close', results: 'results', operations: 'operations', report: 'dashboard',
+};
+const GUIDE_TARGETS: readonly string[] = ['datasets', 'scope', 'structure', 'billing', 'results', 'operations', 'dashboard', 'drafts', 'workbook', 'close'];
+const NOT_STARTED: Record<Step, string> = {
+  materials: '还没有资料', scope: '', close: '', results: '还没有计算结果', operations: '还没有经营分析结果', report: '还没有看板卡片或文稿',
+};
+
+/** A to-do's place in the guide's words: a control is handled on 勾稽, next month's draft on 资料. */
+function guideTarget(target: string, step: Step): GuideTarget {
+  if (target === 'controls') return 'close';
+  if (target === 'rollforward') return 'datasets';
+  return GUIDE_TARGETS.includes(target) ? target as GuideTarget : STEP_TARGETS[step];
+}
 
 /**
- * The six quick-start steps, each read from the open task's month-close status, so a step
- * is done because the task says so and never because it was ticked or remembered locally.
- * Each row has one action, which goes to where the step is done. There is no 跳过.
+ * The task's six steps, read the way its step row and 总览's 本月进度 read them (steps.ts), so a step is done
+ * because the task says so and never because it was ticked or remembered locally. A step with a to-do names the
+ * first one and goes where it is handled; a step this period does without says 本期不做. There is no 跳过 here.
  */
-export function stepsFrom(status: CloseStatus): Step[] {
-  const block = (key: string) => status.blocks.find((item) => item.key === key);
-  const blocked = (key: string) => block(key)?.state === 'blocked';
-  const firstItem = (key: string) => block(key)?.items.find((item) => item.blocking);
-  const first = (key: string) => firstItem(key)?.text ?? '';
-  const toGuide = (target: string | undefined, fallback: GuideTarget): GuideTarget =>
-    target === 'controls' ? 'close' : (target as GuideTarget | undefined) ?? fallback;
-  const source = block('source');
-  const files = source?.items.filter((item) => item.target === 'datasets').length ?? 0;
-  const review = block('review');
-  const calculated = Boolean(review && review.state !== 'not_started');
-  // A calculation made before the scope or the data changed has to run again; it is not done.
-  const rerun = review?.items.find((item) => item.blocking && item.target === 'results');
-  const draftItem = review?.items.find((item) => item.blocking && item.target !== 'results');
-  const awaitingManager = review?.items.some((item) => item.text.startsWith('经理尚未复核'));
-  return [
-    { label: '添加资料', state: blocked('source') ? 'todo' : 'done', detail: blocked('source') ? '还没有资料' : `${files} 份`, target: 'datasets' },
-    { label: '确认表结构', state: !files ? 'not_started' : blocked('structure') ? 'todo' : 'done', detail: first('structure'), target: 'structure' },
-    { label: '确认分析范围', state: blocked('scope') ? 'todo' : 'done', detail: first('scope'), target: 'scope' },
-    { label: '运行计算', state: !calculated ? 'not_started' : rerun ? 'todo' : 'done', detail: !calculated ? '还没有计算结果' : rerun?.text ?? '', target: 'results' },
-    { label: '核对来源与异常', state: !files ? 'not_started' : blocked('controls') || blocked('exceptions') ? 'todo' : 'done',
-      detail: first('controls') || first('exceptions'), target: toGuide((firstItem('controls') ?? firstItem('exceptions'))?.target, 'close') },
-    { label: '保存文稿并复核', state: !calculated ? 'not_started' : draftItem ? 'todo' : 'done',
-      detail: draftItem?.text ?? (calculated && awaitingManager ? '待经理复核' : ''), target: toGuide(draftItem?.target, 'drafts') },
-  ];
+export function stepsFrom(row: OverviewTask, skipped: readonly Step[] = []): Row[] | null {
+  const read = overviewStepStates(row);
+  if (!read) return null;
+  return STEPS.map(({ step, label }) => {
+    const state: StepState = skipped.includes(step) ? 'skipped' : read[step];
+    const todo = row.todo.find((item) => item.target && stepOf(sectionOf(item.target)) === step);
+    const detail = state === 'skipped' ? ''
+      : state === 'done' ? (step === 'materials' ? `${row.work?.datasets ?? 0} 份资料` : '')
+        : state === 'not_started' ? NOT_STARTED[step]
+          : todo?.text ?? (step === 'report' ? '看板上有卡等你认可' : '');
+    return { step, label, state, detail, target: todo?.target ? guideTarget(todo.target, step) : STEP_TARGETS[step] };
+  });
+}
+
+/** The step row's mark for a state; the state is written beside it, so the mark is only decoration. */
+function mark(state: StepState) {
+  const Icon = STEP_ICONS[state];
+  return <Icon className="fnd-checklist__mark" size={14} strokeWidth={1.75} aria-hidden />;
 }
 
 /** Anything that changes a task's state says so on this event; the checklist reads it again. */
 export const TASK_CHANGED_EVENT = 'fnd:task-changed';
 
 export function QuickStartChecklist({ taskId, canOpen, onOpen }: { taskId?: string; canOpen: boolean; onOpen(target: GuideTarget): void }) {
-  const [status, setStatus] = useState<CloseStatus | null>(null);
+  const { preferences } = usePreferences();
+  // undefined while reading; null when 总览 does not list the task (archived, or in the trash).
+  const [row, setRow] = useState<OverviewTask | null | undefined>(undefined);
   const [error, setError] = useState('');
   const [version, setVersion] = useState(0);
+  const readable = Boolean(bridge()?.overview);
   useEffect(() => {
     const changed = () => setVersion((value) => value + 1);
     window.addEventListener(TASK_CHANGED_EVENT, changed);
     return () => window.removeEventListener(TASK_CHANGED_EVENT, changed);
   }, []);
-  useEffect(() => { setStatus(null); }, [taskId]);
+  useEffect(() => { setRow(undefined); }, [taskId]);
   useEffect(() => {
     setError('');
-    const api = bridge(); if (!api?.financeCall || !taskId) return;
+    const api = bridge(); if (!api?.overview || !taskId) return;
     let live = true;
-    void Promise.resolve(api.financeCall(taskId, 'finance-close-status') as Promise<Answer<CloseStatus> | undefined>).then((answer) => {
+    void Promise.resolve(api.overview()).then((answer) => {
       if (!live || !answer) return;
-      if (!answer.ok) setError(answer.message); else setStatus(answer.value);
+      if (!answer.ok) setError(answer.message);
+      else setRow(answer.value.tasks.find((item) => item.task.id === taskId) ?? null);
     }).catch((failure) => { if (live) setError(errorText(failure)); });
     return () => { live = false; };
   }, [taskId, version]);
   if (!taskId) return <p className="analysis-note">打开或新建一个任务后，这里按任务的实际状态显示六步进度。</p>;
+  if (!readable) return <p className="analysis-note">这里读不到任务的进度，打开任务后看步骤行上的状态。</p>;
   if (error) return <p className="analysis-message analysis-message--error" role="alert">{error}</p>;
-  if (!status) return <Loading label="正在读取这个任务的进度…"><SkeletonRows rows={6} meta={false} /></Loading>;
+  if (row === undefined) return <Loading label="正在读取这个任务的进度…"><SkeletonRows rows={6} meta={false} /></Loading>;
+  if (row === null) return <p className="analysis-note">这个任务不在进行中，恢复后这里才显示六步进度。</p>;
+  const steps = stepsFrom(row, preferences.skipped_steps[taskId] ?? []);
+  if (!steps) return <p className="analysis-note">{row.building ? '参考结果正在生成，生成后这里显示六步进度。' : row.error ? `读取失败：${row.error}` : '这个任务的进度还读不出来。'}</p>;
   return <ol className="fnd-checklist" aria-label="快速开始清单">
-    {stepsFrom(status).map((step, index) => <li key={step.label} className={`fnd-checklist__step fnd-checklist__step--${step.state}`}>
-      <span className="fnd-checklist__label">{index + 1} {step.label}</span>
-      <span className="fnd-checklist__state">{WORDS[step.state]}{step.detail ? ` · ${step.detail}` : ''}</span>
-      {step.state !== 'done' && canOpen ? <Button variant="link" size="sm" type="button" onClick={() => onOpen(step.target)}>去处理</Button> : null}
+    {steps.map((step, index) => <li key={step.step} className={`fnd-checklist__step fnd-checklist__step--${step.state}`}>
+      <span className="fnd-checklist__label">{mark(step.state)}{index + 1} {step.label}</span>
+      <span className="fnd-checklist__state">{STEP_WORDS[step.state]}{step.detail ? ` · ${step.detail}` : ''}</span>
+      {step.state !== 'done' && step.state !== 'skipped' && canOpen
+        ? <Button variant="link" size="sm" type="button" onClick={() => onOpen(step.target)}>去处理</Button> : null}
     </li>)}
   </ol>;
 }

@@ -93,6 +93,19 @@ describe('a snapshot of the board', () => {
     expect(snapshotFileName(snapshot, 'pdf')).toBe('经营看板_华宸物业8月月结_2026年8月.pdf');
   });
 
+  it('prints the 署名 it was exported under, and nothing when nobody is chosen', () => {
+    const gap = { ...figure('collection_gap'), state: 'accepted' as const };
+    gap.accepted = { run_id: gap.run_id, at: '2026-10-10T10:00:00Z', by: '财务部 张三' };
+    const signed = buildSnapshot({ board: board([gap]), runs: [health], contextOf, task, format: 'pdf', signer: ' 财务部 张三 ' });
+    expect(signed.signed_by).toBe('财务部 张三');
+    expect(normalizeSnapshot(JSON.parse(JSON.stringify(signed)), true)).toEqual(signed);
+    expect(snapshotHtml(signed, { sans: 'data:font/woff2;base64,AA==', figures: [] }, '2026-10-10 18:20')).toContain('导出于 2026-10-10 18:20 · 导出人 财务部 张三 · 看板版本');
+    const unsigned = buildSnapshot({ board: board([gap]), runs: [health], contextOf, task, format: 'pdf' });
+    expect('signed_by' in unsigned).toBe(false);
+    expect(snapshotHtml(unsigned, { sans: 'data:font/woff2;base64,AA==', figures: [] }, '2026-10-10 18:20')).not.toContain('导出人');
+    expect(() => normalizeSnapshot({ ...JSON.parse(JSON.stringify(signed)), signed_by: '张'.repeat(81) }, true)).toThrow();
+  });
+
   it('draws a profit bridge as its run holds it', () => {
     const bridge: DashboardCard = { id: id(), kind: 'bridge', title: '利润桥 · 华东', run_id: variance.id, template: 'operating', note: null, proposed_by: 'manager',
       select: { match: profitBridges(variance)[0].match }, ...accepted(variance) };

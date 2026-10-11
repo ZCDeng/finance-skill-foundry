@@ -1,12 +1,18 @@
-import { useEffect, useId, useState, type ReactNode } from 'react';
-import { FolderOpen } from 'lucide-react';
-import { bridge } from '../bridge.js';
+import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
+import { FolderOpen, UserPlus } from 'lucide-react';
+import { bridge, type Preferences } from '../bridge.js';
 import { usePreferences } from '../components/Preferences.js';
 import { ThemeSwitch } from '../components/ThemeSwitch.js';
 import { Button } from '../components/ui/button.js';
+import { Input } from '../components/ui/input.js';
 import { NativeSelect } from '../components/ui/native-select.js';
 import { Switch } from '../components/ui/switch.js';
 import './settings.css';
+
+type Person = Preferences['people'][number];
+const ROLE_WORDS: Record<Person['role'], string> = { manager: '经理', analyst: '财务分析', reviewer: '复核人' };
+/** As many as electron/preferences.ts keeps. */
+const MAX_PEOPLE = 20;
 
 /**
  * 设置: what the manager chooses for the app as a whole, on this computer. One page, reached from the gear in the
@@ -23,9 +29,13 @@ export function Settings({ onWorkspace }: { onWorkspace(): void }) {
     void api.appInfo().then((answer) => { if (live && answer.ok) setInfo(answer.value); }).catch(() => {});
     return () => { live = false; };
   }, [api]);
-  const change = (patch: Parameters<typeof set>[0]) => {
+  /** Saves a change; says why not and answers false when it was not kept. */
+  const change = (patch: Parameters<typeof set>[0]): Promise<boolean> => {
     setProblem('');
-    void set(patch).catch((failure: unknown) => setProblem(`没有保存：${failure instanceof Error ? failure.message : String(failure)}`));
+    return set(patch).then(() => true, (failure: unknown) => {
+      setProblem(`没有保存：${failure instanceof Error ? failure.message : String(failure)}`);
+      return false;
+    });
   };
   const reveal = () => {
     setProblem('');
@@ -54,6 +64,10 @@ export function Settings({ onWorkspace }: { onWorkspace(): void }) {
       </Row>
     </Section>
 
+    <Section title="使用者">
+      <People available={available} people={preferences.people} current={preferences.current_person} change={change} />
+    </Section>
+
     <Section title="显示">
       <Row label="显示技术信息" note="编号、摘要、脚本、SQL、原始结果和引擎诊断。平时用不到，排查问题时再打开；助手不受影响，照常能读。">
         {(id) => <Switch id={id} checked={preferences.technical} disabled={!available} onCheckedChange={(on) => change({ technical: on })} />}
@@ -80,6 +94,79 @@ export function Settings({ onWorkspace }: { onWorkspace(): void }) {
       <Row label="FA Foundry" note={info ? `版本 ${info.version}` : '可追溯的 AI 财务分析师。'} />
     </Section>
   </div>;
+}
+
+/**
+ * 使用者 on this computer: a name, what they do and the 署名 a record is signed with, and who is signing now. Disposing
+ * of a difference and its review fill that 署名 in, where it can still be changed; a board card's 认可 and the one-page
+ * board record it. There is no password: this is who signed, not who may.
+ */
+function People({ available, people, current, change }: {
+  available: boolean; people: Person[]; current: string; change(patch: Partial<Preferences>): Promise<boolean>;
+}) {
+  // The person being changed, or 'new' for one being added; null while the list is only read.
+  const [editing, setEditing] = useState<string | null>(null);
+  const signing = people.some((person) => person.id === current) ? current : '';
+  const save = (person: Person) => {
+    const known = people.some((row) => row.id === person.id);
+    change({ people: known ? people.map((row) => (row.id === person.id ? person : row)) : [...people, person],
+      // The first person added signs from then on; nobody has to pick them as well.
+      ...(!known && !people.length ? { current_person: person.id } : {}) })
+      // A form that was not saved stays open with what was typed in it.
+      .then((saved) => { if (saved) setEditing(null); });
+  };
+  const remove = (person: Person) => void change({ people: people.filter((row) => row.id !== person.id), ...(person.id === current ? { current_person: '' } : {}) });
+  return <>
+    <Row label="当前使用者" note="处置差异和复核时自动填上这个人的署名，填上后仍可改；认可看板卡和导出一页纸时记下这个署名。同一台电脑上切换使用者不要密码：这是署名，不是权限。">
+      {(id) => <NativeSelect id={id} className="fnd-settings__select" value={signing} disabled={!available || !people.length}
+        onChange={(event) => change({ current_person: event.target.value })}>
+        <option value="">没有选（不自动署名）</option>
+        {people.map((person) => <option key={person.id} value={person.id}>{`${person.name} · ${ROLE_WORDS[person.role]}`}</option>)}
+      </NativeSelect>}
+    </Row>
+    {people.map((person) => editing === person.id
+      ? <PersonForm key={person.id} person={person} onSave={save} onCancel={() => setEditing(null)} />
+      : <Row key={person.id} label={person.name} note={`${ROLE_WORDS[person.role]} · 署名「${person.signature}」${person.id === signing ? ' · 当前使用者' : ''}`}>
+        <Button variant="ghost" size="sm" type="button" disabled={!available || editing !== null} onClick={() => setEditing(person.id)}
+          aria-label={`改「${person.name}」`}>改</Button>
+        <Button variant="ghost" size="sm" type="button" disabled={!available || editing !== null} onClick={() => remove(person)}
+          aria-label={`删除「${person.name}」`}>删除</Button>
+      </Row>)}
+    {editing === 'new' ? <PersonForm onSave={save} onCancel={() => setEditing(null)} />
+      : people.length < MAX_PEOPLE ? <Row label={people.length ? '再加一个人' : '还没有使用者'} note={people.length ? undefined : '加上自己，以后署名不用每次手填。'}>
+        <Button variant="outline" size="sm" type="button" disabled={!available || editing !== null} onClick={() => setEditing('new')}>
+          <UserPlus size={14} strokeWidth={1.5} aria-hidden />添加使用者</Button>
+      </Row> : null}
+  </>;
+}
+
+function PersonForm({ person, onSave, onCancel }: { person?: Person; onSave(person: Person): void; onCancel(): void }) {
+  const id = useId();
+  const [name, setName] = useState(person?.name ?? '');
+  const [role, setRole] = useState<Person['role']>(person?.role ?? 'manager');
+  const [signature, setSignature] = useState(person?.signature ?? '');
+  const tidy = (text: string) => text.replace(/\s+/g, ' ').trim();
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!tidy(name)) return;
+    onSave({ id: person?.id ?? crypto.randomUUID().replace(/-/g, ''), name: tidy(name), role, signature: tidy(signature) || tidy(name) });
+  };
+  return <form className="fnd-settings__row fnd-settings__person" aria-label={person ? `改「${person.name}」` : '添加使用者'} onSubmit={submit}>
+    <div className="fnd-settings__fields">
+      <label htmlFor={`${id}-name`}>姓名</label>
+      <Input id={`${id}-name`} value={name} maxLength={80} required onChange={(event) => setName(event.target.value)} />
+      <label htmlFor={`${id}-role`}>角色</label>
+      <NativeSelect id={`${id}-role`} value={role} onChange={(event) => setRole(event.target.value as Person['role'])}>
+        {(Object.keys(ROLE_WORDS) as Person['role'][]).map((key) => <option key={key} value={key}>{ROLE_WORDS[key]}</option>)}
+      </NativeSelect>
+      <label htmlFor={`${id}-signature`}>署名</label>
+      <Input id={`${id}-signature`} value={signature} maxLength={80} placeholder={tidy(name) || '和姓名一样'} onChange={(event) => setSignature(event.target.value)} />
+    </div>
+    <div className="fnd-settings__control">
+      <Button size="sm" type="submit" disabled={!tidy(name)}>{person ? '保存' : '添加'}</Button>
+      <Button variant="ghost" size="sm" type="button" onClick={onCancel}>取消</Button>
+    </div>
+  </form>;
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {

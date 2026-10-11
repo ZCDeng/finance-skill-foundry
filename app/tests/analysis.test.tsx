@@ -149,7 +149,7 @@ describe('every step: its purpose on top, 本期不做, 未经月结勾稽 and �
     blocks: [['scope', 'done'], ['source', 'done'], ['structure', 'done'], ['controls', 'blocked'], ['exceptions', 'done']]
       .map(([key, state]) => ({ key, label: key, state })) } as unknown as OverviewTask;
   function mountWithPreferences() {
-    let saved: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {} };
+    let saved: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people: [], current_person: '' };
     const preferencesSet = vi.fn(async (patch: Partial<Preferences>) => success(saved = { ...saved, ...patch }));
     mountBridge({ preferencesGet: vi.fn(async () => success(saved)), preferencesSet });
     render(<PreferencesProvider><Analysis {...props} embedded section="scope" progress={progress} /></PreferencesProvider>);
@@ -1403,7 +1403,7 @@ ${canonicalAppendix} 已改写`;
       render(<Analysis {...props} embedded section="results" />);
       await waitForSettingsEntryOrDialog();
       const dialog = openFinanceSettings();
-      const line = await within(dialog).findByText('先到资料页「分析范围」处理冲突。');
+      const line = await within(dialog).findByText('先到第 2 步「范围」处理冲突。');
       for (const name of ['计算损益表', '计算预算差异', '按已保存范围重算损益表', '按已保存范围计算预算差异']) {
         const button = within(dialog).getByRole('button', { name }) as HTMLButtonElement;
         expect(button.disabled, name).toBe(true);
@@ -1420,7 +1420,7 @@ ${canonicalAppendix} 已改写`;
       render(<Analysis {...props} embedded section="results" />);
       await waitForSettingsEntryOrDialog();
       openFinanceSettings();
-      expect(await screen.findByText('先到资料页「分析范围」处理冲突。')).toBeTruthy();
+      expect(await screen.findByText('先到第 2 步「范围」处理冲突。')).toBeTruthy();
       expect((screen.getByRole('button', { name: '计算损益表' }) as HTMLButtonElement).disabled).toBe(true);
     });
 

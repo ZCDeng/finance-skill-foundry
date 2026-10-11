@@ -5,6 +5,7 @@ import { SearchableSelect, TextField } from '../../components/FinancialControls.
 import { Badge } from '../../components/ui/badge.js';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
+import { useSigner } from '../../components/Preferences.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { AskLink, HelpLink } from '../guide/GuideHub.js';
 import {
@@ -180,6 +181,12 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
 
 type FindingSpec = { finding_type: FindingType; note?: string };
 
+/** Two names are one person the way finance_controls.same_person reads them: trimmed, case folded (ß as ss). */
+function samePerson(left: string, right: string): boolean {
+  const fold = (text: string) => text.trim().toUpperCase().toLowerCase();
+  return Boolean(left.trim()) && fold(left) === fold(right);
+}
+
 function IssueRow({ row, locked, requireReview, onDecide, onReview, onRetire, onFinding }: {
   row: ControlRow; locked: boolean; requireReview: boolean;
   onDecide(spec: { decision: Decision; reason: string; counterparty?: string; decided_by_name?: string }): void;
@@ -192,9 +199,14 @@ function IssueRow({ row, locked, requireReview, onDecide, onReview, onRetire, on
   const [decision, setDecision] = useState<Decision | ''>('');
   const [reason, setReason] = useState('');
   const [counterparty, setCounterparty] = useState('');
-  const [name, setName] = useState('');
-  const [reviewer, setReviewer] = useState('');
+  // Untouched, the names are the current person's 署名 (设置 › 使用者); typed, they are what was typed.
+  const signer = useSigner();
+  const [typedName, setName] = useState<string | null>(null);
+  const [typedReviewer, setReviewer] = useState<string | null>(null);
   const issue = row.issue!;
+  const name = typedName ?? signer;
+  // The one who accepted a difference cannot review it, so their own 署名 is never offered as the reviewer.
+  const reviewer = typedReviewer ?? (signer && !samePerson(signer, issue.disposition?.decided_by_name ?? '') ? signer : '');
   const result = row.result;
   const decidable = result && (result.status === 'break' || result.status === 'error') && issue.state !== 'stale';
   // A range that cannot be read is fixed in the file, never accepted.
@@ -224,6 +236,7 @@ function IssueRow({ row, locked, requireReview, onDecide, onReview, onRetire, on
       </div></div> : null}
     {issue.disposition ? <p className="analysis-note">处置：{DECISION_LABELS[issue.disposition.decision]}
       {issue.disposition.counterparty ? ` · ${issue.disposition.counterparty}` : ''}{issue.disposition.reason ? ` · ${issue.disposition.reason}` : ''}
+      {issue.disposition.decided_by_name ? ` · 处置人 ${issue.disposition.decided_by_name}` : ''}
       {issue.disposition.reviewer ? ` · 复核人 ${issue.disposition.reviewer}` : ''}</p> : null}
     {issue.outdated_disposition ? <p className="analysis-note">之前的处置针对的是另一笔差额，已不适用。</p> : null}
     {finding ? <FindingField key={`${finding.type ?? ''}:${finding.note ?? ''}`} finding={finding} locked={locked} onSave={onFinding} /> : null}
@@ -243,7 +256,7 @@ function IssueRow({ row, locked, requireReview, onDecide, onReview, onRetire, on
       {decision ? <>
         {decision === 'pending_external' ? <Input aria-label="由谁确认" placeholder="由谁确认，例如：账套编制方" value={counterparty} onChange={(event) => setCounterparty(event.target.value)} /> : null}
         <Textarea aria-label="说明" placeholder={needsReason ? '必填：为什么接受这笔差异，或请对方确认什么' : '可选：修正了什么'} value={reason} onChange={(event) => setReason(event.target.value)} rows={2} />
-        {needsName ? <Input aria-label="你的姓名" placeholder="必填：你的姓名（复核人需是另一个人）" value={name} onChange={(event) => setName(event.target.value)} /> : null}
+        {needsName || signer ? <Input aria-label="你的姓名" placeholder={needsName ? '必填：你的姓名（复核人需是另一个人）' : '你的姓名'} value={name} onChange={(event) => setName(event.target.value)} /> : null}
         <div className="analysis-actions"><Button type="button" size="sm" disabled={!ready}
           onClick={() => onDecide({ decision: decision as Decision, reason: reason.trim(), ...(counterparty.trim() ? { counterparty: counterparty.trim() } : {}), ...(name.trim() ? { decided_by_name: name.trim() } : {}) })}>保存处置</Button></div>
       </> : null}

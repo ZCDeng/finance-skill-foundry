@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, Check, Download, Pin, Presentation, RefreshCw, X } from 'lucide-react';
 import { bridge, when, type Answer, type AnalysisRevision, type AnalysisRun, type DatasetSnapshot } from '../../bridge.js';
+import { useSigner } from '../../components/Preferences.js';
 import { Button } from '../../components/ui/button.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '../../components/ui/empty.js';
@@ -162,6 +163,8 @@ type CardActions = {
   busy: boolean;
   act(label: string, edit: Edit): void;
   onOpenResult?(run: AnalysisRun): void;
+  /** The current person's 署名 (设置 › 使用者), sent with an acceptance; '' when nobody is chosen. */
+  signer: string;
 };
 
 /** 导出一页纸: what each format is for, as the menu says it. */
@@ -182,6 +185,11 @@ const TOUR: { key: TourStep; title: string; text: string }[] = [
     text: '已认可的卡可以导出成一页 PDF 或 PPT，每个数都带来源编号。开会时也可以点「汇报模式」，一张一张讲。' },
 ];
 
+/** A card accepted now, under the current person's 署名 when one is chosen. The backend stamps when, on which run. */
+function accept(card: DashboardCard, signer: string): DashboardCard {
+  return { ...card, state: 'accepted', ...(signer ? { accepted_by: signer } : {}) };
+}
+
 export function DashboardView({ task, state, runs, analyses, datasets, superseded = [], readOnly, tour, onOpenResult }: {
   /** The task the board is on, as the page names it; without it the board has no export. */
   task?: SnapshotTask & { id: string };
@@ -199,6 +207,7 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
   const [tourAt, setTourAt] = useState(0);
   const root = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
+  const signer = useSigner();
   const [said, setSaid] = useState('');
   const [error, setError] = useState('');
   const [confirmAll, setConfirmAll] = useState(false);
@@ -219,7 +228,7 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
     setBusy(true); setError(''); setSaid('');
     void change(edit).then(() => setSaid(label), (failure) => setError(errorText(failure))).finally(() => setBusy(false));
   };
-  const actions: CardActions = { readOnly, busy, act, onOpenResult };
+  const actions: CardActions = { readOnly, busy, act, onOpenResult, signer };
   const accepted = board.filter(acceptedCard).length;
   // 汇报模式 shows what the one-page export would, then the what-ifs as what-ifs; a card still waiting stays off.
   const laidOut = [...board.filter((card) => card.kind === 'figure'), ...board.filter((card) => card.kind !== 'figure')];
@@ -247,7 +256,7 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
         setError('看板刚在别处更新过，已重新读取，看过后再导出。');
         return;
       }
-      const snapshot = buildSnapshot({ board: latest, runs, contextOf, task, format });
+      const snapshot = buildSnapshot({ board: latest, runs, contextOf, task, format, signer });
       const out = unwrap(await api.dashboardExport!(task.id, format, snapshot));
       if ('cancelled' in out) return;
       const name = out.path.split(/[\\/]/).pop() ?? out.path;
@@ -260,7 +269,7 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
   };
   const acceptAll = () => {
     setConfirmAll(false);
-    act(`已认可 ${waiting.length} 张卡。`, (now) => now.map((card) => (card.state === 'pinned' && !isWhatIf(card.kind) ? { ...card, state: 'accepted' } : card)));
+    act(`已认可 ${waiting.length} 张卡。`, (now) => now.map((card) => (card.state === 'pinned' && !isWhatIf(card.kind) ? accept(card, signer) : card)));
   };
   const moveAll = () => {
     const moves = new Map(movable.map(({ card, next }) => [card.id, next.id]));
@@ -547,7 +556,7 @@ function BoardCard({ card, run, contextOf, actions, newer, presenting = false, s
     {presenting ? null : <RecomputedLine card={card} />}
     <footer className="dashboard-card__foot">
       {run ? <p className="dashboard-card__basis"><span>{`${when(run.created_at)} 计算`}</span>
-        {card.state === 'accepted' && card.accepted ? <span>{`${when(card.accepted.at)} 认可`}</span> : null}
+        {card.state === 'accepted' && card.accepted ? <span>{`${when(card.accepted.at)} ${card.accepted.by ? `${card.accepted.by} ` : ''}认可`}</span> : null}
         {stale ? <span className="dashboard__stale">资料已更新，待重算</span> : null}</p> : null}
       {presenting ? null : <Actions card={card} run={run} actions={actions} newer={newer} />}
     </footer>
@@ -555,8 +564,9 @@ function BoardCard({ card, run, contextOf, actions, newer, presenting = false, s
 }
 
 function Actions({ card, run, actions, newer }: { card: DashboardCard; run?: AnalysisRun; actions: CardActions; newer?: AnalysisRun }) {
-  const { readOnly, busy, act, onOpenResult } = actions;
-  const set = (state: DashboardCard['state'], label: string) => act(label, (now) => now.map((item) => (item.id === card.id ? { ...item, state } : item)));
+  const { readOnly, busy, act, onOpenResult, signer } = actions;
+  const set = (state: DashboardCard['state'], label: string) => act(label, (now) => now.map((item) => (item.id !== card.id ? item
+    : state === 'accepted' ? accept(item, signer) : { ...item, state })));
   const remove = (label: string) => act(label, (now) => now.filter((item) => item.id !== card.id));
   return <div className="dashboard-card__actions">
     {!readOnly && card.state === 'explore' && <>

@@ -33,8 +33,10 @@ export type SnapshotTask = { title: string; period: string };
  * beside them; the accepted cards past that are named on it, and an Excel snapshot holds every one. Throws, in words a
  * manager reads, when an accepted card no longer draws on its run.
  */
-export function buildSnapshot({ board, runs, contextOf, task, format }: {
+export function buildSnapshot({ board, runs, contextOf, task, format, signer = '' }: {
   board: Dashboard; runs: AnalysisRun[]; contextOf(run: AnalysisRun): FigureSourceContext; task: SnapshotTask; format: SnapshotFormat;
+  /** The current person's 署名 (设置 › 使用者), printed as 导出人; '' when nobody is chosen. */
+  signer?: string;
 }): DashboardSnapshot {
   const cards = board.cards.filter((card) => card.state !== 'explore');
   const wanted = cards.filter(acceptedCard);
@@ -121,6 +123,7 @@ export function buildSnapshot({ board, runs, contextOf, task, format }: {
       pinned: cards.filter((card) => !isWhatIf(card.kind) && !acceptedCard(card)).map(named),
       scenario: cards.filter((card) => isWhatIf(card.kind)).map(named),
     },
+    ...(signer.trim() ? { signed_by: cut(signer.trim(), 80) } : {}),
   };
 }
 

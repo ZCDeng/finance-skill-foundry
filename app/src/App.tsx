@@ -31,7 +31,7 @@ import { Settings } from './views/Settings.js';
 import { usePreferences } from './components/Preferences.js';
 import { DataBar, Formulator } from './views/Formulator.js';
 import { Analysis } from './views/Analysis.js';
-import { sectionOf, type AnalysisSection } from './views/analysis/steps.js';
+import { sectionOf, type AnalysisSection, type Step } from './views/analysis/steps.js';
 import { materialsAnchor } from './views/analysis/MaterialsFileList.js';
 import { readCopy, writeCopy } from './views/analysis/workingCopy.js';
 import { Booting, WiringTrouble, type OpenSession } from './views/Workbench.js';
@@ -570,8 +570,8 @@ export function App() {
     return result.value.id;
   }, [api, refreshTasks]);
 
-  /** Bring an example task up under 进行中, on the step it is meant to be read from. */
-  const showSampleTask = useCallback((id: string, section: AnalysisSection) => {
+  /** Bring a task just made (an example, or 总览's 做一次经营分析) up under 进行中, on the step it is meant to be read from. */
+  const showMadeTask = useCallback((id: string, section: AnalysisSection) => {
     setTaskLifecycleView('active');
     currentRef.current = id;
     explicitSelection.current = true;
@@ -579,6 +579,15 @@ export function App() {
     refreshTasks('active');
     setSections((held) => ({ ...held, [id]: section }));
   }, [refreshTasks]);
+
+  /** 总览's 做一次经营分析: 月结 is not the only use, so a task can start at its 经营分析 step. */
+  const startOperations = useCallback(async () => {
+    if (!api) return;
+    const result = await api.taskNew('经营分析', '');
+    if (!result.ok) { setProblem(result.message); return; }
+    showMadeTask(result.value.id, 'operations');
+    setScreen('analysis');
+  }, [api, showMadeTask]);
 
   /**
    * The reference task takes most of a minute to build, so it is built in the background and shared:
@@ -612,11 +621,11 @@ export function App() {
   const openReferenceTask = useCallback(async (target: GuideTarget = 'results') => {
     const id = await buildReference(false);
     if (!id) throw new Error(referenceFailure.current || '参考结果没有生成出来，请稍后再试。');
-    showSampleTask(id, guideSection(target));
+    showMadeTask(id, guideSection(target));
     if (target === 'scope' || target === 'structure' || target === 'datasets' || target === 'billing') {
       setTimeout(() => materialsAnchor(target)?.scrollIntoView?.({ block: 'start' }), 60);
     }
-  }, [buildReference, showSampleTask]);
+  }, [buildReference, showMadeTask]);
 
   /**
    * 60 秒看看它能做什么 (electron/firstLook.ts): offered on 总览 until it is seen through or closed. 开始看 builds the
@@ -655,17 +664,17 @@ export function App() {
       if (selectionRevision.current !== selection || screenRef.current !== 'overview') return;
       setTouring(id);
       setScreen('analysis');
-      showSampleTask(id, 'dashboard');
+      showMadeTask(id, 'dashboard');
     }).finally(() => setFirstLookBusy(false));
-  }, [buildReference, showSampleTask]);
+  }, [buildReference, showMadeTask]);
 
   /** The September practice task for 跟着做's last step, opened on 资料 where its structures wait. */
   const openNextMonthTask = useCallback(async () => {
     if (!api?.taskSampleNext) throw new Error('这个版本还不能创建 9 月练习任务。');
     const result = await api.taskSampleNext();
     if (!result.ok) throw new Error(result.message);
-    showSampleTask(result.value.id, 'materials');
-  }, [api, showSampleTask]);
+    showMadeTask(result.value.id, 'materials');
+  }, [api, showMadeTask]);
 
   const exportTemplates = useCallback(async () => {
     if (!api?.templatesExport) throw new Error('这个版本还不能导出补充模板。');
@@ -678,19 +687,19 @@ export function App() {
   const rebuildReferenceTask = useCallback(async () => {
     const leaving = currentRef.current;
     const id = await buildReference(true);
-    if (id && currentRef.current === leaving) showSampleTask(id, 'results');
-  }, [buildReference, showSampleTask]);
+    if (id && currentRef.current === leaving) showMadeTask(id, 'results');
+  }, [buildReference, showMadeTask]);
 
   /** The practice task, opened on the 资料 tab with the guide's checklist beside it; the reference is built behind it. */
   const openSampleTask = useCallback(async () => {
     if (!api?.taskSample) throw new Error('这个版本还不能创建示例任务。');
     const result = await api.taskSample();
     if (!result.ok) throw new Error(result.message);
-    showSampleTask(result.value.id, 'materials');
+    showMadeTask(result.value.id, 'materials');
     setGuideArticle('quick-start');
     setGuideRequest((value) => value + 1);
     void buildReference(false);
-  }, [api, buildReference, showSampleTask]);
+  }, [api, buildReference, showMadeTask]);
 
   /** Put down the task on screen and show the list it was in, as 新建任务 would. */
   const leaveTask = useCallback(() => {
@@ -1034,7 +1043,7 @@ export function App() {
    * The tab's content arrives after its first read, so the block is looked for a few times
    * before giving up; once found it is scrolled to and outlined for a moment (`fnd-arrival`).
    */
-  const openFromOverview = (task: TaskRow, target: OverviewTarget | 'close') => {
+  const openFromOverview = (task: TaskRow, target: OverviewTarget | Step) => {
     const section = sectionOf(target);
     const view = task.lifecycle_status ?? 'active';
     setTaskLifecycleView(view);
@@ -1048,7 +1057,8 @@ export function App() {
     const find = (): Element | null => target === 'controls' ? document.getElementById('month-close-controls')
       : target === 'rollforward' ? document.querySelector('.analysis-rollforward')
         : target === 'scope' || target === 'structure' || target === 'datasets' || target === 'billing' ? materialsAnchor(target) : null;
-    if (target === 'results' || target === 'drafts' || target === 'dashboard' || target === 'close') return;
+    // A step, or a place with nothing in it to point at, is opened and left as it is.
+    if (!['controls', 'rollforward', 'scope', 'structure', 'datasets', 'billing'].includes(target)) return;
     let tries = 0;
     const look = () => {
       const node = find();
@@ -1172,7 +1182,7 @@ export function App() {
           {boundReadOnly ? <Empty><EmptyHeader><EmptyTitle asChild><h2>任务已停用编辑</h2></EmptyTitle><EmptyDescription>这个任务在{boundLifecycle === 'archived' ? '归档' : '回收站'}中。可以查看已生成成果，恢复任务后打开文稿、继续提问或打开数据定位。</EmptyDescription></EmptyHeader><EmptyContent><Button variant="outline" onClick={() => bound ? void changeTaskLifecycle(bound.id, 'restore') : undefined}>恢复任务</Button></EmptyContent></Empty> :
             <Analysis active={inWorkspace} embedded section={analysisSection} onSectionChange={setAnalysisSection}
               task={bound} tasks={tasks} draftRequest={draftRequest} onPick={pickAnalysisTask} onNew={newAnalysisTask} onChat={chatAnalysis}
-              onOpenTarget={bound ? (target) => openFromOverview(bound, target as OverviewTarget | 'close') : undefined}
+              onOpenTarget={bound ? (target) => openFromOverview(bound, target as OverviewTarget | Step) : undefined}
               progress={overview?.tasks.find((row) => row.task.id === bound?.id)}
               tour={touring && bound?.id === touring ? { onEnd: endFirstLook } : undefined}
               onLocatorPreview={api.sourceLocatorOpen ? (spec) => {
@@ -1212,11 +1222,12 @@ export function App() {
           recent={gallery.slice(0, 5)}
           onRefresh={() => { refreshOverview(); refreshGallery(); }}
           onOpen={openFromOverview}
-          onOpenClose={(task) => openFromOverview(task, 'close')}
+          onOpenStep={(task, step) => openFromOverview(task, step)}
           onNewQuestion={() => {
             pickAnalysisTask('');
             requestAnimationFrame(() => document.getElementById('analysis-question')?.focus());
           }}
+          onOperations={() => void startOperations().catch((failure: unknown) => setProblem(failure instanceof Error ? failure.message : String(failure)))}
           onSample={api?.taskSample ? () => { setScreen('analysis'); void openSampleTask().catch((failure: unknown) => setProblem(failure instanceof Error ? failure.message : String(failure))); } : undefined}
           onChecklist={() => { setScreen('analysis'); openGuideAt('data-checklist'); }}
           onGuide={() => { setScreen('analysis'); openGuideAt('first-run'); }}
