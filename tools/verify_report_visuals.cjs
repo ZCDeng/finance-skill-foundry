@@ -223,6 +223,9 @@ async function ensureSidebar(page) {
 }
 
 async function revealReport(page, manifest) {
+  // 文稿 sits under the 汇报 step.
+  const reportStep = page.getByRole('tab', { name: /汇报/ }).first();
+  if (await reportStep.isVisible({ timeout: 5000 }).catch(() => false)) await reportStep.click();
   const documentTab = page.getByRole('tab', { name: /文稿/ }).first();
   if (await documentTab.isVisible({ timeout: 5000 }).catch(() => false)) await documentTab.click();
   else {

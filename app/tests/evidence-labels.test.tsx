@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
-import { ReadinessPanel } from '../src/views/analysis/ReadinessPanel.js';
+import { FileReadinessFacts, FileReadinessStates } from '../src/views/analysis/ReadinessPanel.js';
 import { ExplanationQualityPanel, type ExplanationFact, type ExplanationQuality } from '../src/views/analysis/ExplanationQualityPanel.js';
 import { countSummary, EVIDENCE_LABELS, evidenceLabelText } from '../src/views/analysis/evidenceLabels.js';
 
@@ -30,60 +30,65 @@ const report = {
   can_run: ['control_totals'], blocked: [], file_identity_policy: 'snapshot_only', diagnostics: [], erp_connected: false,
 };
 
-function mountReadiness(value: unknown) {
-  const financeCall = vi.fn(async () => ({ ok: true, value }));
-  (globalThis as { foundry?: unknown }).foundry = { financeCall };
+/** What the file list shows for one file: trouble on its row, and every fact beside its content. */
+function readOf(name: string, datasets: typeof report.datasets = report.datasets) {
+  const row = datasets.find((item) => item.name === name)! as never;
+  const states = render(<FileReadinessStates row={row} />);
+  const onRow = states.container.textContent ?? '';
+  states.unmount();
+  const facts = render(<FileReadinessFacts row={row} />);
+  const view = { onRow, facts: screen.getByLabelText('这份资料读到的范围') };
+  return { ...view, done: () => facts.unmount() };
 }
 
 describe('readiness: as-of, period and freshness per file', () => {
-  it('names the as-of date and period and says in words whether each file is current', async () => {
-    mountReadiness(report);
-    render(<ReadinessPanel taskId="t" />);
-    await screen.findByText('这批资料能算什么');
-    expect(screen.getByRole('columnheader', { name: '截至日 / 期间' })).toBeTruthy();
-    expect(screen.getByRole('columnheader', { name: '时效' })).toBeTruthy();
+  it('names the as-of date and period and says in words whether each file is current', () => {
+    const current = readOf('8月总账');
+    expect(current.facts.textContent).toContain('期间 2026 年 8 月 · 月度');
+    expect(current.facts.querySelector('.analysis-readiness-freshness--current')?.textContent).toBe('当前');
+    // A current file adds nothing to its row.
+    expect(current.onRow).toBe('');
+    current.done();
 
-    const current = screen.getByRole('row', { name: /8月总账/ });
-    expect(current.textContent).toContain('期间 2026 年 8 月 · 月度');
-    expect(current.querySelector('.analysis-readiness-freshness--current')?.textContent).toBe('当前');
-
-    const july = screen.getByRole('row', { name: /7月总账/ });
-    const mismatch = july.querySelector('.analysis-readiness-freshness--warning')!;
+    const july = readOf('7月总账');
+    const mismatch = july.facts.querySelector('.analysis-readiness-freshness--warning')!;
     expect(mismatch.textContent).toBe('期间不符（资料期间 2026-07 与分析期间 2026-08 不同）');
-    // Words and an icon, never colour alone.
+    // Words and an icon, never colour alone; and a file for another period says so on its row.
     expect(mismatch.querySelector('svg')).toBeTruthy();
+    expect(july.onRow).toBe('时效期间不符（资料期间 2026-07 与分析期间 2026-08 不同）');
+    july.done();
 
-    const balance = screen.getByRole('row', { name: /余额表/ });
-    expect(balance.textContent).toContain('截至 2026-08-20（来自标题） · 时点');
-    expect(balance.textContent).toContain('资料过期（截至日 2026-08-20 早于期末 2026-08-31）');
+    const balance = readOf('余额表');
+    expect(balance.facts.textContent).toContain('截至 2026-08-20（来自标题） · 时点');
+    expect(balance.facts.textContent).toContain('资料过期（截至日 2026-08-20 早于期末 2026-08-31）');
+    expect(balance.onRow).toContain('资料过期');
+    balance.done();
 
-    const budget = screen.getByRole('row', { name: /预算/ });
-    expect(budget.querySelector('.analysis-readiness-freshness--unknown')?.textContent).toBe('未声明（资料没有声明期间或截至日）');
+    const budget = readOf('预算');
+    expect(budget.facts.querySelector('.analysis-readiness-freshness--unknown')?.textContent).toBe('未声明（资料没有声明期间或截至日）');
+    // Undeclared is not trouble on the row; what is missing is.
+    expect(budget.onRow).toBe('还缺期间');
+    budget.done();
 
-    const refreshed = screen.getByRole('row', { name: /ERP 刷新/ });
-    expect(refreshed.textContent).toContain('截至 2026-09-05（刷新截止） · 期间 2026 年 8 月 · 月度');
-    expect(refreshed.querySelector('.analysis-readiness-freshness--current')?.textContent).toBe('当前');
-    expect(screen.getByRole('button', { name: '使用指南：资料时效与证据标签' })).toBeTruthy();
+    const refreshed = readOf('ERP 刷新');
+    expect(refreshed.facts.textContent).toContain('截至 2026-09-05（刷新截止） · 期间 2026 年 8 月 · 月度');
+    expect(refreshed.facts.querySelector('.analysis-readiness-freshness--current')?.textContent).toBe('当前');
+    refreshed.done();
   });
 
-  it('says it cannot judge, rather than that the file left something out, while the analysis period is missing', async () => {
-    mountReadiness({ ...report, datasets: [{ ...report.datasets[0],
-      freshness: { state: 'unknown', reasons: [{ code: 'no_task_period', text: '分析期间还没确认，无法判断时效' }] } }] });
-    render(<ReadinessPanel taskId="t" />);
-    await screen.findByText('这批资料能算什么');
-    const row = screen.getByRole('row', { name: /8月总账/ });
-    expect(row.querySelector('.analysis-readiness-freshness--unknown')?.textContent).toBe('无法判断（分析期间还没确认，无法判断时效）');
-    expect(row.textContent).toContain('期间 2026 年 8 月 · 月度');
+  it('says it cannot judge, rather than that the file left something out, while the analysis period is missing', () => {
+    const datasets = [{ ...report.datasets[0], freshness: { state: 'unknown', reasons: [{ code: 'no_task_period', text: '分析期间还没确认，无法判断时效' }] } }];
+    const row = readOf('8月总账', datasets as typeof report.datasets);
+    expect(row.facts.querySelector('.analysis-readiness-freshness--unknown')?.textContent).toBe('无法判断（分析期间还没确认，无法判断时效）');
+    expect(row.facts.textContent).toContain('期间 2026 年 8 月 · 月度');
+    expect(row.onRow).toBe('');
   });
 
-  it('shows a dash for a file an older CLI reported without freshness', async () => {
-    mountReadiness(report);
-    render(<ReadinessPanel taskId="t" />);
-    await screen.findByText('这批资料能算什么');
-    const old = screen.getByRole('row', { name: /旧版报告/ });
-    const cells = within(old).getAllByRole('cell');
-    expect(cells[1].textContent).toBe('期间 2026 年 8 月');
-    expect(cells[2].textContent).toBe('—');
+  it('shows a dash for a file an older CLI reported without freshness', () => {
+    const old = readOf('旧版报告');
+    const values = within(old.facts).getAllByRole('definition');
+    expect(values[0].textContent).toContain('期间 2026 年 8 月');
+    expect(values[2].textContent).toBe('—');
   });
 });
 

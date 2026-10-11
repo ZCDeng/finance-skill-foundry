@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Answer, Bridge } from '../src/bridge.js';
-import { ReadinessPanel } from '../src/views/analysis/ReadinessPanel.js';
+import { FileReadinessFacts, ReadinessPanel } from '../src/views/analysis/ReadinessPanel.js';
 import { RequirementsPanel, type AnalysisRequirementsRecord } from '../src/views/analysis/RequirementsPanel.js';
 import { StructureProposalCard, type StructureProposal } from '../src/views/analysis/StructureProposalCard.js';
 import { WorkbookBrowser } from '../src/views/analysis/WorkbookBrowser.js';
@@ -149,8 +149,11 @@ describe('section 7 manager-facing scope copy', () => {
     </>);
 
     expect(await screen.findByText(/情景 累计实际/)).toBeTruthy();
-    expect(await screen.findByText(/每份文件读到的范围/)).toBeTruthy();
-    expect(screen.getByRole('columnheader', { name: '读到的范围' })).toBeTruthy();
+    expect(await screen.findByText(/每份文件读到的范围和时效在它那一行/)).toBeTruthy();
+    expect(screen.getByText(/范围没声明齐/)).toBeTruthy();
+    // The file's own scope, opened with its content in the file list.
+    render(<FileReadinessFacts row={{ dataset_id: 'dataset-1', name: '月结套表', missing_fields: ['scenario'], can_run: [], blocked: [],
+      scope: { ledger: '', organization: '集团合并', period: '2026-08', currency: 'CNY', unit: '万元', scenario: 'budget_ytd' } as never }} />);
     expect(screen.getByText(/情景 累计预算/)).toBeTruthy();
     expect(screen.getByText(/范围没声明齐/)).toBeTruthy();
     expect(screen.queryByText(/读到的口径|口径没声明齐|标题里没读到口径/)).toBeNull();
@@ -177,9 +180,12 @@ describe('section 7 manager-facing scope copy', () => {
 
     render(<ReadinessPanel taskId={taskId} />);
 
-    expect(await screen.findAllByText(/资料 1/)).toHaveLength(2);
+    expect(await screen.findAllByText(/资料 1/)).toHaveLength(1);
+    expect(screen.queryByText(/abcdef12/)).toBeNull();
+    // The full id stays in the file's technical information, beside its content.
+    render(<FileReadinessFacts row={{ dataset_id: datasetId, name: '', missing_fields: [], can_run: ['management_pnl'], blocked: [],
+      scope: { ledger: '', organization: '', period: '2026-08', currency: 'CNY', unit: '万元' } }} />);
     expect(screen.getByText('技术信息')).toBeTruthy();
     expect(screen.getByText(datasetId)).toBeTruthy();
-    expect(screen.queryByRole('rowheader', { name: 'abcdef12' })).toBeNull();
   });
 });

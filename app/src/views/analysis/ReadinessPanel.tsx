@@ -87,14 +87,44 @@ function datasetLabel(row: ReadinessDataset, index: number): string {
   return row.name || `资料 ${index + 1}`;
 }
 
+/** Freshness the manager should act on: a file older than the period, or for another period. */
+const isStale = (row: ReadinessDataset) => row.freshness?.state === 'source_stale' || row.freshness?.state === 'period_mismatch';
+
 /**
- * The report that says what is missing, where the manager can read it.
- *
- * It existed only as a tool the assistant could call, so a file that could not
- * be calculated on said nothing in the workspace and she had no way to find out
- * which file was holding the month up.
+ * A file's own line in the file list, where it says something is wrong: 时效 when the file is older than the
+ * period or for another one, 还缺 when it leaves a field out. A file that is fine adds nothing to its row.
  */
-export function ReadinessPanel({ taskId, refreshKey }: { taskId: string; refreshKey?: unknown }) {
+export function FileReadinessStates({ row }: { row?: ReadinessDataset }) {
+  if (!row) return null;
+  return <>
+    {isStale(row) ? <span className="analysis-file-status">
+      <span className="analysis-file-status-label">时效</span><span className="analysis-file-state"><FreshnessCell row={row} /></span>
+    </span> : null}
+    {row.missing_fields?.length ? <span className="analysis-file-status">
+      <span className="analysis-file-status-label">还缺</span><span className="analysis-file-state">{fields(row.missing_fields)}</span>
+    </span> : null}
+  </>;
+}
+
+/** Everything the check read from one file, shown where the file's content opens: scope, as-of, freshness, what it can run. */
+export function FileReadinessFacts({ row }: { row?: ReadinessDataset }) {
+  if (!row) return null;
+  return <><dl className="analysis-file-facts" aria-label="这份资料读到的范围">
+    <div><dt>读到的范围</dt><dd>{scopeLine(row)}</dd></div>
+    <div><dt>截至日 / 期间</dt><dd>{asOfLine(row)}</dd></div>
+    <div><dt>时效</dt><dd><FreshnessCell row={row} /></dd></div>
+    <div><dt>还缺</dt><dd>{row.missing_fields?.length ? fields(row.missing_fields) : '—'}</dd></div>
+    <div><dt>能算</dt><dd>{row.can_run?.length ? row.can_run.map((name) => label(CAPABILITY_LABELS, name)).join('、') : '—'}</dd></div>
+  </dl><TechnicalInfo rows={[['资料编号', row.dataset_id]]} /></>;
+}
+
+export type Readiness = { report: ReadinessReport | null; error: string; working: boolean; load(manual?: boolean): Promise<void> };
+
+/**
+ * The readiness report, read once for the page: the summary at the top of 资料 and each file's row read the same one.
+ * No task, no read.
+ */
+export function useReadiness(taskId: string | null, refreshKey?: unknown): Readiness {
   const [report, setReport] = useState<ReadinessReport | null>(null);
   const [error, setError] = useState('');
   const [working, setWorking] = useState(false);
@@ -102,7 +132,7 @@ export function ReadinessPanel({ taskId, refreshKey }: { taskId: string; refresh
   // Only 重新检查 shows the read: the page hands over a new refreshKey on its 5-second re-read, and a button
   // that greys out and back every few seconds reads as the page shaking.
   const load = useCallback(async (manual = false) => {
-    const api = bridge(); if (!api?.financeCall) return;
+    const api = bridge(); if (!taskId || !api?.financeCall) return;
     if (manual) { setWorking(true); setError(''); }
     try {
       const answer = await api.financeCall(taskId, 'finance-readiness') as Answer<ReadinessReport> | undefined;
@@ -119,7 +149,22 @@ export function ReadinessPanel({ taskId, refreshKey }: { taskId: string; refresh
     }
   }, [taskId]);
 
+  useEffect(() => { setReport(null); setError(''); }, [taskId]);
   useEffect(() => { void load(); }, [load, refreshKey]);
+  return { report, error, working, load };
+}
+
+/**
+ * The report that says what is missing, where the manager can read it: what this batch can calculate and which
+ * file holds up the rest. Each file's own scope, as-of and freshness sit on its row in the file list.
+ *
+ * It existed only as a tool the assistant could call, so a file that could not
+ * be calculated on said nothing in the workspace and she had no way to find out
+ * which file was holding the month up.
+ */
+export function ReadinessPanel({ taskId, refreshKey, readiness }: { taskId: string; refreshKey?: unknown; readiness?: Readiness }) {
+  const own = useReadiness(readiness ? null : taskId, refreshKey);
+  const { report, error, working, load } = readiness ?? own;
 
   if (!report && !error) return null;
   // An older CLI answers with fewer fields than this build knows about, and a
@@ -168,40 +213,10 @@ export function ReadinessPanel({ taskId, refreshKey }: { taskId: string; refresh
             )}
           </ul>
 
-          {perFile.length > 0 && (
-            <table className="analysis-readiness-table">
-              <caption className="analysis-note">
-                每份文件读到的范围
-                <HelpLink article="evidence" label="资料时效与证据标签" />
-              </caption>
-              <thead>
-                <tr><th scope="col">资料</th><th scope="col">读到的范围</th><th scope="col">截至日 / 期间</th><th scope="col">时效</th><th scope="col">还缺</th><th scope="col">能算</th></tr>
-              </thead>
-              <tbody>
-                {perFile.map((row, index) => (
-                  <tr key={row.dataset_id}>
-                    <th scope="row">
-                      {datasetLabel(row, index)}
-                      <TechnicalInfo rows={[['资料编号', row.dataset_id]]} />
-                    </th>
-                    <td>{scopeLine(row)}</td>
-                    <td>{asOfLine(row)}</td>
-                    <td><FreshnessCell row={row} /></td>
-                    <td>{row.missing_fields?.length ? fields(row.missing_fields) : '—'}</td>
-                    <td>
-                      {row.can_run?.length
-                        ? row.can_run.map((name) => label(CAPABILITY_LABELS, name)).join('、')
-                        : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-
           <p className="analysis-note">
             {report.erp_connected ? '' : '未接外部账套，数字全部来自这些文件。'}
             文件更新时{report.file_identity_policy === 'business_key' ? '按业务键逐行比对' : '整份替换'}。
+            {perFile.length ? <>每份文件读到的范围和时效在它那一行，打开「查看内容」能看全。<HelpLink article="evidence" label="资料时效与证据标签" /></> : null}
           </p>
         </>
       )}

@@ -21,6 +21,27 @@
 .analysis-tabbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--fnd-line); }
 .analysis-tabbar-tools { display: flex; align-items: center; gap: 8px; }
 .analysis-tabs { display: flex; gap: 24px; min-width: 0; }
+/* The six steps (StepNav.tsx): 月结's three after one muted word, the other three each a group of its own, a hairline
+ * between groups. Each step leads with its state's mark, coloured as 总览's dots are and named in words for readers. */
+.analysis-steps-bar { container: analysis-steps / inline-size; }
+.analysis-steps { gap: 16px; }
+.analysis-steps > [data-slot='tabs-trigger'] { gap: 4px; }
+.analysis-steps__group { color: var(--fnd-muted); font-size: var(--fnd-size-label); line-height: 20px; white-space: nowrap; margin-right: -8px; }
+.analysis-steps__rule { align-self: center; width: 1px; height: 16px; background: var(--fnd-line); }
+.analysis-steps__mark { flex: none; color: var(--fnd-muted); }
+.analysis-steps [data-state-step='done'] .analysis-steps__mark { color: var(--fnd-level-ok); }
+.analysis-steps [data-state-step='attention'] .analysis-steps__mark { color: var(--fnd-level-watch); }
+.analysis-steps [data-state-step='todo'] .analysis-steps__mark { color: var(--fnd-warning); }
+.analysis-steps__number, .analysis-steps__label { font: inherit; font-style: normal; }
+.analysis-steps__number { font-variant-numeric: tabular-nums; }
+/* Beside the conversation the column is narrow: the other names give way to their numbers (still read out, and on
+ * hover); the open step keeps its name, so where you are is always written. */
+@container analysis-steps (max-width: 680px) {
+  .analysis-steps { gap: 12px; }
+  .analysis-steps__group { display: none; }
+  .analysis-steps > [data-state='inactive'] .analysis-steps__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+.analysis-report-tabs { gap: 20px; }
 .analysis-content { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .analysis-empty { padding: 32px 0; }
 .analysis-empty h3 { font-size: var(--fnd-size-title); line-height: 1.4; }
@@ -306,12 +327,10 @@
 .analysis-readiness-capabilities li svg { align-self: center; flex: none; }
 .analysis-readiness-ready { color: var(--fnd-ink); }
 .analysis-readiness-blocked { color: var(--fnd-muted); }
-.analysis-readiness-table { width: 100%; border-collapse: collapse; font-size: var(--fnd-size-small); }
-.analysis-readiness-table caption { text-align: left; padding-bottom: 6px; }
-.analysis-readiness-table th,
-.analysis-readiness-table td { border: 1px solid var(--fnd-line); padding: 4px 8px; text-align: left; vertical-align: top; }
-.analysis-readiness-table thead th { background: var(--fnd-selection-surface); color: var(--fnd-ink); font-weight: 600; }
-.analysis-readiness-table tbody th { font-weight: 600; overflow-wrap: anywhere; }
+/* What the readiness check read from one file, above its content when 查看内容 is open. */
+.analysis-file-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 24px; margin: 0; font-size: var(--fnd-size-small); line-height: 20px; }
+.analysis-file-facts dt { color: var(--fnd-muted); }
+.analysis-file-facts dd { margin: 0; color: var(--fnd-ink); overflow-wrap: anywhere; }
 
 /* Which ledger accounts count as revenue, cost and expense. */
 .analysis-account-map { display: grid; gap: 8px; }
@@ -417,7 +436,7 @@
 .analysis-readiness-freshness svg { align-self: center; flex: none; }
 .analysis-readiness-freshness--warning { color: var(--fnd-warning); }
 .analysis-readiness-freshness--unknown { color: var(--fnd-muted); }
-.analysis-readiness-table caption .fnd-help-link { vertical-align: middle; }
+.analysis-readiness .analysis-note .fnd-help-link { vertical-align: middle; }
 .analysis-evidence-posture { display: grid; gap: 4px; padding: 12px 12px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); }
 .analysis-evidence-posture-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; font-size: var(--fnd-size-body); }
 .analysis-evidence-posture-line svg { flex: none; }

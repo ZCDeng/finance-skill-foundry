@@ -31,6 +31,7 @@ import { Settings } from './views/Settings.js';
 import { usePreferences } from './components/Preferences.js';
 import { DataBar, Formulator } from './views/Formulator.js';
 import { Analysis } from './views/Analysis.js';
+import { sectionOf, type AnalysisSection } from './views/analysis/steps.js';
 import { materialsAnchor } from './views/analysis/MaterialsFileList.js';
 import { readCopy, writeCopy } from './views/analysis/workingCopy.js';
 import { Booting, WiringTrouble, type OpenSession } from './views/Workbench.js';
@@ -171,10 +172,10 @@ export function App() {
   const [conversationFocus, setConversationFocus] = useState(0);
   const [conversationProblem, setConversationProblem] = useState<string | null>(null);
   const [nativeRect, setNativeRect] = useState<WorkspaceRect | null>(null);
-  const [sections, setSections] = useState<Record<string, 'materials' | 'results' | 'dashboard' | 'drafts' | 'close' | 'methods'>>({});
+  const [sections, setSections] = useState<Record<string, AnalysisSection>>({});
   const analysisSection = sections[current ?? ''] ?? 'results';
   const [draftRequest, setDraftRequest] = useState({ count: 0, taskId: '', draftId: '' });
-  const setAnalysisSection = useCallback((value: 'materials' | 'results' | 'dashboard' | 'drafts' | 'close' | 'methods') => {
+  const setAnalysisSection = useCallback((value: AnalysisSection) => {
     setSections((held) => ({ ...held, [current ?? '']: value }));
   }, [current]);
   const openRef = useRef(open);
@@ -569,8 +570,8 @@ export function App() {
     return result.value.id;
   }, [api, refreshTasks]);
 
-  /** Bring an example task up under 进行中, on the tab it is meant to be read from. */
-  const showSampleTask = useCallback((id: string, section: 'materials' | 'results' | 'dashboard' | 'drafts' | 'close') => {
+  /** Bring an example task up under 进行中, on the step it is meant to be read from. */
+  const showSampleTask = useCallback((id: string, section: AnalysisSection) => {
     setTaskLifecycleView('active');
     currentRef.current = id;
     explicitSelection.current = true;
@@ -1034,7 +1035,7 @@ export function App() {
    * before giving up; once found it is scrolled to and outlined for a moment (`fnd-arrival`).
    */
   const openFromOverview = (task: TaskRow, target: OverviewTarget | 'close') => {
-    const section = target === 'controls' || target === 'close' ? 'close' : target === 'results' || target === 'drafts' || target === 'dashboard' ? target : 'materials';
+    const section = sectionOf(target);
     const view = task.lifecycle_status ?? 'active';
     setTaskLifecycleView(view);
     if (view !== 'active') {
@@ -1172,6 +1173,7 @@ export function App() {
             <Analysis active={inWorkspace} embedded section={analysisSection} onSectionChange={setAnalysisSection}
               task={bound} tasks={tasks} draftRequest={draftRequest} onPick={pickAnalysisTask} onNew={newAnalysisTask} onChat={chatAnalysis}
               onOpenTarget={bound ? (target) => openFromOverview(bound, target as OverviewTarget | 'close') : undefined}
+              progress={overview?.tasks.find((row) => row.task.id === bound?.id)}
               tour={touring && bound?.id === touring ? { onEnd: endFirstLook } : undefined}
               onLocatorPreview={api.sourceLocatorOpen ? (spec) => {
                 // The locator answer carries no origin. Where the viewer is
@@ -1254,7 +1256,7 @@ export function App() {
   );
 }
 
-/** The tab a place in the guide is on. */
-function guideSection(target: GuideTarget): 'materials' | 'results' | 'dashboard' | 'drafts' | 'close' {
-  return target === 'results' || target === 'dashboard' || target === 'drafts' || target === 'close' ? target : 'materials';
+/** The step a place in the guide is on. */
+function guideSection(target: GuideTarget): AnalysisSection {
+  return sectionOf(target);
 }
