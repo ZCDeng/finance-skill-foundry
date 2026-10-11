@@ -155,6 +155,22 @@ def test_a_task_was_last_worked_on_when_its_newest_record_or_conversation_was(tm
     assert _active_at(task, row, (runs,)) == task.sessions()[0]["opened_at"]
 
 
+def test_saving_the_scope_counts_as_working_on_the_task(tmp_path, capsys, monkeypatch):
+    import foundry.analysis
+    from foundry.finance_service import FinanceStore
+
+    task = TaskStore(tmp_path / "var").create(title="8 月", period="2026-08")
+    ledger = tmp_path / "ledger.csv"
+    ledger.write_text("period,amount\n2026-08,1\n", encoding="utf-8")
+    dataset = AnalysisStore(task).add_dataset(ledger, name="ledger")
+    # 范围 saves a requirements version, not a finance context: that alone moves the task to the front of 总览.
+    monkeypatch.setattr(foundry.analysis, "now_iso", lambda: "2099-01-01T00:00:00Z")
+    FinanceStore(task, actor="manager").analysis_requirements_save(
+        {"question": "八月月结", "scope": {"period": "2026-08"}, "bindings": {"ledger": dataset["id"]}, "items": []})
+    [row] = _overview(tmp_path / "var", capsys)["tasks"]
+    assert row["active_at"] == "2099-01-01T00:00:00Z"
+
+
 def test_library_lists_drafts_of_every_task_but_the_trashed(tmp_path, capsys):
     store = TaskStore(tmp_path / "var")
     kept = store.create(title="归档的", period="2026-07")

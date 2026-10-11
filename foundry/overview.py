@@ -152,7 +152,8 @@ def _task_overview(task, row: dict) -> dict:
         "work": _step_work(runs, revisions, board, drafts, datasets),
         "health": _health_overview(finance),
         "tried": _tried(task, board),
-        "active_at": _active_at(task, row, (runs, revisions, drafts, datasets, finance._list("dashboards"), finance._list("contexts"))),
+        "active_at": _active_at(task, row, (runs, revisions, drafts, datasets, analysis._list("requirements"),
+                                            finance._list("dashboards"), finance._list("contexts"))),
     }
 
 
