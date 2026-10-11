@@ -8,6 +8,7 @@ import { SampleBanner } from './components/SampleBanner.js';
 import {
   type AnalysisDraftRow,
   type AnalysisExportRow,
+  type AnalysisRun,
   type Answer,
   type DeliverableRow,
   type GalleryRow,
@@ -175,6 +176,7 @@ export function App() {
   const [sections, setSections] = useState<Record<string, AnalysisSection>>({});
   const analysisSection = sections[current ?? ''] ?? 'results';
   const [draftRequest, setDraftRequest] = useState({ count: 0, taskId: '', draftId: '' });
+  const [runRequest, setRunRequest] = useState({ count: 0, taskId: '', runId: '', analysisId: '' });
   const setAnalysisSection = useCallback((value: AnalysisSection) => {
     setSections((held) => ({ ...held, [current ?? '']: value }));
   }, [current]);
@@ -1073,6 +1075,17 @@ export function App() {
   };
 
   /**
+   * Open the result a line of 本月三句话 on 总览 names: its task, on the step that holds it, with that run selected.
+   * Written first for a task the workspace binds anew, asked for through `runRequest` for the one already bound.
+   */
+  const openRunFromOverview = (task: TaskRow, run: AnalysisRun, step: 'results' | 'operations') => {
+    const saved = `${task.id}:selection`;
+    writeCopy(`${task.id}:run`, run.id);
+    writeCopy(saved, { ...readCopy<{ analysis?: string; draft?: string }>(saved), analysis: run.analysis_id });
+    setRunRequest((held) => ({ count: held.count + 1, taskId: task.id, runId: run.id, analysisId: run.analysis_id }));
+    openFromOverview(task, step);
+  };
+  /**
    * Open a draft from 成果库 on its task's 文稿 tab, with that version selected.
    *
    * The selection is written first, because the analysis screen reads it when
@@ -1181,7 +1194,7 @@ export function App() {
           {problem ? <Refusal message={problem} onDismiss={() => setProblem(null)} /> : null}
           {boundReadOnly ? <Empty><EmptyHeader><EmptyTitle asChild><h2>任务已停用编辑</h2></EmptyTitle><EmptyDescription>这个任务在{boundLifecycle === 'archived' ? '归档' : '回收站'}中。可以查看已生成成果，恢复任务后打开文稿、继续提问或打开数据定位。</EmptyDescription></EmptyHeader><EmptyContent><Button variant="outline" onClick={() => bound ? void changeTaskLifecycle(bound.id, 'restore') : undefined}>恢复任务</Button></EmptyContent></Empty> :
             <Analysis active={inWorkspace} embedded section={analysisSection} onSectionChange={setAnalysisSection}
-              task={bound} tasks={tasks} draftRequest={draftRequest} onPick={pickAnalysisTask} onNew={newAnalysisTask} onChat={chatAnalysis}
+              task={bound} tasks={tasks} draftRequest={draftRequest} runRequest={runRequest} onPick={pickAnalysisTask} onNew={newAnalysisTask} onChat={chatAnalysis}
               onOpenTarget={bound ? (target) => openFromOverview(bound, target as OverviewTarget | Step) : undefined}
               progress={overview?.tasks.find((row) => row.task.id === bound?.id)}
               tour={touring && bound?.id === touring ? { onEnd: endFirstLook } : undefined}
@@ -1223,6 +1236,7 @@ export function App() {
           onRefresh={() => { refreshOverview(); refreshGallery(); }}
           onOpen={openFromOverview}
           onOpenStep={(task, step) => openFromOverview(task, step)}
+          onOpenResult={openRunFromOverview}
           onNewQuestion={() => {
             pickAnalysisTask('');
             requestAnimationFrame(() => document.getElementById('analysis-question')?.focus());

@@ -38,7 +38,7 @@ import { DisclosureSummary } from '../components/Disclosure.js';
 import { Technical, usePreferences } from '../components/Preferences.js';
 import { Loading, SkeletonCards, SkeletonRows } from '../components/Loading.js';
 import { ReportNav, StepIntro, StepNav, StepNext } from './analysis/StepNav.js';
-import { isOperationsAnalysis, isReportView, isScriptDraft, isSkippable, nextStep, sectionOf, stepOf, stepStates, type AnalysisSection, type ReportView, type SkippableStep } from './analysis/steps.js';
+import { isOperationsAnalysis, isReportView, isScriptDraft, isSkippable, nextStep, resultStep, sectionOf, stepOf, stepStates, type AnalysisSection, type ReportView, type SkippableStep } from './analysis/steps.js';
 import { isCollectionHealthRun } from './analysis/CollectionHealthView.js';
 import { SectionIcon } from '../components/SectionIcon.js';
 
@@ -58,6 +58,8 @@ type Props = {
   onLocatorPreview?(preview: import('../bridge.js').LocatorPreviewSpec): void;
   /** 成果库 asks for one draft version of a task; a new count is a new request. */
   draftRequest?: { count: number; taskId: string; draftId: string };
+  /** 总览 asks for one run of a task (a line of 本月三句话 names it); a new count is a new request. */
+  runRequest?: { count: number; taskId: string; runId: string; analysisId: string };
   /** Go to where a line of 本月三句话 is handled, as a 总览 to-do goes there: the step, then the block on it. */
   onOpenTarget?(target: string): void;
   /** 60 秒看看它能做什么 is walking this task's board. */
@@ -74,7 +76,7 @@ const PAGE_ARTICLES: Partial<Record<AnalysisSection, [article: string, label: st
 const EXAMPLES = ['本月利润为什么没有达到预算？', '哪些客户需要优先跟进回款？', '回款晚两周，现金余额会怎样？'];
 
 /** All figures are rendered as received. In particular, Decimal strings never pass through Number. */
-export function Analysis({ task, tasks, active: visible = true, embedded = false, section, onSectionChange, onPick, onNew, onChat, onLocatorPreview, draftRequest, onOpenTarget, tour, progress }: Props) {
+export function Analysis({ task, tasks, active: visible = true, embedded = false, section, onSectionChange, onPick, onNew, onChat, onLocatorPreview, draftRequest, runRequest, onOpenTarget, tour, progress }: Props) {
   const [state, setState] = useState<AnalysisState | null>(null);
   const [place, setPlace] = useState<AnalysisSection>('materials');
   // 汇报 opens on whichever of its three was last open.
@@ -100,6 +102,13 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   const [billingShow, setBillingShow] = useState<{ id: string; count: number } | undefined>(undefined);
   // Bumped when a card in the conversation opens a run: RunPanel reads the kept run only when it mounts.
   const [runOpens, setRunOpens] = useState(0);
+  const handledRunRequest = useRef(0);
+  useEffect(() => {
+    if (!runRequest || runRequest.count === handledRunRequest.current || runRequest.taskId !== task?.id) return;
+    handledRunRequest.current = runRequest.count;
+    setSelectedAnalysis(runRequest.analysisId);
+    setRunOpens((value) => value + 1);
+  }, [runRequest, task?.id]);
   // One scope per task, edited from the 资料 page and the finance settings alike.
   const analysisScope = useAnalysisScope(task?.id, task?.title ?? '', state?.datasets ?? [], scopeRefresh.version, scopeRefresh.quiet);
   // Held here, not in the workbench: it unmounts when the tab changes, and a run
@@ -331,7 +340,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     writeCopy(`${task.id}:run`, run.id);
     setSelectedAnalysis(run.analysis_id);
     setRunOpens((value) => value + 1);
-    choose(operational.has(run.analysis_id) || isCollectionHealthRun(run) ? 'operations' : 'results');
+    choose(resultStep(run, view?.analyses ?? [], view?.runs ?? []));
   };
   const analysisKey = `${task?.id}:analysis:${analysis?.id}`;
   const draftKey = `${task?.id}:draft:${draft?.id ?? 'new'}`;

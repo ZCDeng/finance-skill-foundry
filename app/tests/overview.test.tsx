@@ -2,7 +2,8 @@
 import { useState } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Answer, Bridge, Overview as OverviewData, TaskRow } from '../src/bridge.js';
+import type { AnalysisRun, AnalysisState, Answer, Bridge, Overview as OverviewData, Preferences, TaskRow } from '../src/bridge.js';
+import fixture from './fixtures/collection-health-run.json';
 import { Overview } from '../src/views/Overview.js';
 import { App } from '../src/App.js';
 import { PreferencesProvider } from '../src/components/Preferences.js';
@@ -36,48 +37,85 @@ const data: OverviewData = {
   ],
 };
 const noop = () => undefined;
-const props = { data, loading: false, error: '', fresh: false, recent: [], onRefresh: noop, onOpen: vi.fn(), onOpenStep: vi.fn(),
+const props = { data, loading: false, error: '', fresh: false, recent: [], onRefresh: noop, onOpen: vi.fn(), onOpenStep: vi.fn(), onOpenResult: vi.fn(),
   onNewQuestion: vi.fn(), onChecklist: vi.fn(), onGuide: vi.fn(), onLibrary: vi.fn() };
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); delete (globalThis as unknown as { foundry?: Bridge }).foundry; });
+afterEach(() => { cleanup(); vi.clearAllMocks(); sessionStorage.clear(); delete (globalThis as unknown as { foundry?: Bridge }).foundry; });
 
 describe('总览', () => {
-  it('groups what waits on the manager, the differences first, and goes where each is handled', () => {
-    render(<Overview {...props} />);
-    expect(screen.getByRole('heading', { name: '等你处理（3）' })).toBeTruthy();
-    const groups = screen.getAllByText(/ · \d$/).map((node) => node.textContent);
-    expect(groups).toEqual(['差异待处置 · 1', '表结构待确认 · 1', '分析范围未确认 · 1']);
-    fireEvent.click(screen.getByRole('button', { name: /去处理：华东 7 月月结，应收滚动/ }));
-    expect(props.onOpen).toHaveBeenCalledWith(july, 'controls');
-    // Each says which step it is handled on.
-    const steps = Array.from(document.querySelectorAll('.fnd-overview__todos .fnd-overview__tag')).map((node) => node.textContent);
-    expect(steps).toEqual(['3 勾稽', '1 资料', '2 范围']);
+  const mainCard = () => screen.getByText('当前任务').closest('section')!;
+
+  it('opens on the task worked on last: its six steps with a line each, and a button to the step that waits', () => {
+    const work = { runs: [], cards: [], drafts: 0, datasets: 2 };
+    const rows = [{ ...data.tasks[0], work, active_at: '2026-10-02T09:00:00Z' }, { ...data.tasks[1], work, active_at: '2026-10-05T09:00:00Z' }];
+    render(<Overview {...props} data={{ ...data, tasks: rows }} />);
+    const card = mainCard();
+    expect(within(card).getByRole('heading', { level: 2 }).textContent).toBe('华东 7 月月结 · 2026 年 7 月');
+    expect(within(card).getByText('账：带保留可用')).toBeTruthy();
+    // Each step says its state and what it holds, in words as well as colour.
+    expect(within(card).getByRole('button', { name: /^1 资料（月结），已完成：2 份资料，表结构都已确认$/ })).toBeTruthy();
+    expect(within(card).getByRole('button', { name: /^3 勾稽（月结），待处理/ })).toBeTruthy();
+    fireEvent.click(within(card).getByRole('button', { name: /^5 经营分析/ }));
+    expect(props.onOpenStep).toHaveBeenLastCalledWith(july, 'operations');
+    // 继续 goes to the first step that waits, and says why.
+    fireEvent.click(within(card).getByRole('button', { name: '继续：第 3 步 勾稽' }));
+    expect(props.onOpenStep).toHaveBeenLastCalledWith(july, 'close');
+    expect(within(card).getByText('应收滚动：待外部确认，差额 1200', { selector: '.fnd-cockpit__next span' })).toBeTruthy();
   });
 
-  it('shows each task\'s six steps in words as well as colour, and opens the first that waits on someone', () => {
+  it('lists only the current task\'s to-dos, each with its step, three before the rest fold', () => {
+    const todo = [...data.tasks[0].todo, { kind: 'controls' as const, text: '还没有确认的勾稽控制', target: 'controls' },
+      { kind: 'review' as const, text: '还没有文稿', target: 'drafts' }];
+    render(<Overview {...props} data={{ ...data, tasks: [{ ...data.tasks[0], todo }, data.tasks[1]] }} />);
+    const card = mainCard();
+    expect(within(card).getByRole('heading', { name: '等你处理（4）' })).toBeTruthy();
+    expect(within(card).queryByText('应收滚动：待外部确认，差额 1200')).toBeNull();
+    const shown = card.querySelector('.fnd-cockpit__todos > ul')!;
+    expect(Array.from(shown.querySelectorAll('.fnd-overview__tag')).map((node) => node.textContent)).toEqual(['2 范围', '1 资料', '3 勾稽']);
+    expect(within(card).getByText('其余 1 条')).toBeTruthy();
+    fireEvent.click(within(card).getByRole('button', { name: '去处理：期间未确认' }));
+    expect(props.onOpen).toHaveBeenCalledWith(august, 'scope');
+  });
+
+  it('switches the main card from its pills or another task\'s row, and keeps the choice while away', () => {
+    const { unmount } = render(<Overview {...props} />);
+    expect(within(mainCard()).getByRole('heading', { level: 2 }).textContent).toContain('华东 8 月月结');
+    const switcher = screen.getByRole('group', { name: '切换任务' });
+    expect(within(switcher).getByRole('button', { name: '华东 8 月月结' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(within(switcher).getByRole('button', { name: '华东 7 月月结' }));
+    expect(within(mainCard()).getByRole('heading', { level: 2 }).textContent).toContain('华东 7 月月结');
+    // The other task is a row under 其他进行中的任务, its six steps small; a row makes it the main card.
+    const others = screen.getByRole('heading', { name: '其他进行中的任务（1）' }).closest('section')!;
+    fireEvent.click(within(others).getByRole('button', { name: /^华东 8 月月结/ }));
+    expect(within(mainCard()).getByRole('heading', { level: 2 }).textContent).toContain('华东 8 月月结');
+    fireEvent.click(within(screen.getByRole('group', { name: '切换任务' })).getByRole('button', { name: '华东 7 月月结' }));
+    unmount();
+    render(<Overview {...props} />);
+    expect(within(mainCard()).getByRole('heading', { level: 2 }).textContent).toContain('华东 7 月月结');
+  });
+
+  it('shows another task\'s six steps in words as well as colour', () => {
     const work = { runs: [], cards: [], drafts: 0, datasets: 2 };
     render(<Overview {...props} data={{ ...data, tasks: data.tasks.map((row) => ({ ...row, work })) }} />);
-    expect(screen.getByRole('heading', { name: '本月进度（进行中 2 个任务）' })).toBeTruthy();
-    const row = screen.getByRole('button', { name: /^华东 8 月月结/ });
-    // 资料 waits on 结构, 范围 on itself; 勾稽 reads 控制 and 异常; nothing is calculated yet.
+    const others = screen.getByRole('heading', { name: '其他进行中的任务（1）' }).closest('section')!;
+    const row = within(others).getByRole('button', { name: /^华东 7 月月结/ });
     expect(within(row).getByRole('img').getAttribute('aria-label'))
-      .toBe('1 资料待处理，2 范围待处理，3 勾稽已完成，4 财务分析未开始，5 经营分析未开始，6 汇报未开始');
-    expect(row.textContent).toContain('尚未准备：还有 2 项待处理');
-    expect(screen.getByText('账：带保留可用')).toBeTruthy();
-    fireEvent.click(row);
-    expect(props.onOpenStep).toHaveBeenCalledWith(august, 'materials');
-    fireEvent.click(screen.getByRole('button', { name: /^华东 7 月月结/ }));
-    expect(props.onOpenStep).toHaveBeenCalledWith(july, 'close');
+      .toBe('1 资料已完成，2 范围已完成，3 勾稽待处理，4 财务分析未开始，5 经营分析未开始，6 汇报未开始');
+    expect(row.textContent).toContain('需要复核：计算完成，但有 1 项来源冲突');
   });
 
   it('places 财务分析, 经营分析 and 汇报 by the same rules as the task\'s steps', () => {
     const run = (extra: Record<string, unknown>) => ({ execution_status: 'succeeded', engine: 'finance', role: '', columns: ['actual'], rows: true, outputs: false, ...extra });
-    const work = { runs: [run({}), run({ scenario_kind: 'collection_health' }), run({ rows: false })],
+    const work = { runs: [run({ label: '管理损益', analysis_id: 'm' }), run({ scenario_kind: 'collection_health', label: '回款健康', analysis_id: 'h' }), run({ rows: false })],
       cards: [{ state: 'pinned', kind: 'figure' }, { state: 'pinned', kind: 'scenario' }], drafts: 1, datasets: 1 };
-    render(<Overview {...props} data={{ ...data, tasks: [{ ...data.tasks[1], work }] }} />);
-    const label = within(screen.getByRole('button', { name: /^华东 7 月月结/ })).getByRole('img').getAttribute('aria-label');
+    render(<Overview {...props} data={{ ...data, tasks: [{ ...data.tasks[1], work, health: { run_id: 'h', levels: { red: 1, green: 4 } } }] }} />);
+    const names = within(mainCard()).getAllByRole('button', { name: /^\d / }).map((button) => button.getAttribute('aria-label'));
     // A pinned card waits on 认可; a what-if card never does.
-    expect(label).toBe('1 资料已完成，2 范围已完成，3 勾稽待处理，4 财务分析已完成，5 经营分析已完成，6 汇报待处理');
+    expect(names).toEqual([
+      '1 资料（月结），已完成：1 份资料，表结构都已确认', expect.stringMatching(/^2 范围（月结），已完成/), expect.stringMatching(/^3 勾稽（月结），待处理/),
+      '4 财务分析（财务分析），已完成：已算：管理损益', '5 经营分析（经营分析），已完成：回款健康：风险雷达 1 个红色',
+      '6 汇报（汇报），待处理：看板 2 张卡，1 张待认可；文稿 1 版',
+    ]);
   });
 
   it('says in one line what the boards were recomputed on this month, and opens a task\'s board', () => {
@@ -123,17 +161,26 @@ describe('总览', () => {
     expect(props.onOpen).toHaveBeenCalledWith(july, 'rollforward');
   });
 
-  it('with no task at all, the ways in are the page', () => {
-    render(<Overview {...props} data={{ schema_version: 1, tasks: [], todo_count: 0 }} fresh onSample={vi.fn()} />);
+  it('with no task at all, three ways in are the page: a minute\'s look, the example, and one\'s own files', () => {
+    const offer = { busy: false, onStart: vi.fn(), onDismiss: vi.fn() };
+    const onSample = vi.fn();
+    render(<Overview {...props} data={{ schema_version: 1, tasks: [], todo_count: 0 }} fresh onSample={onSample} firstLook={offer} />);
     expect(screen.getByRole('heading', { name: '从这里开始' })).toBeTruthy();
-    expect(screen.queryByRole('heading', { name: /等你处理/ })).toBeNull();
+    expect(screen.getAllByRole('heading', { level: 3 }).map((node) => node.textContent)).toEqual(['60 秒看看它能做什么', '用示例练一遍', '带上自己的资料开始']);
+    expect(screen.queryByText('当前任务')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '开始看' }));
+    expect(offer.onStart).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '用示例练习' }));
+    expect(onSample).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '问一个新问题' }));
+    expect(props.onNewQuestion).toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '第一次使用' }));
     expect(props.onGuide).toHaveBeenCalled();
   });
 
   it('says nothing holds the close when nothing does', () => {
     render(<Overview {...props} data={{ ...data, todo_count: 0, tasks: data.tasks.map((row) => ({ ...row, todo: [] })) }} />);
-    expect(screen.getByText('没有挡住月结的事项。')).toBeTruthy();
+    expect(within(mainCard()).getByText('没有挡住月结的事项。')).toBeTruthy();
   });
 
   it('offers the first look with a way to say no, and says while the 参考结果 is being built', () => {
@@ -156,6 +203,82 @@ describe('总览', () => {
   });
 });
 
+describe('总览 reads the current task\'s own results', () => {
+  const ok = <T,>(value: T): Answer<T> => ({ ok: true, value });
+  const run = { ...(fixture as unknown as AnalysisRun), task_id: august.id };
+  const figure = (id: string, title: string, entity: string, state: 'accepted' | 'pinned' | 'explore') => ({ id, kind: 'figure', title, state, run_id: run.id,
+    template: 'collection', note: null, proposed_by: 'manager', accepted: state === 'accepted' ? { run_id: run.id, at: '2026-10-10T09:00:00Z' } : null,
+    select: { match: { entity, metric_key: 'collection_gap', scenario: '本期' }, column: 'value' } });
+  const riskLine = { key: 'risk', label: '风险', text: '大连风险最高。', parts: [{ text: '大连风险最高。' }] };
+  function mountReads(cards: object[] | null, preferences: Partial<Preferences> = {}, line: object = riskLine) {
+    let saved: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people: [], current_person: '', tried: [], tips_open: true, ...preferences };
+    const preferencesSet = vi.fn(async (patch: Partial<Preferences>) => ok(saved = { ...saved, ...patch }));
+    const state = { task_id: august.id, datasets: [{ id: 'd'.repeat(32), name: '套表' }], analyses: [], runs: [run], drafts: [], methods: [] };
+    (globalThis as unknown as { foundry: Partial<Bridge> }).foundry = {
+      analysisState: vi.fn(async () => ok(state as unknown as AnalysisState)),
+      financeCall: vi.fn(async (_task: string, command: string) => command === 'dashboard-read'
+        ? ok({ dashboard: cards ? { id: 'v1', parent_id: null, created_at: '2026-10-10T00:00:00Z', cards } : null })
+        : command === 'month-brief' ? ok({ schema_version: 1, signature: 's', worded: null, lines: [line] })
+          : ok({})) as unknown as Bridge['financeCall'],
+      preferencesGet: vi.fn(async () => ok(saved)),
+      preferencesSet,
+    };
+    const { rerender } = render(<PreferencesProvider><Overview {...props} /></PreferencesProvider>);
+    return { preferencesSet, rerender: (next: OverviewData) => rerender(<PreferencesProvider><Overview {...props} data={next} /></PreferencesProvider>) };
+  }
+
+  it('shows the board\'s accepted figures first, then the pinned, four at most, each opening to its source', async () => {
+    mountReads([figure('c1', '大连距生死线', '大连城市公司', 'pinned'), figure('c2', '集团距生死线', '集团', 'accepted'),
+      figure('c3', '提议的卡', '集团', 'explore'), { ...figure('c4', '回款情景', '集团', 'pinned'), kind: 'scenario' }]);
+    const section = (await screen.findByRole('heading', { name: '关键数字' })).closest('section')!;
+    const tiles = within(section).getAllByRole('listitem');
+    expect(tiles.map((tile) => tile.querySelector('.fnd-cockpit__figure-title')!.textContent)).toEqual(['集团距生死线', '大连距生死线']);
+    expect(within(tiles[0]).getByText('-3.22 个百分点')).toBeTruthy();
+    expect(within(tiles[1]).getByText('待认可')).toBeTruthy();
+    expect(within(tiles[0]).getByRole('button', { name: /查看来源/ })).toBeTruthy();
+    // 本月三句话 is the task's own, read for this task.
+    expect(await screen.findByText('大连风险最高。')).toBeTruthy();
+  });
+
+  it('with nothing on the board, says where the figures come from and opens the board', async () => {
+    mountReads(null);
+    const section = (await screen.findByRole('heading', { name: '关键数字' })).closest('section')!;
+    expect(within(section).getByText(/到第 6 步看板钉几张卡/)).toBeTruthy();
+    fireEvent.click(within(section).getByRole('button', { name: '打开看板' }));
+    expect(props.onOpen).toHaveBeenCalledWith(august, 'dashboard');
+  });
+
+  it('offers three features not used yet, none a real task\'s records or the preferences show, and keeps it folded', async () => {
+    const { preferencesSet } = mountReads(null, { tried: ['source'] });
+    const tries = (await screen.findByText('还没试过')).closest('details')!;
+    expect(Array.from(tries.querySelectorAll('.fnd-cockpit__try-title')).map((node) => node.textContent)).toEqual(['回款情景', '倒推到目标', '收缴率下钻到账单']);
+    fireEvent.click(within(tries).getByRole('button', { name: '试一下：回款情景' }));
+    expect(props.onOpen).toHaveBeenCalledWith(august, 'operations');
+    tries.open = false;
+    fireEvent(tries, new Event('toggle'));
+    await waitFor(() => expect(preferencesSet).toHaveBeenCalledWith({ tips_open: false }));
+  });
+
+  it('opens the result a line of 本月三句话 names on the step that holds it, that run selected', async () => {
+    mountReads(null, {}, { key: 'risk', label: '风险', text: '3 个主体在生死线下。',
+      parts: [{ text: '3 个主体', ref: { kind: 'result', run_id: run.id } }, { text: '在生死线下。' }] });
+    fireEvent.click(await screen.findByRole('button', { name: '3 个主体，打开这次计算的结果' }));
+    // 回款健康 is read on 经营分析, not 财务分析.
+    expect(props.onOpenResult).toHaveBeenCalledWith(august, run, 'operations');
+  });
+
+  it('takes 本月三句话 and 关键数字 down, saying why, when reading the task again fails', async () => {
+    const { rerender } = mountReads([figure('c2', '集团距生死线', '集团', 'accepted')]);
+    expect(await screen.findByText('大连风险最高。')).toBeTruthy();
+    const api = (globalThis as unknown as { foundry: Bridge }).foundry;
+    vi.mocked(api.analysisState!).mockResolvedValueOnce({ ok: false, refused: false, message: '任务库读不了' });
+    rerender({ ...data });
+    expect((await screen.findByRole('alert')).textContent).toMatch(/本月三句话和关键数字没有读到：.*任务库读不了/);
+    expect(screen.queryByText('大连风险最高。')).toBeNull();
+    expect(screen.queryByRole('heading', { name: '关键数字' })).toBeNull();
+  });
+});
+
 describe('总览 in the app', () => {
   const ok = <T,>(value: T): Answer<T> => ({ ok: true, value });
   function mount() {
@@ -173,11 +296,11 @@ describe('总览 in the app', () => {
     return api;
   }
 
-  it('opens on 总览, the count in its heading and not on the tab, and 去处理 lands on that task', async () => {
+  it('opens on 总览, the main card\'s to-dos counted in its heading and not on the tab, and 去处理 lands on that task', async () => {
     mount();
-    await screen.findByRole('heading', { name: '等你处理（3）' });
+    await screen.findByRole('heading', { name: '等你处理（2）' });
     expect(screen.getByRole('button', { name: '总览' }).getAttribute('aria-current')).toBe('page');
-    fireEvent.click(screen.getByRole('button', { name: /去处理：华东 8 月月结，期间未确认/ }));
+    fireEvent.click(screen.getByRole('button', { name: '去处理：期间未确认' }));
     await screen.findByText('本地成果：华东 8 月月结');
     expect(screen.getByRole('button', { name: '工作区' }).getAttribute('aria-current')).toBe('page');
   });
@@ -199,7 +322,7 @@ describe('总览 in the app', () => {
 
   it('reads 总览 again on coming back to it, not on a timer', async () => {
     const api = mount();
-    await screen.findByRole('heading', { name: '等你处理（3）' });
+    await screen.findByRole('heading', { name: '等你处理（2）' });
     const before = api.overview.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: '成果库' }));
     fireEvent.click(screen.getByRole('button', { name: /^总览/ }));
@@ -208,7 +331,7 @@ describe('总览 in the app', () => {
 
   it('reads 总览 again when a task changes in the workspace, so its to-dos follow', async () => {
     const api = mount();
-    await screen.findByRole('heading', { name: '等你处理（3）' });
+    await screen.findByRole('heading', { name: '等你处理（2）' });
     fireEvent.click(screen.getByRole('button', { name: '工作区' }));
     const before = api.overview.mock.calls.length;
     window.dispatchEvent(new Event('fnd:task-changed'));
@@ -243,11 +366,11 @@ describe('总览 in the app', () => {
     await waitFor(() => expect(api.firstLookDone).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole('button', { name: '看完了' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /^总览/ }));
-    await screen.findByRole('heading', { name: '等你处理（3）' });
+    await screen.findByRole('heading', { name: '等你处理（2）' });
     expect(screen.queryByRole('heading', { name: '60 秒看看它能做什么' })).toBeNull();
     unmount();
     render(<App />);
-    await screen.findByRole('heading', { name: '等你处理（3）' });
+    await screen.findByRole('heading', { name: '等你处理（2）' });
     expect(screen.queryByRole('heading', { name: '60 秒看看它能做什么' })).toBeNull();
   });
 
@@ -318,7 +441,7 @@ describe('总览 in the app', () => {
     await screen.findByRole('heading', { name: '设置' });
     expect(screen.getByRole('button', { name: '设置' }).getAttribute('aria-current')).toBe('page');
     fireEvent.click(screen.getByRole('button', { name: '总览' }));
-    await screen.findByRole('heading', { name: '等你处理（3）' });
+    await screen.findByRole('heading', { name: '等你处理（2）' });
   });
 
   it('leaves the 总览 tab out of a build that cannot read it', async () => {

@@ -9,23 +9,140 @@
 .fnd-overview__note { margin: 0; font-size: var(--fnd-size-small); }
 .fnd-overview__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .fnd-overview__roll { display: inline-flex; align-items: center; gap: 6px; color: var(--fnd-muted); }
-/* With no task at all the four ways in are the page, so they get room and a frame. */
-.fnd-overview__start--first { padding: 24px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-surface); box-shadow: var(--fnd-shadow-sm); }
-.fnd-overview__start--first .fnd-overview__h { font-size: var(--fnd-size-lead); }
+/* With no task at all the three ways in are the page: a card each, the largest type on the page after the title. */
+.fnd-overview__first { display: flex; flex-direction: column; gap: 12px; }
+.fnd-overview__first > .fnd-overview__h { font-size: var(--fnd-size-lead); }
+.fnd-overview__ways { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.fnd-overview__way {
+  display: flex; flex-direction: column; gap: 8px; padding: 24px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container);
+  background: var(--fnd-surface); box-shadow: var(--fnd-shadow-sm);
+}
+.fnd-overview__way p { margin: 0; }
+.fnd-overview__way > .fnd-overview__actions { margin-top: auto; padding-top: 8px; }
+.fnd-overview__way-icon { width: 28px; height: 28px; color: var(--fnd-seg, var(--fnd-ink)); }
+.fnd-overview__way-title { margin: 0; font-size: var(--fnd-size-lead); line-height: 28px; font-weight: 600; }
 /* 60 秒看看它能做什么: offered once, on a card like the lists below it. */
 .fnd-overview__first-look { padding: 20px 24px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container);
   background: var(--fnd-surface); box-shadow: var(--fnd-shadow-sm); }
 
 .fnd-overview__grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.fnd-overview__grid:has(> :only-child) { grid-template-columns: minmax(0, 1fr); }
 /* The page is the canvas; each list sits on a card above it. 开始 stays on the canvas: it is a row of ways in, not content. */
-.fnd-overview__grid > .fnd-overview__section, .fnd-overview__recent-section {
+.fnd-overview__grid > .fnd-overview__section, .fnd-overview__recent-section, .fnd-overview__card {
   padding: 20px 24px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-surface); box-shadow: var(--fnd-shadow-sm);
 }
 @media (max-width: 960px) {
   .fnd-overview__grid { grid-template-columns: minmax(0, 1fr); }
-  /* One column: the short progress list first, so it is not pushed below a long to-do list. */
-  .fnd-overview__progress-section { order: -1; }
 }
+
+/* The four segments' colours, wherever a step, a group or a way in names its segment (tokens.css --fnd-seg-*). */
+.fnd-overview [data-segment='close'] { --fnd-seg: var(--fnd-seg-close); }
+.fnd-overview [data-segment='finance'] { --fnd-seg: var(--fnd-seg-finance); }
+.fnd-overview [data-segment='operations'] { --fnd-seg: var(--fnd-seg-operations); }
+.fnd-overview [data-segment='report'] { --fnd-seg: var(--fnd-seg-report); }
+
+/*
+ * 总览's main card (cockpit/Cockpit.tsx): the one task, framed in a quiet gold line, the only gold frame on the page
+ * (DESIGN.md, the halo borrowing: a static border, no glow, nothing that moves).
+ */
+.fnd-cockpit {
+  display: flex; flex-direction: column; gap: 20px; padding: 24px;
+  border: 1px solid color-mix(in srgb, var(--fnd-selected) 55%, var(--fnd-line)); border-radius: var(--fnd-radius-container);
+  background: var(--fnd-surface); box-shadow: var(--fnd-shadow-sm);
+}
+.fnd-cockpit__head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 24px; }
+.fnd-cockpit__name { min-width: 0; }
+.fnd-cockpit__eyebrow { margin: 0; font-size: var(--fnd-size-label); color: var(--fnd-muted); }
+.fnd-cockpit__title { margin: 4px 0 0; font-size: var(--fnd-size-title); line-height: 28px; font-weight: 600; overflow-wrap: anywhere; }
+.fnd-cockpit__title .fnd-muted { font-weight: 400; }
+.fnd-cockpit__status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: 4px 0 0; font-size: var(--fnd-size-small); }
+.fnd-cockpit__status .fnd-overview__conclusion { justify-self: auto; }
+/* Which task: pills on one track, the chosen one lifted with a gold ring. Only the task switch is a pill. */
+.fnd-cockpit__switch {
+  display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-pill);
+  background: var(--fnd-surface-strong);
+}
+.fnd-cockpit__pill {
+  max-width: 14em; padding: 4px 12px; border: 0; border-radius: var(--fnd-radius-pill); background: transparent; color: var(--fnd-muted);
+  font: inherit; font-size: var(--fnd-size-small); line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+  transition: background var(--fnd-transition), color var(--fnd-transition);
+}
+.fnd-cockpit__pill:hover { color: var(--fnd-ink); }
+.fnd-cockpit__pill[aria-pressed='true'] { background: var(--fnd-surface); color: var(--fnd-ink); font-weight: 600; box-shadow: inset 0 0 0 1px var(--fnd-selected); }
+.fnd-cockpit__pill:focus-visible { outline: 2px solid var(--fnd-focus); outline-offset: 2px; }
+
+/* 大号六步条: the four segments over six tiles, each tile topped in its segment's colour so the grouping holds when it wraps. */
+.fnd-cockpit__strip { display: flex; flex-direction: column; gap: 8px; }
+.fnd-cockpit__groups, .fnd-cockpit__steps { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.fnd-cockpit__groups span {
+  padding-bottom: 4px; border-bottom: 2px solid currentColor; color: var(--fnd-seg); font-size: var(--fnd-size-label); font-weight: 600;
+}
+.fnd-cockpit__steps { margin: 0; padding: 0; list-style: none; }
+.fnd-cockpit__steps > li { display: flex; min-width: 0; }
+.fnd-cockpit__step {
+  display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 12px; border: 1px solid var(--fnd-line);
+  border-top: 2px solid var(--fnd-seg); border-radius: var(--fnd-radius-control); background: var(--fnd-bg); color: inherit;
+  font: inherit; text-align: left; cursor: pointer; transition: background var(--fnd-transition), border-color var(--fnd-transition);
+}
+.fnd-cockpit__step:hover { background: var(--fnd-surface-strong); border-color: var(--fnd-line-hover); border-top-color: var(--fnd-seg); }
+.fnd-cockpit__step:focus-visible { outline: 2px solid var(--fnd-focus); outline-offset: 2px; }
+.fnd-cockpit__step-head { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.fnd-cockpit__step-icon { flex: none; color: var(--fnd-muted); }
+.fnd-cockpit__step[data-state='done'] .fnd-cockpit__step-icon { color: var(--fnd-level-ok); }
+.fnd-cockpit__step[data-state='attention'] .fnd-cockpit__step-icon { color: var(--fnd-level-watch); }
+.fnd-cockpit__step[data-state='todo'] .fnd-cockpit__step-icon { color: var(--fnd-warning); }
+.fnd-cockpit__step-state { font-size: var(--fnd-size-label); color: var(--fnd-muted); }
+.fnd-cockpit__step[data-state='todo'] .fnd-cockpit__step-state { color: var(--fnd-warning); }
+.fnd-cockpit__step-line {
+  font-size: var(--fnd-size-small); color: var(--fnd-ink); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
+}
+@media (max-width: 960px) {
+  .fnd-cockpit__groups { display: none; }
+  .fnd-cockpit__steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .fnd-cockpit__steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.fnd-cockpit__next { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.fnd-cockpit__next > .fnd-muted { font-size: var(--fnd-size-small); }
+.fnd-cockpit__todos { display: flex; flex-direction: column; gap: 4px; }
+.fnd-cockpit__h { margin: 0; font-size: var(--fnd-size-body); line-height: 20px; font-weight: 600; }
+
+/* 关键数字: the board's figures, one tile each, the value in figure type. */
+.fnd-cockpit__figures { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 960px) {
+  .fnd-cockpit__figures { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.fnd-cockpit__figure {
+  display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 12px 16px; border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-control); background: var(--fnd-bg);
+}
+.fnd-cockpit__figure p { margin: 0; }
+.fnd-cockpit__figure-title { font-size: var(--fnd-size-small); color: var(--fnd-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fnd-cockpit__figure-value { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: var(--fnd-size-title); line-height: 28px; font-weight: 600; }
+.fnd-cockpit__figure-foot { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: var(--fnd-size-label); color: var(--fnd-muted); }
+.fnd-cockpit__figure-foot [data-state='pinned'] { color: var(--fnd-warning); }
+.fnd-cockpit__empty { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.fnd-cockpit__empty p { margin: 0; }
+
+/* 还没试过: three cards on the canvas, each a sentence and 试一下; folding the block is kept in 设置's preferences. */
+.fnd-cockpit__tries > .fnd-overview__note { margin: 4px 0 12px; }
+.fnd-cockpit__try-list { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.fnd-cockpit__try {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 16px; border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-container); background: var(--fnd-surface);
+}
+.fnd-cockpit__try-icon {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: var(--fnd-radius-mark);
+  color: var(--fnd-seg); background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.fnd-cockpit__try-icon svg { width: 18px; height: 18px; }
+.fnd-cockpit__try-text { display: flex; flex-direction: column; gap: 4px; }
+.fnd-cockpit__try-text p { margin: 0; }
+.fnd-cockpit__try-text .fnd-muted { font-size: var(--fnd-size-small); }
+.fnd-cockpit__try-title { font-weight: 600; }
+.fnd-cockpit__try > button { margin-top: auto; }
 
 .fnd-overview__group { font-size: var(--fnd-size-body); }
 .fnd-overview__group > .fnd-overview__note { margin: 4px 0 8px; }

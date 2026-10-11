@@ -56,6 +56,12 @@ export function isOperationsAnalysis(analysis: AnalysisRevision, runs: AnalysisR
     || runs.some((run) => run.analysis_id === analysis.id && isCollectionHealthRun(run));
 }
 
+/** The step a run's result is read on: 经营分析 for 回款健康, 财务分析 for everything else. */
+export function resultStep(run: AnalysisRun, analyses: AnalysisRevision[], runs: AnalysisRun[]): 'results' | 'operations' {
+  const analysis = analyses.find((row) => row.id === run.analysis_id);
+  return isCollectionHealthRun(run) || (analysis !== undefined && isOperationsAnalysis(analysis, runs)) ? 'operations' : 'results';
+}
+
 /** 回款健康 drawn by a script: shown on 经营分析, marked as not the engine's, and read by nothing else there. */
 export const isScriptDraft = (analysis: AnalysisRevision): boolean =>
   analysis.topic === 'collection_health' && analysis.engine !== 'finance';
@@ -143,6 +149,18 @@ function runOfDigest(digest: OverviewWork['runs'][number]): AnalysisRun {
     result: { columns: digest.columns.map((name) => ({ name, type: '' })), rows: digest.rows ? [{}] : [], row_count: digest.rows ? 1 : 0,
       truncated: false, scenario_kind: digest.scenario_kind ?? undefined },
   } as unknown as AnalysisRun;
+}
+
+/**
+ * What 财务分析 and 经营分析 count on 总览: the business results among the task's runs, as runPresentationRole reads
+ * them, and which of those are 回款健康, each as overview.py read it (with the version it ran for and its question).
+ */
+export function overviewResults(row: OverviewTask): { results: OverviewWork['runs']; operations: OverviewWork['runs'] } {
+  const business = (row.work?.runs ?? []).filter((digest) => runPresentationRole(runOfDigest(digest)) === 'business');
+  return {
+    results: business.filter((digest) => !isCollectionHealthRun(runOfDigest(digest))),
+    operations: business.filter((digest) => isCollectionHealthRun(runOfDigest(digest))),
+  };
 }
 
 /** 总览's row: the same rules as the task's own steps, on what overview.py read of it. None while it cannot be read. */
