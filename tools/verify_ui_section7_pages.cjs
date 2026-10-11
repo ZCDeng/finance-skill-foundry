@@ -139,6 +139,10 @@ async function main() {
   };
   const pass = (name, details = {}) => evidence.checks.push({ name, ok: true, ...details });
 
+  // These pages are checked with their technical folds on screen; since 设置 they are off until 显示技术信息 is on.
+  fs.mkdirSync(path.join(qa, 'profile'), { recursive: true });
+  fs.writeFileSync(path.join(qa, 'profile', 'preferences.json'), JSON.stringify({ technical: true }) + '\n');
+
   const app = await _electron.launch({
     executablePath: executable,
     args: [`--user-data-dir=${path.join(qa, 'profile')}`],

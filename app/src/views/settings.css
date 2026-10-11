@@ -1,0 +1,21 @@
+@layer components {
+/* 设置 (Settings.tsx): one column of sections, each a card of rows; what a choice does on the left, its control on the right. */
+.fnd-settings { display: flex; flex-direction: column; gap: 24px; max-width: 760px; }
+.fnd-settings__head p { margin: 4px 0 0; }
+.fnd-settings__title { margin: 0; font-size: var(--fnd-size-title); line-height: 28px; }
+.fnd-settings__notice { margin: 0; padding: 8px 12px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); color: var(--fnd-warning); font-size: var(--fnd-size-small); }
+.fnd-settings__section { display: flex; flex-direction: column; gap: 8px; }
+.fnd-settings__h { margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; font-weight: var(--fnd-weight-strong); }
+.fnd-settings__rows { border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-surface); box-shadow: var(--fnd-shadow-sm); }
+.fnd-settings__row { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 16px 20px; }
+.fnd-settings__row + .fnd-settings__row { border-top: 1px solid var(--fnd-line); }
+.fnd-settings__text { min-width: 0; }
+.fnd-settings__label { display: block; margin: 0; font-size: var(--fnd-size-body); line-height: var(--fnd-leading-body); font-weight: var(--fnd-weight-strong); }
+.fnd-settings__note { margin: 4px 0 0; color: var(--fnd-muted); font-size: var(--fnd-size-small); line-height: 20px; max-width: 52ch; }
+.fnd-settings__path { font-family: var(--fnd-font-figure); overflow-wrap: anywhere; }
+.fnd-settings__control { flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
+.fnd-settings__select { min-width: 128px; }
+@media (max-width: 620px) {
+  .fnd-settings__row { flex-direction: column; align-items: flex-start; gap: 12px; }
+}
+}

@@ -171,7 +171,7 @@ export function ReadinessPanel({ taskId, refreshKey }: { taskId: string; refresh
           {perFile.length > 0 && (
             <table className="analysis-readiness-table">
               <caption className="analysis-note">
-                每份文件各自声明的范围。空着的格子表示标题和数据里都没有这一项。时效只拿资料声明的期间、截至日和分析期间比较，不用电脑日期。
+                每份文件读到的范围
                 <HelpLink article="evidence" label="资料时效与证据标签" />
               </caption>
               <thead>

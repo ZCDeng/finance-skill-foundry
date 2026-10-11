@@ -10,6 +10,7 @@ import { HelpLink } from '../guide/GuideHub.js';
 import { EvidenceLabelChip, EvidencePostureSummary } from './EvidencePosture.js';
 import type { DatasetFreshness, EvidenceLabelEntry, EvidencePosture } from './evidenceLabels.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
+import { Technical } from '../../components/Preferences.js';
 import type { RequirementItemView } from './requirementGaps.js';
 import { paragraphLocation } from './readabilityLocation.js';
 
@@ -124,7 +125,7 @@ export function ExplanationQualityPanel({ taskId, quality, state, facts, citedFa
         {locatorPdf?.factId === fact.id ? <PdfComparison dataUrl={locatorPdf.dataUrl} page={locatorPdf.page} /> : null}
         {factDetails[fact.id] && <FactDrilldown detail={factDetails[fact.id]} />}
       </article>)}</div></details>}
-    {Boolean(quality?.coverage) && <details className="analysis-details"><DisclosureSummary>高级：检查覆盖明细</DisclosureSummary><pre className="analysis-source-text">{JSON.stringify(quality?.coverage, null, 2)}</pre></details>}
+    {Boolean(quality?.coverage) && <Technical><details className="analysis-details"><DisclosureSummary>高级：检查覆盖明细</DisclosureSummary><pre className="analysis-source-text">{JSON.stringify(quality?.coverage, null, 2)}</pre></details></Technical>}
   </section>;
 }
 

@@ -14,7 +14,7 @@ import { SettingsGroup, SettingsPanel, useSettingsPanel } from './SettingsPanel.
 import { PeriodPending, ScopeFields, pendingPeriods } from './ScopePanel.js';
 import { scenarioLabel as displayScenarioLabel } from './glossary.js';
 import { editableScope, SCOPE_LABELS, type AnalysisScope, type ScopeKey, type ScopeValues } from './scope.js';
-import { accountMapOptions, aliasOptions, contextOptions, datasetOptions, scopeFields, scopeSummary, unwrap, errorText } from './shared.js';
+import { accountMapOptions, aliasOptions, aliasWords, contextOptions, datasetOptions, scopeFields, scopeSummary, unwrap, errorText } from './shared.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
 
@@ -455,7 +455,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
     {finance?.contexts.length ? <details className="analysis-details"><DisclosureSummary>已保存的范围 · {finance.contexts.length} 个</DisclosureSummary>
       <div className="analysis-history-list">{[...finance.contexts].reverse().map((context) => <button key={context.id} type="button" className="analysis-history-row" disabled={locked}
         aria-current={context.id === contextId ? 'true' : undefined} onClick={() => setContextId(context.id)}>
-        <span>{context.name}</span><span>{Object.entries(context.scopes ?? {}).map(([alias, item]) => `${alias === 'actual' ? '实际' : alias === 'budget' ? '预算' : alias} ${scopeSummary(item)}`).join('；')}</span></button>)}</div></details> : null}
+        <span>{context.name}</span><span>{Object.entries(context.scopes ?? {}).map(([alias, item]) => `${aliasWords(alias, context, datasets)} ${scopeSummary(item)}`).join('；')}</span></button>)}</div></details> : null}
     <details className="analysis-details"><DisclosureSummary>管理科目映射</DisclosureSummary>
       <p className="analysis-note">损益表算不出来，多半是这里没配齐。系统只认收入、成本、费用三类管理科目，把原表的科目代码归到这三类。</p>
       <div className="analysis-edit-grid"><label>映射名称<Input className="min-w-0 flex-1" value={mapName} disabled={locked} onChange={(event) => setMapName(event.target.value)}  /></label>

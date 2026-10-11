@@ -12,7 +12,9 @@ import { bridge, type Appearance } from '../bridge.js';
  *
  * A radio group: one tab stop, arrows move and choose, as the ARIA pattern has
  * it. A build without the channel shows nothing rather than a switch that does nothing.
+ * 设置 draws a second one; a pick in either moves both (APPEARANCE_EVENT).
  */
+const APPEARANCE_EVENT = 'foundry:appearance-picked';
 const OPTIONS: { value: Appearance; label: string; Icon: typeof Monitor }[] = [
   { value: 'system', label: '跟随系统外观', Icon: Monitor },
   { value: 'light', label: '浅色', Icon: Sun },
@@ -35,6 +37,11 @@ export function ThemeSwitch() {
     }).catch(() => {});
     return () => { live = false; };
   }, [api, available]);
+  useEffect(() => {
+    const follow = (event: Event) => { picked.current = true; setValue((event as CustomEvent<Appearance>).detail); };
+    window.addEventListener(APPEARANCE_EVENT, follow);
+    return () => window.removeEventListener(APPEARANCE_EVENT, follow);
+  }, []);
 
   if (!available) return null;
   const shown = value ?? 'system';
@@ -45,9 +52,11 @@ export function ThemeSwitch() {
     picked.current = true;
     const before = value;
     setValue(next);
+    window.dispatchEvent(new CustomEvent(APPEARANCE_EVENT, { detail: next }));
+    const undo = () => window.dispatchEvent(new CustomEvent(APPEARANCE_EVENT, { detail: before ?? 'system' }));
     void api!.appearanceSet!(next).then((answer) => {
-      if (!answer.ok) setValue(before);
-    }).catch(() => setValue(before));
+      if (!answer.ok) undo();
+    }).catch(undo);
   };
 
   const move = (event: KeyboardEvent<HTMLDivElement>) => {

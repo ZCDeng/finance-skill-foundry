@@ -149,7 +149,7 @@ describe('section 7 manager-facing scope copy', () => {
     </>);
 
     expect(await screen.findByText(/情景 累计实际/)).toBeTruthy();
-    expect(await screen.findByText(/每份文件各自声明的范围/)).toBeTruthy();
+    expect(await screen.findByText(/每份文件读到的范围/)).toBeTruthy();
     expect(screen.getByRole('columnheader', { name: '读到的范围' })).toBeTruthy();
     expect(screen.getByText(/情景 累计预算/)).toBeTruthy();
     expect(screen.getByText(/范围没声明齐/)).toBeTruthy();

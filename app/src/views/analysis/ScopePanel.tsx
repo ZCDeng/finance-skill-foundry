@@ -133,7 +133,7 @@ export function ScopePanel({ scope: state, datasetCount, disabled, onSaved }: {
   const more = MORE_FIELDS.map((field) => state.scope[field] ? `${SCOPE_LABELS[field]} ${state.scope[field]}` : '').filter(Boolean).join(' · ');
   return <section className="analysis-scope-card" aria-label="分析范围">
     <div><span className="fnd-with-help"><h3>分析范围</h3><HelpLink article="scope" label="分析范围与期间" /></span>
-      <p className="analysis-note">资料里读到的值列在字段下方，点一下即可采用；确认后保存，之后的计算和文稿都按这个范围。<span title={state.current?.id}>当前{state.current ? '已保存' : '未保存'} · 资料 {datasetCount} 份。</span></p></div>
+      <p className="analysis-note">资料里读到的值列在字段下方，点一下即可采用；确认后保存，之后的计算和文稿都按这个范围。当前{state.current ? '已保存' : '未保存'} · 资料 {datasetCount} 份。</p></div>
     {state.loading ? <p role="status" className="analysis-note">正在读取已保存范围…</p> : null}
     <PeriodPending scope={state} />
     <ScopeFields fields={PRIMARY_FIELDS} scope={state.scope} candidates={state.candidates} sources={state.candidateSources} ranks={state.candidateRanks} disabled={blocked} onField={state.setField} ariaPrefix="分析范围" />

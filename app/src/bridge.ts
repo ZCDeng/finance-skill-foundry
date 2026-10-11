@@ -418,6 +418,12 @@ export interface Bridge {
   /** 60 秒看看它能做什么: whether it was seen through or closed. Absent in a build without it; 总览 then does not offer it. */
   firstLookGet?(): Promise<Answer<{ done: boolean }>>;
   firstLookDone?(): Promise<Answer<{ done: boolean }>>;
+  /** 设置: the app-wide choices. Absent in a build without them; the workspace then shows technical details as before. */
+  preferencesGet?(): Promise<Answer<Preferences>>;
+  preferencesSet?(patch: Partial<Preferences>): Promise<Answer<Preferences>>;
+  /** 设置 › 关于 and 数据与存储. */
+  appInfo?(): Promise<Answer<{ version: string; data_folder: string }>>;
+  appRevealData?(): Promise<Answer<{ revealed: true }>>;
   tasks(lifecycle?: TaskLifecycleFilter): Promise<Answer<TaskRow[]>>;
   task(id: string): Promise<Answer<TaskDetail>>;
   /** 成果库: old-flow versions, the newest draft of each revision chain and every filed export, newest first. */
@@ -556,6 +562,7 @@ export type WaitOutcome = import('../electron/ipc/contract').WaitOutcome;
 /** One user wait as the timing log takes it: what, how it ended, and two durations. */
 export type WaitEntry = import('../electron/timing').WaitEntry;
 export type Appearance = import('../electron/appearance').Appearance;
+export type Preferences = import('../electron/preferences').Preferences;
 
 /**
  * Times one user wait: from the call, made on the click, to the end of `work`,

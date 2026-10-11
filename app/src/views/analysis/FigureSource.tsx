@@ -7,6 +7,7 @@ import { DisclosureSummary } from '../../components/Disclosure.js';
 import { askWith } from '../guide/ask.js';
 import { askAboutFigure, sourceText, type FigureSourceInfo } from './figureSourceInfo.js';
 import { PinButton } from './PinButton.js';
+import { useTechnical } from '../../components/Preferences.js';
 import type { CardDraft } from './dashboardModel.js';
 import './FigureSource.css';
 
@@ -20,6 +21,7 @@ export function FigureSource({ text, info, hang = false, exact = false, pin }: {
   pin?: CardDraft | null;
 }) {
   const [copied, setCopied] = useState(false);
+  const technical = useTechnical();
   if (!info || text.trim() === '' || text === '—') return <Figure text={text} hang={hang} exact={exact} />;
   const copy = () => {
     void navigator.clipboard?.writeText(sourceText(info)).then(() => setCopied(true), () => setCopied(false));
@@ -51,7 +53,7 @@ export function FigureSource({ text, info, hang = false, exact = false, pin }: {
         <ul className="fnd-source-card__files">
           {info.files.map((file, index) => <li key={`${file.name}:${index}`}>
             <span>{file.name}</span>
-            {file.digest ? <span className="fnd-source-card__digest" title="资料摘要前 12 位">{file.digest}</span> : null}
+            {technical && file.digest ? <span className="fnd-source-card__digest" title="资料摘要前 12 位">{file.digest}</span> : null}
             {file.replaced ? <span className="fnd-source-card__replaced">已被新版本取代</span> : null}
           </li>)}
         </ul>

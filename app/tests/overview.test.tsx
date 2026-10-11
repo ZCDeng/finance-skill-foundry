@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Answer, Bridge, Overview as OverviewData, TaskRow } from '../src/bridge.js';
 import { Overview } from '../src/views/Overview.js';
 import { App } from '../src/App.js';
+import { PreferencesProvider } from '../src/components/Preferences.js';
 
 vi.mock('../src/views/Analysis.js', () => ({
   Analysis: ({ task, tour }: { task: TaskRow | null; tour?: { onEnd(): void } }) => {
@@ -260,6 +261,29 @@ describe('总览 in the app', () => {
     const again = (await screen.findByRole('heading', { name: '60 秒看看它能做什么' })).closest('section')!;
     expect(api.firstLookDone).not.toHaveBeenCalled();
     expect(within(again).getByRole('button', { name: '开始看' })).toBeTruthy();
+  });
+
+  it('opens on the workspace when 设置 says so, and ⌘, opens 设置 from there', async () => {
+    const preferences = { technical: false, brief_open: true, start: 'workspace' as const, samples_read: [] };
+    const api = {
+      tasks: vi.fn(async () => ok([july, august])),
+      task: vi.fn(async (id: string) => ok({ task: id === august.id ? august : july, windows: [], deliverables: [], sessions: [] })),
+      gallery: vi.fn(async () => ok([])),
+      overview: vi.fn(async () => ok(data)),
+      harnessStatus: vi.fn(async () => ok({ wiring: { state: 'ready' as const }, consequence: null, origin: 'http://localhost:1' })),
+      harnessOpen: vi.fn(async (_intent: string, id: string) => ok({ sessionId: `session-${id}`, preset: 'analysis' })),
+      paneVisible: vi.fn(async (value: string) => ok({ screen: value })),
+      preferencesGet: vi.fn(async () => ok(preferences)),
+      preferencesSet: vi.fn(async () => ok(preferences)),
+    } satisfies Partial<Bridge>;
+    (globalThis as unknown as { foundry: Partial<Bridge> }).foundry = api;
+    render(<PreferencesProvider><App /></PreferencesProvider>);
+    await waitFor(() => expect(screen.getByRole('button', { name: '工作区' }).getAttribute('aria-current')).toBe('page'));
+    fireEvent.keyDown(window, { key: ',', metaKey: true });
+    await screen.findByRole('heading', { name: '设置' });
+    expect(screen.getByRole('button', { name: '设置' }).getAttribute('aria-current')).toBe('page');
+    fireEvent.click(screen.getByRole('button', { name: '总览' }));
+    await screen.findByRole('heading', { name: '等你处理（3）' });
   });
 
   it('leaves the 总览 tab out of a build that cannot read it', async () => {

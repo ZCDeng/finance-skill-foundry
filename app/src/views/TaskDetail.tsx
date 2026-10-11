@@ -19,6 +19,7 @@ import {
   when,
 } from '../bridge.js';
 import { TechnicalInfo } from './analysis/TechnicalInfo.js';
+import { useTechnical } from '../components/Preferences.js';
 import { PeriodWords, joinParts } from '../components/PeriodWords.js';
 
 const KIND_LABEL: Record<DeliverableRow['kind'], string> = {
@@ -40,6 +41,7 @@ const REASON_LABEL: Record<WindowRow['reason'], string> = {
 };
 
 function Inputs({ window: row }: { window: WindowRow }) {
+  const technical = useTechnical();
   if (row.inputs.length === 0) {
     return <p className="fnd-muted">这个窗口还没有导入过。</p>;
   }
@@ -51,7 +53,7 @@ function Inputs({ window: row }: { window: WindowRow }) {
             <th>表</th>
             <th className="fnd-num">大小</th>
             <th>导入时的来源</th>
-            <th>技术信息</th>
+            {technical ? <th>技术信息</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -69,7 +71,7 @@ function Inputs({ window: row }: { window: WindowRow }) {
                 * and the window still answers for itself.
                 */}
               <td className="fnd-muted">{input.origin_path ?? ''}</td>
-              <td><TechnicalInfo rows={[['归档副本', input.archived]]} /></td>
+              {technical ? <td><TechnicalInfo rows={[['归档副本', input.archived]]} /></td> : null}
             </tr>
           ))}
         </tbody>
@@ -108,6 +110,7 @@ export function TaskDetail({
   busy: string | null;
   reading: { sha: string; text: string } | null;
 }) {
+  const technical = useTechnical();
   const [openWindow, setOpenWindow] = useState<string | null>(detail.windows[0]?.window_id ?? null);
   const versionsFor = (windowId: string) =>
     detail.deliverables.filter((row) => row.window_id === windowId);
@@ -185,7 +188,7 @@ export function TaskDetail({
                           <th>时间</th>
                           <th className="fnd-num">大小</th>
                           <th>打开</th>
-                          <th>技术信息</th>
+                          {technical ? <th>技术信息</th> : null}
                         </tr>
                       </thead>
                       <tbody>
@@ -234,11 +237,11 @@ export function TaskDetail({
                                 </button>
                               ) : null}
                             </td>
-                            <td><TechnicalInfo rows={[
+                            {technical ? <td><TechnicalInfo rows={[
                               ['会话', version.session_id ?? '无会话'],
                               ['摘要', version.sha256],
                               ['窗口编号', version.window_id],
-                            ]} /></td>
+                            ]} /></td> : null}
                           </tr>
                         ))}
                       </tbody>
