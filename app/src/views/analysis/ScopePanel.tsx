@@ -32,7 +32,11 @@ function Candidates({ field, values, sources, ranks, current, disabled, onPick }
 }) {
   const [more, setMore] = useState(false);
   const listId = useId();
-  const { ordered, recommended } = orderCandidates((values ?? []).filter((value) => value !== current), ranks);
+  // Recommend from every candidate, the one already chosen included, and only then leave that one out of the list:
+  // once the manager has taken the recommendation, the runner-up is not recommended in its place.
+  const all = orderCandidates(values ?? [], ranks);
+  const { recommended } = all;
+  const ordered = all.ordered.filter((value) => value !== current);
   if (!ordered.length) return null;
   const visible = (value: string) => field === 'scenario' ? scenarioLabel(value) : value;
   const shown = more || ordered.length <= SHOWN_CANDIDATES ? ordered : ordered.slice(0, SHOWN_CANDIDATES - 1);
@@ -42,7 +46,7 @@ function Candidates({ field, values, sources, ranks, current, disabled, onPick }
     <ul id={listId}>{shown.map((value) => {
       const places = sources?.[value]?.split('；') ?? [];
       const files = ranks?.[value]?.files ?? 0;
-      const meta = [value === recommended && ordered.length > 1 ? '推荐' : '', files > 1 ? `${files} 份资料` : '',
+      const meta = [value === recommended && all.ordered.length > 1 ? '推荐' : '', files > 1 ? `${files} 份资料` : '',
         places.length ? `来自 ${places[0]}${places.length > 1 ? ` 等 ${places.length} 处` : ''}` : ''].filter(Boolean).join(' · ');
       return <li key={value}>
         <Button variant="outline" type="button" size="chip" disabled={disabled} aria-label={`采用资料里的${SCOPE_LABELS[field]} ${value}`}
@@ -100,15 +104,16 @@ export function pendingPeriods(scope: Pick<AnalysisScope, 'scope' | 'candidates'
 }
 
 /**
- * Says why the period-bound actions are closed. It names the month most files back rather than every month any
- * title mentions; the candidates under 期间 list the rest with where each was read.
+ * Says why the period-bound actions are closed. It names the month the files back most strongly (weighed by where
+ * each read it, so not always the most files) rather than every month any title mentions; the candidates under
+ * 期间 list the rest with where each was read.
  */
 export function PeriodPending({ scope, announce = true }: { scope: Pick<AnalysisScope, 'scope' | 'candidates' | 'candidateRanks'>; announce?: boolean }) {
   const periods = pendingPeriods(scope);
   if (!periods.length) return null;
   const { recommended } = orderCandidates(periods, scope.candidateRanks?.period);
   const said = periods.length === 1 ? <>资料写的期间是 <span className="fnd-period">{formatPeriods(periods)[0]}</span></>
-    : recommended ? <>资料里多数写的是 <span className="fnd-period">{formatPeriods([recommended])[0]}</span></>
+    : recommended ? <>资料里依据最充分的期间是 <span className="fnd-period">{formatPeriods([recommended])[0]}</span></>
     : <>资料里读到 {periods.length} 个不同的期间</>;
   // The scope card announces it; a second copy in the settings dialog would read it twice.
   return <p role={announce ? 'status' : undefined} className="analysis-message">{said}，但任务期间还没确认。确认后，计算、背景和文稿才会使用该期间。</p>;

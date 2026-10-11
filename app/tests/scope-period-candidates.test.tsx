@@ -105,13 +105,34 @@ it('lists the strongest candidates one per row, marks the recommended one and fo
   const scope: AnalysisScope = { ...scopeOf('', ['2026-01', '2018-11', '2026-08', '2026-09']),
     candidateSources: inferCandidateSources(mixed), candidateRanks: rankScopeCandidates([], mixed) };
   render(<ScopePanel scope={scope} datasetCount={5} />);
-  expect(screen.getByRole('status').textContent).toContain('资料里多数写的是 2026 年 8 月，但任务期间还没确认');
+  expect(screen.getByRole('status').textContent).toContain('资料里依据最充分的期间是 2026 年 8 月，但任务期间还没确认');
   const buttons = () => screen.getAllByRole('button', { name: /^采用资料里的期间/ }).map((button) => button.textContent);
   expect(buttons()).toEqual(['2026-08', '2026-01']);
   expect(screen.getByText('推荐 · 2 份资料 · 来自 已确认的表结构 等 2 处')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '其他 2 个' }));
   expect(buttons()).toEqual(['2026-08', '2026-01', '2018-11', '2026-09']);
   expect(screen.getByRole('button', { name: '收起' }).getAttribute('aria-expanded')).toBe('true');
+});
+
+it('keeps the recommendation on the chosen value rather than passing it to the runner-up', () => {
+  const scope: AnalysisScope = { ...scopeOf('2026-08', ['2026-01', '2018-11', '2026-08', '2026-09']),
+    candidateSources: inferCandidateSources(mixed), candidateRanks: rankScopeCandidates([], mixed) };
+  render(<ScopePanel scope={scope} datasetCount={5} />);
+  expect(screen.getAllByRole('button', { name: /^采用资料里的期间/ }).map((button) => button.textContent)).toEqual(['2026-01', '2018-11', '2026-09']);
+  expect(screen.queryByText(/^推荐/)).toBeNull();
+});
+
+it('names the best-backed month without calling it most of the files', () => {
+  // One confirmed structure outweighs two sheet titles: recommended, but not a majority.
+  const weighed = report([
+    { dataset_id: 'close', name: '月结套表', scope: { ...blank, period: '2026-08' }, missing_fields: [], can_run: [], blocked: [],
+      scope_sources: { period: { origin: 'confirmed' } } },
+    ...['a', 'b'].map((id) => ({ dataset_id: id, name: id, scope: { ...blank, period: '2026-07' }, missing_fields: [], can_run: [], blocked: [],
+      scope_sources: { period: { origin: 'title' as const, sheet: id, text: '2026-07' } } })),
+  ]);
+  render(<PeriodPending scope={{ ...scopeOf('', ['2026-07', '2026-08']), candidateRanks: rankScopeCandidates([], weighed) }} />);
+  expect(screen.getByRole('status').textContent).toContain('资料里依据最充分的期间是 2026 年 8 月');
+  expect(screen.getByRole('status').textContent).not.toContain('多数');
 });
 
 it('lists two or three candidates without folding any', () => {
