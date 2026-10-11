@@ -3,6 +3,8 @@
 .analysis-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
 .analysis-header h2 { margin: 8px 0; overflow-wrap: anywhere; }
 .analysis-note, .analysis-formats { color: var(--fnd-muted); font-size: var(--fnd-size-small); line-height: 1.7; overflow-wrap: anywhere; }
+/* A note reads as a paragraph, not a banner: about 52 characters to the line, wherever the column is wider. */
+.analysis-note { max-width: 52em; }
 .analysis-task-picker { display: flex; flex-direction: column; gap: 6px; min-width: 150px; max-width: 260px; font-size: var(--fnd-size-small); color: var(--fnd-muted); }
 .analysis-task-controls { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .analysis-edit-grid .fnd-field,

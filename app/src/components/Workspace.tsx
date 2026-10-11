@@ -341,7 +341,7 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
             onPointerMove={(event) => { if (drag.current) resized(drag.current.width + event.clientX - drag.current.x); }}
             onPointerUp={() => { drag.current = null; setDragging(false); }}
             onLostPointerCapture={() => { drag.current = null; setDragging(false); }} />
-          <section className="workspace-results" ref={canvas} aria-label="分析成果" hidden={Boolean(task) && effective === 'conversation'}>{children}</section>
+          <section className="workspace-results fnd-hang" ref={canvas} aria-label="分析成果" hidden={Boolean(task) && effective === 'conversation'}>{children}</section>
         </div>
       </section>
       <AlertDialog open={Boolean(confirm)} onOpenChange={(open) => { if (!open && !confirmBusy) setConfirm(null); }}>

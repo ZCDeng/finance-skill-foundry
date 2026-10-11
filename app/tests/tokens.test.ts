@@ -448,6 +448,34 @@ describe('where the warning colour is drawn', () => {
  * Formulator start and stop button, so every gold title-bar rule is written
  * under `.fnd-head` and those reuses keep their own colours.
  */
+/*
+ * Segment colours (DESIGN.md 分区标题图标): the four parts of a task tint section-title icons and 总览's step labels.
+ * Each holds 4.5:1 on the canvas and on a card in every theme, so an icon drawn in it reads as clearly as text would.
+ */
+describe('the segment colours', () => {
+  const tables = [['light', block(TOKENS, ':root')], ['dark (system)', block(TOKENS, '@media (prefers-color-scheme: dark)')],
+    ['dark (stamped)', block(TOKENS, ":root[data-theme='dark']")]] as const;
+  it('names one colour per part in every theme and clears 4.5:1 on the canvas and a card', () => {
+    for (const [theme, table] of tables) {
+      for (const name of ['--fnd-seg-close', '--fnd-seg-finance', '--fnd-seg-operations', '--fnd-seg-report']) {
+        expect(table[name], `${theme} ${name}`).toMatch(/^#[0-9a-f]{6}$/);
+        for (const ground of ['--fnd-bg', '--fnd-surface']) {
+          expect(contrast(table[name], table[ground]), `${theme} ${name} on ${ground}`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    }
+  });
+
+  it('keeps the four apart from the gold, the warning and the screening lights', () => {
+    for (const [, table] of tables) {
+      const segments = ['--fnd-seg-close', '--fnd-seg-finance', '--fnd-seg-operations', '--fnd-seg-report'].map((name) => table[name]);
+      for (const reserved of ['--fnd-selected', '--fnd-warning', '--fnd-level-ok', '--fnd-level-watch', '--fnd-mark-external']) {
+        expect(segments).not.toContain(table[reserved]);
+      }
+    }
+  });
+});
+
 describe('the title bar gold', () => {
   const COMPONENTS = readFileSync(fileURLToPath(new URL('../src/components/components.css', import.meta.url)), 'utf8');
   const light = block(TOKENS, ':root');
@@ -706,8 +734,9 @@ describe('the 资料 page, settings panel and task drawer controls', () => {
     expect(ANALYSIS).not.toContain('analysis-finance-setup-scroll');
     // The column around the panes clips rather than hides, so scrollIntoView inside a pane cannot slide it.
     expect(declarations(read('../src/components/components.css'), ".fnd-shell[data-screen='analysis'] .fnd-column").overflow).toBe('clip');
-    // The results pane keeps a 24px gutter, room for the fold's hanging chevron.
-    expect(declarations(WORKSPACE, '.workspace-results').padding.split(' ')[1]).toBe('24px');
+    // The results pane keeps a left gutter wide enough for the fold's hanging chevron (24px) and the section-title
+    // tile (28px, 8px clear on both sides: 44px), and 32px on the right.
+    expect(declarations(WORKSPACE, '.workspace-results').padding).toBe('24px 32px 32px 44px');
   });
 
   it('draws the task drawer\'s status segments as ordinary 36px, 14px controls', () => {

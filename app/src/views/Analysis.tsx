@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowUp, FilePlus2, MessageSquare, RefreshCw, TriangleAlert } from 'lucide-react';
+import { ArrowUp, FilePlus2, FolderOpen, MessageSquare, RefreshCw, TriangleAlert, Wallet, Wrench } from 'lucide-react';
 import { bridge, timeWait, when, type Answer, type AnalysisDraft, type AnalysisRevision, type AnalysisRun, type AnalysisState, type DatasetSnapshot, type FinanceDrilldown,
   type TaskRow } from '../bridge.js';
 import './analysis.css';
@@ -40,6 +40,7 @@ import { Loading, SkeletonCards, SkeletonRows } from '../components/Loading.js';
 import { ReportNav, StepIntro, StepNav, StepNext } from './analysis/StepNav.js';
 import { isOperationsAnalysis, isReportView, isScriptDraft, isSkippable, nextStep, sectionOf, stepOf, stepStates, type AnalysisSection, type ReportView, type SkippableStep } from './analysis/steps.js';
 import { isCollectionHealthRun } from './analysis/CollectionHealthView.js';
+import { SectionIcon } from '../components/SectionIcon.js';
 
 type Selection = { analysis?: string; draft?: string };
 export type { AnalysisSection } from './analysis/steps.js';
@@ -552,7 +553,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         {loading && (view ? <p role="status" className="analysis-note">正在读取任务资料与成果…</p>
           : <Loading label="正在读取任务资料与成果…">{place === 'results' ? <SkeletonCards /> : <SkeletonRows />}</Loading>)}
         {view && place === 'materials' && <>
-          <div className="analysis-section-heading"><span className="fnd-with-help"><h3>任务资料</h3><HelpLink article="data-safety" label="资料快照与原文件" /></span>{embedded && view.datasets.length > 0
+          <div className="analysis-section-heading"><span className="fnd-with-help"><h3><SectionIcon icon={FolderOpen} segment="close" />任务资料</h3><HelpLink article="data-safety" label="资料快照与原文件" /></span>{embedded && view.datasets.length > 0
             ? <Button variant="outline" type="button" disabled={busy} onClick={() => void perform(addFiles)}><FilePlus2 size={15} aria-hidden />添加资料</Button> : null}</div>
           {!view.datasets.length && <AnalysisEmpty title="把手头的资料加进来" body="添加文件，或先和助手说清范围。"
             onAddFiles={embedded ? () => void perform(addFiles) : undefined}
@@ -567,7 +568,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
             })} onClosePreview={() => setDataset(null)} onRefresh={() => refresh(task.id)} />
           <WorkbookOverview taskId={task.id} datasets={view.datasets} />
           <section className="analysis-more-actions" aria-labelledby="analysis-more-actions">
-            <div><h3 id="analysis-more-actions">更多操作</h3><p className="analysis-note">换新导出的来源，或用这个月的数起草下月套表。</p></div>
+            <div><h3 id="analysis-more-actions"><SectionIcon icon={Wrench} segment="close" />更多操作</h3><p className="analysis-note">换新导出的来源，或用这个月的数起草下月套表。</p></div>
             <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />
             <details className="analysis-details analysis-rollforward"><DisclosureSummary>滚动到下月</DisclosureSummary>
               <RollforwardPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} onApplied={() => refresh(task.id)} />
@@ -579,7 +580,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           : <AnalysisEmpty title="先把资料加进来" body="资料里写的期间、组织和单位会列在这里，点一下就能采用。"
             onAddFiles={embedded ? () => void perform(addFiles) : undefined} onChat={() => void chat(question.trim() || undefined)} />)}
         {view && place === 'operations' && <>
-          <div className="analysis-section-heading"><div><h3>回款与现金</h3><p className="analysis-note">收缴率、清欠和收费明细这些业务上的事放在这一步。</p></div>
+          <div className="analysis-section-heading"><div><h3><SectionIcon icon={Wallet} segment="operations" />回款与现金</h3><p className="analysis-note">收缴率、清欠和收费明细这些业务上的事放在这一步。</p></div>
             {view.datasets.length && !readOnly ? <AskLink ask="collection-health" label={operationsAnalysis ? '让助手重算回款健康' : '让助手做回款健康分析'} disabled={busy} /> : null}</div>
           {structureWaits.length && !readOnly ? <p className="analysis-step-flag" role="note">
             <TriangleAlert size={14} strokeWidth={1.5} aria-hidden /><b>表结构待确认</b>

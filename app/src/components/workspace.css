@@ -50,7 +50,8 @@ button.workspace-sample__tag:hover { border-color: var(--fnd-line-hover); color:
 .workspace-divider { flex: 0 0 7px; cursor: col-resize; position: relative; background: var(--fnd-bg); touch-action: none; }
 .workspace-divider::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: var(--fnd-line); }
 .workspace-divider:hover::after, .workspace-divider:focus-visible::after { background: var(--fnd-line-hover); }
-.workspace-results { flex: 1; min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 24px 24px 32px; }
+/* The left gutter holds the section-title tiles (8px clear of the edge and 8px before the words) and the folds' chevrons. */
+.workspace-results { --fnd-hang-tile: 28px; flex: 1; min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 24px 32px 32px 44px; }
 .workspace[data-focus='conversation'] .workspace-conversation { width: 100%; flex: 1; }
 .workspace[data-focus='empty'] .workspace-results { display: flex; flex-direction: column; }
 .workspace-scrim { position: absolute; inset: 0; z-index: 40; background: var(--fnd-overlay); border: 0; cursor: default; }
@@ -67,7 +68,7 @@ button.workspace-sample__tag:hover { border-color: var(--fnd-line-hover); color:
   .workspace-sample { padding: 8px 20px; }
   .workspace-title h1 { font-size: var(--fnd-size-lead); }
   .workspace-title span { display: none; }
-  .workspace-results { padding-left: 20px; padding-right: 20px; }
+  .workspace-results { --fnd-hang-tile: 24px; padding-left: 36px; padding-right: 24px; }
 }
 
 }

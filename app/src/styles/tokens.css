@@ -87,6 +87,13 @@
   /* A screening light to watch: orange-brown, apart from the gold that marks where the reader is. */
   --fnd-level-watch: #a35f1f;
   --fnd-level-watch-fill: #a35f1f1f;
+  /* Segment colours (2026-10-11): the four parts of a task, 月结 · 财务分析 · 经营分析 · 汇报. They tint section-title
+     icons and 总览's step labels only, never a control, a state or a figure, and stay clear of gold, brick red,
+     the screening lights and the external blue. */
+  --fnd-seg-close: #556178;
+  --fnd-seg-finance: #4c56a8;
+  --fnd-seg-operations: #1d7470;
+  --fnd-seg-report: #7d5895;
   --fnd-duration: 180ms;
   --fnd-easing: ease;
   --fnd-transition: var(--fnd-duration) var(--fnd-easing);
@@ -125,6 +132,10 @@
     --fnd-level-ok: #9cc0a0;
     --fnd-level-watch: #e0a46a;
     --fnd-level-watch-fill: #e0a46a1f;
+    --fnd-seg-close: #a9b3c7;
+    --fnd-seg-finance: #a7aef0;
+    --fnd-seg-operations: #6fc5bd;
+    --fnd-seg-report: #c9a7e0;
   }
 }
 :root[data-theme='dark'] {
@@ -160,6 +171,10 @@
   --fnd-level-ok: #9cc0a0;
   --fnd-level-watch: #e0a46a;
   --fnd-level-watch-fill: #e0a46a1f;
+  --fnd-seg-close: #a9b3c7;
+  --fnd-seg-finance: #a7aef0;
+  --fnd-seg-operations: #6fc5bd;
+  --fnd-seg-report: #c9a7e0;
 }
 @media (prefers-reduced-motion: reduce) {
   :root { --fnd-duration: 0ms; }

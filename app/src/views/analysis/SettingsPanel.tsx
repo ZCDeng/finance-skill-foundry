@@ -1,5 +1,7 @@
+import { Calculator } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { DisclosureSummary } from '../../components/Disclosure.js';
+import { SectionIcon } from '../../components/SectionIcon.js';
 
 /**
  * Open state for the 范围与计算 fold. `setOpen` opens or closes without taking
@@ -35,7 +37,7 @@ export type SettingsPanelState = ReturnType<typeof useSettingsPanel>;
 export function SettingsGroup({ note, children }: { note: string; children: ReactNode }) {
   const heading = useId();
   return <section className="analysis-settings-group" aria-labelledby={heading}>
-    <div className="analysis-settings-group__head"><h3 id={heading}>自己动手算</h3><p className="analysis-note">{note}</p></div>
+    <div className="analysis-settings-group__head"><h3 id={heading}><SectionIcon icon={Calculator} segment="finance" />自己动手算</h3><p className="analysis-note">{note}</p></div>
     {children}
   </section>;
 }
