@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AnalysisRun, Bridge } from '../src/bridge.js';
+import { PreferencesProvider } from '../src/components/Preferences.js';
 import { DashboardView, useDashboard } from '../src/views/analysis/Dashboard.js';
 import { cardSignature, DashboardPinContext, figureDraft, matchingRows, splitDisplay, type CardDraft, type Dashboard, type DashboardCard } from '../src/views/analysis/dashboardModel.js';
 import { newerRun, TEMPLATES } from '../src/views/analysis/dashboardTemplates.js';
@@ -54,7 +55,8 @@ function boardBackend(initial: DashboardCard[] = []) {
       version += 1;
       const cards = (spec.cards as (Omit<DashboardCard, 'id' | 'template' | 'note' | 'proposed_by' | 'accepted'> & Partial<DashboardCard>)[]).map((card, index) => ({
         template: null, note: null, proposed_by: 'manager' as const, ...card, id: card.id ?? `card-${version}-${index}`,
-        accepted: card.state === 'accepted' ? card.accepted ?? { run_id: card.run_id, at: '2026-10-10T09:00:00Z' } : null,
+        accepted: card.state === 'accepted'
+          ? card.accepted ?? { run_id: card.run_id, at: '2026-10-10T09:00:00Z', ...(card.accepted_by ? { by: card.accepted_by } : {}) } : null,
       }));
       board = { id: `v${version}`, parent_id: board?.id ?? null, created_at: '2026-10-10T00:00:00Z', cards };
       return board;
@@ -170,6 +172,24 @@ describe('the board', () => {
     fireEvent.click(await screen.findByRole('button', { name: '全部认可' }));
     // The what-if stays as it was: the backend refuses to accept it, and would refuse the whole save with it.
     await waitFor(() => expect(backend.board()?.cards.map((row) => row.state)).toEqual(['accepted', 'accepted', 'pinned']));
+  });
+
+  it('accepts under the current person\'s 署名 and says who accepted on the card', async () => {
+    const backend = boardBackend([card({})]);
+    const people = [{ id: 'p1', name: '张三', role: 'manager' as const, signature: '财务部 张三' }];
+    Object.assign((globalThis as { foundry?: Partial<Bridge> }).foundry!, {
+      preferencesGet: vi.fn(async () => ({ ok: true, value: { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people, current_person: 'p1' } })),
+      preferencesSet: vi.fn(),
+    });
+    render(<PreferencesProvider><Board /></PreferencesProvider>);
+    const gap = await screen.findByRole('article', { name: '距生死线（本年账单收缴率）' });
+    await waitFor(() => expect((globalThis as { foundry?: Partial<Bridge> }).foundry!.preferencesGet).toHaveBeenCalled());
+    await act(async () => {});
+    fireEvent.click(within(gap).getByRole('button', { name: '认可' }));
+    await waitFor(() => expect(backend.board()?.cards[0].accepted).toMatchObject({ by: '财务部 张三' }));
+    const save = backend.financeCall.mock.calls.find(([, command]) => command === 'dashboard-save')!;
+    expect((save[2]!.cards as DashboardCard[])[0].accepted_by).toBe('财务部 张三');
+    expect(await within(screen.getByRole('article', { name: '距生死线（本年账单收缴率）' })).findByText(/财务部 张三 认可$/)).toBeTruthy();
   });
 
   it('shows the assistant\'s proposals apart until the manager pins them', async () => {

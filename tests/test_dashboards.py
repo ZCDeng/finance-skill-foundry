@@ -104,6 +104,21 @@ def test_only_the_manager_accepts_and_acceptance_holds_for_the_run_it_was_given_
         assistant.dashboard_save({"parent_id": forged["id"], "cards": [{**card, "state": "accepted"}]})
 
 
+def test_an_acceptance_keeps_the_signature_it_was_given_with(tmp_path):
+    manager, run, _ = _board(tmp_path)
+    board = manager.dashboard_save({"parent_id": None, "cards": [_gap(run), _rank(run)]})
+    gap, rank = board["cards"]
+    accepted = manager.dashboard_save({"parent_id": board["id"], "cards": [
+        {**gap, "state": "accepted", "accepted_by": " 财务部 张三 "}, {**rank, "state": "accepted"}]})
+    signed, unsigned = (card["accepted"] for card in accepted["cards"])
+    assert signed["by"] == "财务部 张三" and "by" not in unsigned
+    # The 署名 belongs to that acceptance: saving again, under another name, keeps who accepted it.
+    again = manager.dashboard_save({"parent_id": accepted["id"], "cards": [{**card, "accepted_by": "李四"} for card in accepted["cards"]]})
+    assert [card["accepted"] for card in again["cards"]] == [signed, unsigned]
+    with pytest.raises(FoundryError, match="accepted_by is longer than 80"):
+        manager.dashboard_save({"parent_id": again["id"], "cards": [{**gap, "state": "accepted", "accepted_by": "张" * 81}]})
+
+
 def test_the_assistant_proposes_explore_cards_the_manager_pins(tmp_path):
     manager, run, bindings = _board(tmp_path)
     assistant = FinanceStore(manager.task, snapshot_ids=set(bindings.values()), actor="assistant")

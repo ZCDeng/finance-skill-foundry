@@ -163,6 +163,8 @@ def normalize(raw: Any) -> dict:
         "figures": figures, "charts": charts, "sources": sources, "runs": runs,
         "beyond": _named(model.get("beyond"), "beyond"),
         "left_out": {"pinned": _named(left.get("pinned"), "pinned"), "scenario": _named(left.get("scenario"), "scenario")},
+        # The 署名 it was exported under (设置 › 使用者): a name on the copy, not a permission.
+        **({"signed_by": _text(model["signed_by"], "signed by", 80, blank=False)} if model.get("signed_by") else {}),
     }
 
 
@@ -544,6 +546,8 @@ def workbook(model: dict, cards: dict[str, dict], run_of) -> bytes:
     sheet.append([f"经营看板 · {model['task']}{' · ' + model['period'] if model['period'] else ''}"])
     sheet["A1"].font = Font(bold=True, size=14, color=INK)
     sheet.append(["只放经理认可的卡。「计算里的数」是它读的那次计算里原样的数（位数太多、表格存不下的写成文字），来源见「来源」页。"])
+    if model.get("signed_by"):
+        sheet.append([f"导出人：{model['signed_by']}"])
     left = model["left_out"]
     if left["pinned"] or left["scenario"]:
         sheet.append(["没有放进来：" + "；".join(filter(None, [

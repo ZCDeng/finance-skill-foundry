@@ -50,6 +50,8 @@ export interface DashboardSnapshot {
   beyond: SnapshotNamed[];
   /** Cards on the board that no snapshot shows: waiting for the manager, and 回款情景 what-ifs. */
   left_out: { pinned: SnapshotNamed[]; scenario: SnapshotNamed[] };
+  /** The 署名 it was exported under (设置 › 使用者); absent when nobody was chosen. A name, not a permission. */
+  signed_by?: string;
 }
 
 /** One page holds two rows of six figures; three charts beside more than six figures, else six. */
@@ -144,6 +146,7 @@ export function normalizeSnapshot(raw: unknown, page: boolean): DashboardSnapsho
         files: list(row.files, '资料', 20).map((name) => text(name, '资料', 600)) }; }),
     beyond: named(model.beyond, '放不下的卡'),
     left_out: { pinned: named(left.pinned, '待认可的卡'), scenario: named(left.scenario, '情景卡') },
+    ...(model.signed_by ? { signed_by: text(model.signed_by, '导出人', 80, true) } : {}),
   };
   if (page && (figures.length > PAGE_FIGURES || charts.length > pageCharts(figures.length))) throw new Error('一页纸放不下这么多卡。');
   if (!figures.length && !charts.length) throw new Error('看板上还没有认可的卡。');
@@ -315,7 +318,7 @@ export function snapshotHtml(snapshot: DashboardSnapshot, fonts: SnapshotFonts, 
 <style>${faces(fonts)}${STYLE}.figures{grid-template-columns:repeat(${columns},minmax(0,1fr));}.charts{grid-template-columns:repeat(${across},minmax(0,1fr));}</style></head>
 <body><main class="page">
 <header class="head"><h1>经营看板<span>${e([snapshot.task, snapshot.period].filter(Boolean).join(' · '))}</span></h1>
-<p>只放经理认可的卡 · 每个数的来源见页脚<br>${e(`导出于 ${exportedAt} · 看板版本 ${snapshot.board_id.slice(0, 8)}`)}</p></header>
+<p>只放经理认可的卡 · 每个数的来源见页脚<br>${e(`导出于 ${exportedAt}${snapshot.signed_by ? ` · 导出人 ${snapshot.signed_by}` : ''} · 看板版本 ${snapshot.board_id.slice(0, 8)}`)}</p></header>
 ${tiles ? `<div class="figures">${tiles}</div>` : ''}
 ${charts ? `<div class="charts">${charts}</div>` : ''}
 <footer class="foot">

@@ -16,6 +16,7 @@ from foundry.analysis import AnalysisStore
 from foundry.dashboard_snapshot import (
     _check_figure,
     _reads,
+    normalize,
     ranked,
     save,
     snapshot_path,
@@ -137,6 +138,17 @@ def test_a_workbook_snapshot_holds_every_accepted_card_as_its_run_holds_it(board
 
     assert snapshot_path(task, record["id"]) == Path(filed["path"])
     assert [row["id"] for row in snapshots(task)] == [record["id"]]
+
+
+def test_a_workbook_snapshot_says_who_exported_it_when_a_name_was_given(board):
+    task, manager, run, saved = board
+    signed = save(task, {"format": "xlsx", "model": {**_model(manager, saved, run), "signed_by": "财务部 张三"}}, actor="manager")
+    sheet = [row[0] for row in load_workbook(io.BytesIO(Path(signed["path"]).read_bytes()))["看板快照"].iter_rows(values_only=True)]
+    assert "导出人：财务部 张三" in sheet
+    unsigned = normalize(_model(manager, saved, run))
+    assert "signed_by" not in unsigned
+    with pytest.raises(FoundryError, match="signed by must be text of at most 80"):
+        normalize({**_model(manager, saved, run), "signed_by": "张" * 81})
 
 
 def test_a_page_names_the_cards_left_off_it_and_the_files_come_from_the_desktop(board, tmp_path):

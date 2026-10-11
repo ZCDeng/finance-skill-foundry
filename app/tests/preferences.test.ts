@@ -21,7 +21,7 @@ beforeEach(() => { mocks.handlers.clear(); mocks.openPath.mockClear(); });
 describe('设置, kept beside the appearance', () => {
   it('starts with technical details off, and a missing, broken or foreign file reads as the defaults', () => {
     const dir = folder();
-    expect(readPreferences(dir)).toEqual({ technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {} });
+    expect(readPreferences(dir)).toEqual({ technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people: [], current_person: '' });
     writeFileSync(path.join(dir, 'preferences.json'), '{not json');
     expect(readPreferences(dir)).toEqual(DEFAULT_PREFERENCES);
     writeFileSync(path.join(dir, 'preferences.json'), JSON.stringify({ technical: 'yes', start: 'tasks', samples_read: ['practice', 'other'], extra: 1 }));
@@ -32,7 +32,7 @@ describe('设置, kept beside the appearance', () => {
     const dir = folder();
     expect(writePreferences(dir, { technical: true })).toEqual({ ...DEFAULT_PREFERENCES, technical: true });
     expect(writePreferences(dir, { start: 'workspace', samples_read: ['practice'] }))
-      .toEqual({ technical: true, brief_open: true, start: 'workspace', samples_read: ['practice'], skipped_steps: {} });
+      .toEqual({ technical: true, brief_open: true, start: 'workspace', samples_read: ['practice'], skipped_steps: {}, people: [], current_person: '' });
     expect(JSON.parse(readFileSync(path.join(dir, 'preferences.json'), 'utf8'))).toEqual(readPreferences(dir));
   });
 
@@ -57,6 +57,29 @@ describe('设置, kept beside the appearance', () => {
     expect(readPreferences(dir).skipped_steps).toEqual({ [task]: ['close'] });
     writeFileSync(path.join(dir, 'preferences.json'), JSON.stringify({ skipped_steps: { [task]: ['scope'] } }));
     expect(readPreferences(dir).skipped_steps).toEqual({});
+  });
+
+  it('keeps the people who use this computer and who is signing now, each name on one line and each id once', () => {
+    const dir = folder();
+    expect(DEFAULT_PREFERENCES.people).toEqual([]);
+    expect(DEFAULT_PREFERENCES.current_person).toBe('');
+    const zhang = { id: 'p1', name: '张三', role: 'manager' as const, signature: '财务部 张三' };
+    const li = { id: 'p2', name: '李四', role: 'reviewer' as const, signature: '李四' };
+    expect(preferencesPatchOf({ people: [zhang, li], current_person: 'p1' })).toEqual({ people: [zhang, li], current_person: 'p1' });
+    expect(preferencesPatchOf({ current_person: '' })).toEqual({ current_person: '' });
+    for (const bad of [
+      [{ ...zhang, role: 'admin' }], [{ ...zhang, name: '' }], [{ ...zhang, name: ' 张三' }], [{ ...zhang, signature: '张\n三' }],
+      [{ ...zhang, signature: '张'.repeat(81) }], [zhang, { ...li, id: 'p1' }], [{ ...zhang, password: '1' }], [{ id: 'p1', name: '张三', role: 'manager' }],
+      Array.from({ length: 21 }, (_, n) => ({ ...zhang, id: `p${n}` })), {},
+    ]) {
+      expect(() => preferencesPatchOf({ people: bad })).toThrow(/bad value for people/);
+    }
+    expect(() => preferencesPatchOf({ current_person: 'not an id' })).toThrow(/bad value for current_person/);
+    writePreferences(dir, { people: [zhang], current_person: 'p1' });
+    expect(readPreferences(dir)).toMatchObject({ people: [zhang], current_person: 'p1' });
+    // A list with one broken entry is not half kept: it reads as nobody, and every name is typed again.
+    writeFileSync(path.join(dir, 'preferences.json'), JSON.stringify({ people: [zhang, { ...li, role: 'owner' }], current_person: 'p1' }));
+    expect(readPreferences(dir)).toMatchObject({ people: [], current_person: 'p1' });
   });
 
   it('answers over IPC, says which version this is and where its data lives, and opens that folder', async () => {

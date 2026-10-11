@@ -17,9 +17,9 @@ export type PreferencesState = {
   set(patch: Partial<Preferences>): Promise<void>;
 };
 
-const AS_BEFORE: Preferences = { technical: true, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {} };
+const AS_BEFORE: Preferences = { technical: true, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people: [], current_person: '' };
 /** What a build that can keep the choices starts from until the saved file is read (electron/preferences.ts). */
-const DEFAULTS: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {} };
+const DEFAULTS: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people: [], current_person: '' };
 
 const PreferencesContext = createContext<PreferencesState>({ preferences: AS_BEFORE, available: false, loaded: true, set: async () => {} });
 
@@ -64,4 +64,13 @@ export function useTechnical(): boolean {
 /** Its children only while technical details are shown. */
 export function Technical({ children }: { children: ReactNode }) {
   return useTechnical() ? <>{children}</> : null;
+}
+
+/**
+ * The current person's 署名 (设置 › 使用者), filled in wherever a record is signed: a disposition, its review, a board
+ * card's 认可, the one-page board. '' when nobody is chosen, and the name is typed as before. It is who signed, not who may.
+ */
+export function useSigner(): string {
+  const { preferences } = useContext(PreferencesContext);
+  return preferences.people.find((person) => person.id === preferences.current_person)?.signature ?? '';
 }

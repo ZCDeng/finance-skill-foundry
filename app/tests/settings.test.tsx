@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Preferences, TaskRow } from '../src/bridge.js';
 import { PreferencesProvider } from '../src/components/Preferences.js';
@@ -12,7 +12,7 @@ afterEach(() => { cleanup(); delete (globalThis as { foundry?: unknown }).foundr
 
 /** A bridge that keeps preferences the way main does: a patch over what is saved. */
 function install(saved: Partial<Preferences> = {}) {
-  let preferences: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, ...saved };
+  let preferences: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people: [], current_person: '', ...saved };
   const api = {
     preferencesGet: vi.fn(async () => ({ ok: true, value: preferences })),
     preferencesSet: vi.fn(async (patch: Partial<Preferences>) => { preferences = { ...preferences, ...patch }; return { ok: true, value: preferences }; }),
@@ -112,4 +112,29 @@ it('keeps another kind of example open after one kind was read, and folds again 
   // Opened on one task, the note stays folded on another task of the same kind.
   rerender(banner({ ...practice, id: 't3' }));
   expect(screen.queryByText(/这是练习用的示例任务/)).toBeNull();
+});
+
+it('keeps the people on this computer, signs as the first one added, and says a 署名 is not a permission', async () => {
+  const api = install();
+  render(<PreferencesProvider><Settings onWorkspace={() => {}} /></PreferencesProvider>);
+  expect(await screen.findByText(/这是署名，不是权限/)).toBeTruthy();
+  const current = screen.getByLabelText('当前使用者') as HTMLSelectElement;
+  expect(current.disabled).toBe(true);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '添加使用者' })); });
+  const form = screen.getByRole('form', { name: '添加使用者' });
+  fireEvent.change(within(form).getByLabelText('姓名'), { target: { value: ' 张三 ' } });
+  fireEvent.change(within(form).getByLabelText('角色'), { target: { value: 'reviewer' } });
+  await act(async () => { fireEvent.click(within(form).getByRole('button', { name: '添加' })); });
+  const [patch] = api.preferencesSet.mock.calls.at(-1)!;
+  // No 署名 typed: it signs with the name.
+  expect(patch.people).toEqual([{ id: expect.stringMatching(/^[0-9a-f]{32}$/), name: '张三', role: 'reviewer', signature: '张三' }]);
+  expect(patch.current_person).toBe(patch.people![0].id);
+  expect(await screen.findByText('复核人 · 署名「张三」 · 当前使用者')).toBeTruthy();
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '改「张三」' })); });
+  const edit = screen.getByRole('form', { name: '改「张三」' });
+  fireEvent.change(within(edit).getByLabelText('署名'), { target: { value: '财务部 张三' } });
+  await act(async () => { fireEvent.click(within(edit).getByRole('button', { name: '保存' })); });
+  expect(api.preferencesSet).toHaveBeenLastCalledWith({ people: [{ ...patch.people![0], signature: '财务部 张三' }] });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '删除「张三」' })); });
+  expect(api.preferencesSet).toHaveBeenLastCalledWith({ people: [], current_person: '' });
 });

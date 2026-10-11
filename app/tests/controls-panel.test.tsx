@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Bridge } from '../src/bridge.js';
+import { PreferencesProvider } from '../src/components/Preferences.js';
 import { ControlsPanel } from '../src/views/analysis/ControlsPanel.js';
 import type { ControlList, ControlRow } from '../src/views/analysis/controls.js';
 
@@ -278,4 +279,38 @@ it('turns second review on from a labelled switch', async () => {
   expect(toggle.getAttribute('aria-checked')).toBe('false');
   fireEvent.click(screen.getByText('接受差异后需要第二人复核'));
   await waitFor(() => expect(calls).toHaveBeenCalledWith('t', 'finance-control-settings-save', { require_second_review: true }));
+});
+
+it('signs a disposition and offers the review with the current person\'s 署名, never as the reviewer of their own acceptance', async () => {
+  const people = [{ id: 'p1', name: '张三', role: 'manager' as const, signature: '财务部 张三' }];
+  const calls = mount((command) => command === 'finance-controls-list' ? listOf([broken]) : {});
+  const foundry = (globalThis as { foundry?: Partial<Bridge> }).foundry!;
+  Object.assign(foundry, {
+    preferencesGet: vi.fn(async () => ({ ok: true, value: { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people, current_person: 'p1' } })),
+    preferencesSet: vi.fn(),
+  });
+  const { unmount } = render(<PreferencesProvider><ControlsPanel taskId="t" /></PreferencesProvider>);
+  fireEvent.click(await screen.findByLabelText('接受差异并说明'));
+  fireEvent.change(screen.getByLabelText('说明'), { target: { value: '已知' } });
+  // Filled in, and still the manager's to change.
+  await waitFor(() => expect((screen.getByLabelText('你的姓名') as HTMLInputElement).value).toBe('财务部 张三'));
+  fireEvent.click(screen.getByRole('button', { name: '保存处置' }));
+  await waitFor(() => expect(calls).toHaveBeenCalledWith('t', 'finance-control-disposition-save', { control_id: 'c1', decision: 'waived', reason: '已知', decided_by_name: '财务部 张三' }));
+  unmount();
+
+  const waiting = (by: string): ControlRow => ({ ...broken, issue: { state: 'awaiting_review', blocking: true, disposition: { id: 'd1', decision: 'waived', reason: '已知', decided_by_name: by } } });
+  mount((command) => command === 'finance-controls-list' ? listOf([waiting('张会计')], true) : {});
+  Object.assign((globalThis as { foundry?: Partial<Bridge> }).foundry!, { preferencesGet: foundry.preferencesGet, preferencesSet: vi.fn() });
+  const second = render(<PreferencesProvider><ControlsPanel taskId="t" /></PreferencesProvider>);
+  expect(await screen.findByText(/处置人 张会计/)).toBeTruthy();
+  await waitFor(() => expect((screen.getByLabelText('复核人') as HTMLInputElement).value).toBe('财务部 张三'));
+  second.unmount();
+
+  mount((command) => command === 'finance-controls-list' ? listOf([waiting('财务部 张三')], true) : {});
+  Object.assign((globalThis as { foundry?: Partial<Bridge> }).foundry!, { preferencesGet: foundry.preferencesGet, preferencesSet: vi.fn() });
+  render(<PreferencesProvider><ControlsPanel taskId="t" /></PreferencesProvider>);
+  expect(await screen.findByText(/处置人 财务部 张三/)).toBeTruthy();
+  await waitFor(() => expect(foundry.preferencesGet).toHaveBeenCalledTimes(3));
+  await act(async () => {});
+  expect((screen.getByLabelText('复核人') as HTMLInputElement).value).toBe('');
 });

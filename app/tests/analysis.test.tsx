@@ -149,7 +149,7 @@ describe('every step: its purpose on top, 本期不做, 未经月结勾稽 and �
     blocks: [['scope', 'done'], ['source', 'done'], ['structure', 'done'], ['controls', 'blocked'], ['exceptions', 'done']]
       .map(([key, state]) => ({ key, label: key, state })) } as unknown as OverviewTask;
   function mountWithPreferences() {
-    let saved: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {} };
+    let saved: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people: [], current_person: '' };
     const preferencesSet = vi.fn(async (patch: Partial<Preferences>) => success(saved = { ...saved, ...patch }));
     mountBridge({ preferencesGet: vi.fn(async () => success(saved)), preferencesSet });
     render(<PreferencesProvider><Analysis {...props} embedded section="scope" progress={progress} /></PreferencesProvider>);
