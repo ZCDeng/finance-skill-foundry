@@ -56,6 +56,12 @@ export function isOperationsAnalysis(analysis: AnalysisRevision, runs: AnalysisR
     || runs.some((run) => run.analysis_id === analysis.id && isCollectionHealthRun(run));
 }
 
+/** The step a run's result is read on: 经营分析 for 回款健康, 财务分析 for everything else. */
+export function resultStep(run: AnalysisRun, analyses: AnalysisRevision[], runs: AnalysisRun[]): 'results' | 'operations' {
+  const analysis = analyses.find((row) => row.id === run.analysis_id);
+  return isCollectionHealthRun(run) || (analysis !== undefined && isOperationsAnalysis(analysis, runs)) ? 'operations' : 'results';
+}
+
 /** 回款健康 drawn by a script: shown on 经营分析, marked as not the engine's, and read by nothing else there. */
 export const isScriptDraft = (analysis: AnalysisRevision): boolean =>
   analysis.topic === 'collection_health' && analysis.engine !== 'finance';

@@ -37,7 +37,7 @@ const data: OverviewData = {
   ],
 };
 const noop = () => undefined;
-const props = { data, loading: false, error: '', fresh: false, recent: [], onRefresh: noop, onOpen: vi.fn(), onOpenStep: vi.fn(),
+const props = { data, loading: false, error: '', fresh: false, recent: [], onRefresh: noop, onOpen: vi.fn(), onOpenStep: vi.fn(), onOpenResult: vi.fn(),
   onNewQuestion: vi.fn(), onChecklist: vi.fn(), onGuide: vi.fn(), onLibrary: vi.fn() };
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); sessionStorage.clear(); delete (globalThis as unknown as { foundry?: Bridge }).foundry; });
@@ -209,7 +209,8 @@ describe('总览 reads the current task\'s own results', () => {
   const figure = (id: string, title: string, entity: string, state: 'accepted' | 'pinned' | 'explore') => ({ id, kind: 'figure', title, state, run_id: run.id,
     template: 'collection', note: null, proposed_by: 'manager', accepted: state === 'accepted' ? { run_id: run.id, at: '2026-10-10T09:00:00Z' } : null,
     select: { match: { entity, metric_key: 'collection_gap', scenario: '本期' }, column: 'value' } });
-  function mountReads(cards: object[] | null, preferences: Partial<Preferences> = {}) {
+  const riskLine = { key: 'risk', label: '风险', text: '大连风险最高。', parts: [{ text: '大连风险最高。' }] };
+  function mountReads(cards: object[] | null, preferences: Partial<Preferences> = {}, line: object = riskLine) {
     let saved: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people: [], current_person: '', tried: [], tips_open: true, ...preferences };
     const preferencesSet = vi.fn(async (patch: Partial<Preferences>) => ok(saved = { ...saved, ...patch }));
     const state = { task_id: august.id, datasets: [{ id: 'd'.repeat(32), name: '套表' }], analyses: [], runs: [run], drafts: [], methods: [] };
@@ -217,13 +218,13 @@ describe('总览 reads the current task\'s own results', () => {
       analysisState: vi.fn(async () => ok(state as unknown as AnalysisState)),
       financeCall: vi.fn(async (_task: string, command: string) => command === 'dashboard-read'
         ? ok({ dashboard: cards ? { id: 'v1', parent_id: null, created_at: '2026-10-10T00:00:00Z', cards } : null })
-        : command === 'month-brief' ? ok({ schema_version: 1, signature: 's', worded: null, lines: [{ key: 'risk', label: '风险', text: '大连风险最高。', parts: [{ text: '大连风险最高。' }] }] })
+        : command === 'month-brief' ? ok({ schema_version: 1, signature: 's', worded: null, lines: [line] })
           : ok({})) as unknown as Bridge['financeCall'],
       preferencesGet: vi.fn(async () => ok(saved)),
       preferencesSet,
     };
-    render(<PreferencesProvider><Overview {...props} /></PreferencesProvider>);
-    return preferencesSet;
+    const { rerender } = render(<PreferencesProvider><Overview {...props} /></PreferencesProvider>);
+    return { preferencesSet, rerender: (next: OverviewData) => rerender(<PreferencesProvider><Overview {...props} data={next} /></PreferencesProvider>) };
   }
 
   it('shows the board\'s accepted figures first, then the pinned, four at most, each opening to its source', async () => {
@@ -248,7 +249,7 @@ describe('总览 reads the current task\'s own results', () => {
   });
 
   it('offers three features not used yet, none a real task\'s records or the preferences show, and keeps it folded', async () => {
-    const preferencesSet = mountReads(null, { tried: ['source'] });
+    const { preferencesSet } = mountReads(null, { tried: ['source'] });
     const tries = (await screen.findByText('还没试过')).closest('details')!;
     expect(Array.from(tries.querySelectorAll('.fnd-cockpit__try-title')).map((node) => node.textContent)).toEqual(['回款情景', '倒推到目标', '收缴率下钻到账单']);
     fireEvent.click(within(tries).getByRole('button', { name: '试一下：回款情景' }));
@@ -256,6 +257,25 @@ describe('总览 reads the current task\'s own results', () => {
     tries.open = false;
     fireEvent(tries, new Event('toggle'));
     await waitFor(() => expect(preferencesSet).toHaveBeenCalledWith({ tips_open: false }));
+  });
+
+  it('opens the result a line of 本月三句话 names on the step that holds it, that run selected', async () => {
+    mountReads(null, {}, { key: 'risk', label: '风险', text: '3 个主体在生死线下。',
+      parts: [{ text: '3 个主体', ref: { kind: 'result', run_id: run.id } }, { text: '在生死线下。' }] });
+    fireEvent.click(await screen.findByRole('button', { name: '3 个主体，打开这次计算的结果' }));
+    // 回款健康 is read on 经营分析, not 财务分析.
+    expect(props.onOpenResult).toHaveBeenCalledWith(august, run, 'operations');
+  });
+
+  it('takes 本月三句话 and 关键数字 down, saying why, when reading the task again fails', async () => {
+    const { rerender } = mountReads([figure('c2', '集团距生死线', '集团', 'accepted')]);
+    expect(await screen.findByText('大连风险最高。')).toBeTruthy();
+    const api = (globalThis as unknown as { foundry: Bridge }).foundry;
+    vi.mocked(api.analysisState!).mockResolvedValueOnce({ ok: false, refused: false, message: '任务库读不了' });
+    rerender({ ...data });
+    expect((await screen.findByRole('alert')).textContent).toMatch(/本月三句话和关键数字没有读到：.*任务库读不了/);
+    expect(screen.queryByText('大连风险最高。')).toBeNull();
+    expect(screen.queryByRole('heading', { name: '关键数字' })).toBeNull();
   });
 });
 

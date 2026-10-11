@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, BookOpen, ChartNoAxesCombined, ClipboardList, FlaskConical, FolderOpen, MessageSquarePlus, RefreshCw, Repeat, Sparkles } from 'lucide-react';
 
-import { bridge, SNAPSHOT_FORMAT_WORDS, type AnalysisState, type GalleryRow, type Overview as OverviewData, type OverviewTask, type TaskRow, when } from '../bridge.js';
+import { bridge, SNAPSHOT_FORMAT_WORDS, type AnalysisRun, type AnalysisState, type GalleryRow, type Overview as OverviewData, type OverviewTask, type TaskRow, when } from '../bridge.js';
 import { Button } from '../components/ui/button.js';
 import { NativeSelect } from '../components/ui/native-select.js';
 import { DisclosureSummary } from '../components/Disclosure.js';
@@ -12,7 +12,9 @@ import { usePreferences } from '../components/Preferences.js';
 import { STEP_ICONS } from './analysis/StepNav.js';
 import { useDashboard } from './analysis/Dashboard.js';
 import { MonthBrief } from './analysis/MonthBrief.js';
-import { STEPS, STEP_WORDS, overviewStepStates, type Step, type StepState } from './analysis/steps.js';
+import { STEPS, STEP_WORDS, overviewStepStates, resultStep, type Step, type StepState } from './analysis/steps.js';
+import { errorText } from './analysis/glossary.js';
+import { unwrap } from './analysis/shared.js';
 import { Cockpit, currentRow, TaskName } from './cockpit/Cockpit.js';
 import { KeyFigures } from './cockpit/KeyFigures.js';
 import { TryCards } from './cockpit/TryCards.js';
@@ -47,6 +49,8 @@ export interface OverviewProps {
   onOpen(task: TaskRow, target: OverviewTarget): void;
   /** Opens a task on one of its six steps. */
   onOpenStep(task: TaskRow, step: Step): void;
+  /** Opens a task on the step that holds a run's result, that run selected. */
+  onOpenResult(task: TaskRow, run: AnalysisRun, step: 'results' | 'operations'): void;
   onNewQuestion(): void;
   /** 做一次经营分析: a new task, opened on 经营分析. Absent where tasks cannot be made. */
   onOperations?(): void;
@@ -91,7 +95,7 @@ function statesOf(row: OverviewTask, skipped: readonly Step[] = []): Record<Step
  * items (or a 收费明细 column or 口径 waiting on the manager), a figure is the board's card. Nothing adds figures across
  * tasks: two tasks' periods, organisations and 口径 differ, and a total of them would be a number no workbook holds.
  */
-export function Overview({ data, loading, error, fresh, recent, onRefresh, onOpen, onOpenStep, onNewQuestion, onOperations, onSample, onChecklist, onGuide, onLibrary, firstLook }: OverviewProps) {
+export function Overview({ data, loading, error, fresh, recent, onRefresh, onOpen, onOpenStep, onOpenResult, onNewQuestion, onOperations, onSample, onChecklist, onGuide, onLibrary, firstLook }: OverviewProps) {
   const rows = data?.tasks ?? [];
   // No active task is not the same as none at all: everything may be archived. Only the second is a first run.
   const empty = data !== null && rows.length === 0 && fresh;
@@ -123,7 +127,7 @@ export function Overview({ data, loading, error, fresh, recent, onRefresh, onOpe
         <Recomputed rows={rows} onOpen={onOpen} />
         {data === null && loading ? <Loading label="正在读取各任务的月结状态…"><SkeletonRows rows={4} /></Loading> : null}
         {current ? <CurrentTask key={current.task.id} row={current} rows={rows} data={data} states={statesOf(current, preferences.skipped_steps[current.task.id])}
-          onPick={pick} onOpen={onOpen} onOpenStep={onOpenStep} /> : null}
+          onPick={pick} onOpen={onOpen} onOpenStep={onOpenStep} onOpenResult={onOpenResult} /> : null}
         {others.length || recent.length ? <div className="fnd-overview__grid">
           {others.length ? <Others rows={others} onPick={pick} /> : null}
           {recent.length ? <Recent rows={recent} onLibrary={onLibrary} /> : null}
@@ -134,27 +138,35 @@ export function Overview({ data, loading, error, fresh, recent, onRefresh, onOpe
   );
 }
 
-/** One task's analysis state, read again whenever 总览 is; the last answer stays up while the next is read. */
-function useTaskView(taskId: string, again: unknown): AnalysisState | null {
+/**
+ * One task's analysis state, read again whenever 总览 is; the last answer stays up while the next is read. A read
+ * that fails takes it down and says so: 本月三句话 and 关键数字 would otherwise stand beside a refreshed main card.
+ */
+function useTaskView(taskId: string, again: unknown): { view: AnalysisState | null; problem: string } {
   const [view, setView] = useState<AnalysisState | null>(null);
+  const [problem, setProblem] = useState('');
   useEffect(() => {
     const api = bridge();
     if (!api?.analysisState) return;
     let live = true;
-    void api.analysisState(taskId).then((answer) => { if (live && answer.ok) setView(answer.value); }).catch(() => undefined);
+    const fail = (text: string) => { if (live) { setView(null); setProblem(text); } };
+    void api.analysisState(taskId).then(unwrap).then((value) => {
+      if (live) { setView(value); setProblem(''); }
+    }, (failure: unknown) => fail(errorText(failure)));
     return () => { live = false; };
   }, [taskId, again]);
-  return view;
+  return { view, problem };
 }
 
 /** The main card and what reads the task's own results under it: 本月三句话, 关键数字 and 还没试过. */
-function CurrentTask({ row, rows, data, states, onPick, onOpen, onOpenStep }: {
+function CurrentTask({ row, rows, data, states, onPick, onOpen, onOpenStep, onOpenResult }: {
   row: OverviewTask; rows: OverviewTask[]; data: OverviewData | null; states: Record<Step, StepState> | null;
   onPick(taskId: string): void; onOpen(task: TaskRow, target: OverviewTarget): void; onOpenStep(task: TaskRow, step: Step): void;
+  onOpenResult(task: TaskRow, run: AnalysisRun, step: 'results' | 'operations'): void;
 }) {
   const id = useId();
   const { task } = row;
-  const view = useTaskView(task.id, data);
+  const { view, problem } = useTaskView(task.id, data);
   const board = useDashboard(task.id);
   // 总览 read again (刷新, a change in the workspace): the board is read again with it, not only on the first look.
   const seen = useRef(data);
@@ -167,10 +179,11 @@ function CurrentTask({ row, rows, data, states, onPick, onOpen, onOpenStep }: {
   const reads = Boolean(bridge()?.financeCall && bridge()?.analysisState);
   return <>
     <Cockpit row={row} rows={rows} states={states} onPick={onPick} onOpen={(_, target) => open(target)} onOpenStep={onOpenStep} />
+    {problem ? <p role="alert" className="analysis-message analysis-message--error">本月三句话和关键数字没有读到：{problem}</p> : null}
     {view && view.datasets.length > 0 && bridge()?.financeCall ? <MonthBrief taskId={task.id} board={board.dashboard}
       refreshKey={`${view.datasets.length}:${view.runs.length}:${view.drafts.length}:${board.dashboard?.id ?? ''}`}
       runs={view.runs} analyses={view.analyses} datasets={view.datasets} superseded={view.superseded_datasets ?? []}
-      onOpen={open} onOpenResult={() => open('results')} /> : null}
+      onOpen={open} onOpenResult={(run) => onOpenResult(task, run, resultStep(run, view.analyses, view.runs))} /> : null}
     {reads && board.loaded && view ? <Section id={`${id}-figures`} title="关键数字" className="fnd-overview__card"
       note="这个任务看板上经理认可或钉住的数，点数字看来源；不跨任务相加。">
       <KeyFigures board={board.dashboard} view={view} onBoard={() => open('dashboard')} />

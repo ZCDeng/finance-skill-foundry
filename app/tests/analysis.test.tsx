@@ -25,6 +25,7 @@ import { DraftBody } from '../src/views/analysis/DraftBody.js';
 import { documentFromMarkdown, documentToMarkdown } from '../electron/reports/format.js';
 import type { Answer, AnalysisDraft, AnalysisRevision, AnalysisRun, AnalysisState, Bridge, DatasetSnapshot, HarnessCardAction, OverviewTask, Preferences, TaskRow } from '../src/bridge.js';
 import { acrossElements } from './text-match.js';
+import { writeCopy } from '../src/views/analysis/workingCopy.js';
 import healthFixture from './fixtures/collection-health-run.json';
 
 const task: TaskRow = { id: 'a'.repeat(32), title: '华东经营分析', period: null, skill_id: null, created_at: '2026-09-05T00:00:00Z', windows: 0 };
@@ -1089,6 +1090,18 @@ ${canonicalAppendix} 已改写`;
     await screen.findByText('900,719,925,474,099.99');
     await waitFor(() => expect(tell).toBeDefined());
     act(() => tell!({ action: 'open', taskId: task.id, kind: 'analysis', runId: earlier.id, analysisId: analysis.id }));
+    expect(await screen.findByText('900,719,925,474,000.09')).toBeTruthy();
+    expect(screen.queryByText('900,719,925,474,099.99')).toBeNull();
+  });
+
+  it('opens the run a line of 本月三句话 on 总览 names, the task already open on another run', async () => {
+    const earlier = { ...run, id: '9'.repeat(32), result: { ...run.result!, rows: [{ profit: '900719925474000.09' }] } };
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [earlier, run] }) });
+    const { rerender } = render(<Analysis {...props} embedded section="results" />);
+    await screen.findByText('900,719,925,474,099.99');
+    // 总览 keeps the run for the task before asking for it, as App does.
+    writeCopy(`${task.id}:run`, earlier.id);
+    rerender(<Analysis {...props} embedded section="results" runRequest={{ count: 1, taskId: task.id, runId: earlier.id, analysisId: analysis.id }} />);
     expect(await screen.findByText('900,719,925,474,000.09')).toBeTruthy();
     expect(screen.queryByText('900,719,925,474,099.99')).toBeNull();
   });
