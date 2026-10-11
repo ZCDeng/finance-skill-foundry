@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, Check, Download, LayoutDashboard, Pin, Presentation, RefreshCw, X } from 'lucide-react';
 import { bridge, when, type Answer, type AnalysisRevision, type AnalysisRun, type DatasetSnapshot } from '../../bridge.js';
-import { useSigner } from '../../components/Preferences.js';
+import { useMarkTried, useSigner } from '../../components/Preferences.js';
 import { Button } from '../../components/ui/button.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '../../components/ui/empty.js';
@@ -213,6 +213,7 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
   const [error, setError] = useState('');
   const [confirmAll, setConfirmAll] = useState(false);
   const [presenting, setPresenting] = useState(false);
+  const tried = useMarkTried();
   const replaced = useMemo(() => new Set(superseded), [superseded]);
   const cards = dashboard?.cards ?? [];
   const board = cards.filter((card) => card.state !== 'explore');
@@ -298,7 +299,7 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
         {(!readOnly || shown.length > 0) && <div className="dashboard__tools">
           <Button type="button" variant="outline" disabled={busy || !shown.length} title={shown.length ? undefined : '先认可要汇报的卡'}
             data-spotlight={step === 'export' && !(!readOnly && canExport) ? '' : undefined}
-            onClick={() => setPresenting(true)}><Presentation size={14} strokeWidth={1.5} aria-hidden />汇报模式</Button>
+            onClick={() => { setPresenting(true); tried('present'); }}><Presentation size={14} strokeWidth={1.5} aria-hidden />汇报模式</Button>
           {!readOnly && waiting.length > 0 && <Button type="button" variant="outline" disabled={busy} onClick={() => setConfirmAll(true)}>
             <Check size={14} strokeWidth={1.5} aria-hidden />{`全部认可（${waiting.length} 张）`}</Button>}
           {!readOnly && movable.length > 0 && <Button type="button" variant="outline" disabled={busy} onClick={moveAll}>

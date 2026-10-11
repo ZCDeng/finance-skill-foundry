@@ -35,6 +35,11 @@ def test_a_task_with_no_files_says_so_and_points_at_the_materials_page(tmp_path,
     assert result["todo_count"] == len(row["todo"])
     # What the steps after 勾稽 read (steps.ts): nothing yet.
     assert row["work"] == {"runs": [], "cards": [], "drafts": 0, "datasets": 0}
+    # Each block keeps its rows for the step's line on 总览.
+    scope = next(block for block in row["blocks"] if block["key"] == "scope")
+    assert {"text": "期间未确认", "blocking": True, "attention": False, "target": "scope"} in scope["items"]
+    assert row["health"] is None and row["tried"] == []
+    assert row["active_at"] == row["task"]["created_at"]
 
 
 def test_the_work_digest_carries_what_the_step_rules_read_of_each_run():
@@ -98,8 +103,10 @@ def test_billing_details_and_caliber_waiting_on_the_manager_are_to_dos(tmp_path,
     billing = BillingDetailStore(task, actor="manager")
     source = _detail(tmp_path, "receivable", "应收", ["应收单号,房产编号,收费项目,账期,应收净额", "B1,P1,物业费,2026-08,100"])
     billing.add("receivable", [source], name="应收明细")
-    todo = next(row for row in _overview(store.var_root, capsys)["tasks"])["todo"]
-    assert {"kind": "collection", "text": "收费明细「应收明细」的列还没确认", "target": "billing"} in todo
+    row = next(row for row in _overview(store.var_root, capsys)["tasks"])
+    assert {"kind": "collection", "text": "收费明细「应收明细」的列还没确认", "target": "billing"} in row["todo"]
+    # A 收费明细 added: 收缴率 down to the bill is no longer one to try.
+    assert row["tried"] == ["billing"]
 
     BillingDetailStore(task, actor="assistant").caliber_propose({"exclude_related": True}, "关联方不计")
     todo = next(row for row in _overview(store.var_root, capsys)["tasks"])["todo"]
@@ -111,6 +118,41 @@ def test_no_billing_details_no_collection_to_dos(tmp_path, capsys):
     store.create(title="无明细", period="2026-08")
     [row] = _overview(store.var_root, capsys)["tasks"]
     assert not [item for item in row["todo"] if item["kind"] == "collection"]
+
+
+def test_the_cockpit_reads_the_radar_the_features_used_and_each_run_s_question(tmp_path, capsys):
+    from test_dashboards import _board, _gap, _scenario
+
+    manager, run, _ = _board(tmp_path)
+    [row] = _overview(tmp_path / "var", capsys)["tasks"]
+    # 回款健康's 风险雷达, by light: 经营分析's line. Nothing on the board yet, so nothing tried.
+    assert row["health"] == {"run_id": run["id"], "levels": {"green": 1}}
+    assert row["tried"] == []
+    [digest] = row["work"]["runs"]
+    assert digest["scenario_kind"] == "collection_health" and digest["analysis_id"] == run["analysis_id"] and digest["label"]
+
+    manager.dashboard_save({"parent_id": None, "cards": [_gap(run), _scenario(run)]})
+    [row] = _overview(tmp_path / "var", capsys)["tasks"]
+    assert row["tried"] == ["scenario"]
+    # 倒推 and 敏感性表 count as one: working back from a target.
+    board = manager.dashboard_read({})["dashboard"]
+    goal = {**_scenario(run), "kind": "goal", "title": "倒推", "select": {"match": {"entity": "集团", "scenario": "本期"}, "goal": "collection"}}
+    manager.dashboard_save({"parent_id": board["id"], "cards": [*board["cards"], goal]})
+    [row] = _overview(tmp_path / "var", capsys)["tasks"]
+    assert row["tried"] == ["scenario", "goal"]
+
+
+def test_a_task_was_last_worked_on_when_its_newest_record_or_conversation_was(tmp_path):
+    from foundry.overview import _active_at
+
+    task = TaskStore(tmp_path / "var").create(title="8 月", period="2026-08")
+    row = {"created_at": "2026-10-01T08:00:00Z", "restored_at": None}
+    assert _active_at(task, row, ([], [])) == "2026-10-01T08:00:00Z"
+    runs = [{"created_at": "2026-10-03T08:00:00Z"}, {"created_at": "2026-10-05T08:00:00Z"}]
+    assert _active_at(task, row, (runs, [{"created_at": "2026-10-04T08:00:00Z"}])) == "2026-10-05T08:00:00Z"
+    # A conversation opened after the last record counts too.
+    task.record_session("s1", role="analysis")
+    assert _active_at(task, row, (runs,)) == task.sessions()[0]["opened_at"]
 
 
 def test_library_lists_drafts_of_every_task_but_the_trashed(tmp_path, capsys):

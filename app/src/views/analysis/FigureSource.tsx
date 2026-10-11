@@ -7,7 +7,7 @@ import { DisclosureSummary } from '../../components/Disclosure.js';
 import { askWith } from '../guide/ask.js';
 import { askAboutFigure, sourceText, type FigureSourceInfo } from './figureSourceInfo.js';
 import { PinButton } from './PinButton.js';
-import { useTechnical } from '../../components/Preferences.js';
+import { useMarkTried, useTechnical } from '../../components/Preferences.js';
 import type { CardDraft } from './dashboardModel.js';
 import './FigureSource.css';
 
@@ -22,11 +22,12 @@ export function FigureSource({ text, info, hang = false, exact = false, pin }: {
 }) {
   const [copied, setCopied] = useState(false);
   const technical = useTechnical();
+  const tried = useMarkTried();
   if (!info || text.trim() === '' || text === '—') return <Figure text={text} hang={hang} exact={exact} />;
   const copy = () => {
     void navigator.clipboard?.writeText(sourceText(info)).then(() => setCopied(true), () => setCopied(false));
   };
-  return <Popover onOpenChange={(open) => { if (!open) setCopied(false); }}>
+  return <Popover onOpenChange={(open) => { if (open) tried('source'); else setCopied(false); }}>
     <PopoverTrigger asChild>
       <button type="button" className="fnd-figure-source" data-stale={info.stale || undefined}
         aria-label={`${info.metric}${info.part} ${info.value}${info.stale ? '（资料已更新，待重算）' : ''}，查看来源`}>

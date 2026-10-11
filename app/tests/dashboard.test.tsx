@@ -178,7 +178,7 @@ describe('the board', () => {
     const backend = boardBackend([card({})]);
     const people = [{ id: 'p1', name: '张三', role: 'manager' as const, signature: '财务部 张三' }];
     Object.assign((globalThis as { foundry?: Partial<Bridge> }).foundry!, {
-      preferencesGet: vi.fn(async () => ({ ok: true, value: { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people, current_person: 'p1' } })),
+      preferencesGet: vi.fn(async () => ({ ok: true, value: { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people, current_person: 'p1', tried: [], tips_open: true } })),
       preferencesSet: vi.fn(),
     });
     render(<PreferencesProvider><Board /></PreferencesProvider>);
@@ -512,6 +512,31 @@ describe('the 回款情景 card and asking the assistant for cards', () => {
     const deck = await screen.findByRole('dialog', { name: '华宸物业 9 月月结 · 2026 年 9 月' });
     expect(within(deck).getAllByRole('button', { name: /^第 \d 张：/ }).map((dot) => dot.getAttribute('aria-label')))
       .toEqual(['第 1 张：风险雷达得分（从高到低）', '第 2 张：回款情景：收缴率变了会怎样']);
+  });
+
+  it('keeps 汇报模式 and a figure\'s source as tried, once, for 总览\'s 还没试过', async () => {
+    boardBackend([card({ id: 'c1', run_id: run.id, state: 'accepted', accepted: { run_id: run.id, at: '2026-10-10T09:00:00Z' } })]);
+    let saved = { technical: false, brief_open: true, start: 'overview' as const, samples_read: [], skipped_steps: {}, people: [], current_person: '', tried: [] as string[], tips_open: true };
+    const preferencesSet = vi.fn(async (patch: Partial<typeof saved>) => ({ ok: true as const, value: saved = { ...saved, ...patch } }));
+    Object.assign((globalThis as { foundry?: Partial<Bridge> }).foundry!, { preferencesGet: vi.fn(async () => ({ ok: true, value: saved })), preferencesSet });
+    function Board() {
+      const state = useDashboard('t');
+      return <DashboardView task={{ id: 't', title: '华宸物业 9 月月结', period: '2026 年 9 月' }} state={state} runs={[run]} analyses={[]} datasets={[]} readOnly={false} />;
+    }
+    render(<PreferencesProvider><Board /></PreferencesProvider>);
+    const gap = await screen.findByRole('article', { name: '距生死线（本年账单收缴率）' });
+    await act(async () => {});
+    fireEvent.click(within(gap).getByRole('button', { name: /查看来源/ }));
+    await waitFor(() => expect(preferencesSet).toHaveBeenLastCalledWith({ tried: ['source'] }));
+    fireEvent.keyDown(await screen.findByRole('dialog', { name: /的来源$/ }), { key: 'Escape' });
+    await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: '汇报模式' }));
+    await waitFor(() => expect(preferencesSet).toHaveBeenLastCalledWith({ tried: ['source', 'present'] }));
+    fireEvent.click(await screen.findByRole('button', { name: '退出汇报' }));
+    await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: '汇报模式' }));
+    fireEvent.click(await screen.findByRole('button', { name: '退出汇报' }));
+    expect(preferencesSet).toHaveBeenCalledTimes(2);
   });
 
   it('walks 60 秒看看它能做什么 over the board: a figure\'s source, the 回款情景 card, then the one-page export', async () => {

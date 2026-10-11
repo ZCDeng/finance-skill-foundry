@@ -21,7 +21,7 @@ beforeEach(() => { mocks.handlers.clear(); mocks.openPath.mockClear(); });
 describe('设置, kept beside the appearance', () => {
   it('starts with technical details off, and a missing, broken or foreign file reads as the defaults', () => {
     const dir = folder();
-    expect(readPreferences(dir)).toEqual({ technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people: [], current_person: '' });
+    expect(readPreferences(dir)).toEqual({ technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people: [], current_person: '', tried: [], tips_open: true });
     writeFileSync(path.join(dir, 'preferences.json'), '{not json');
     expect(readPreferences(dir)).toEqual(DEFAULT_PREFERENCES);
     writeFileSync(path.join(dir, 'preferences.json'), JSON.stringify({ technical: 'yes', start: 'tasks', samples_read: ['practice', 'other'], extra: 1 }));
@@ -32,7 +32,7 @@ describe('设置, kept beside the appearance', () => {
     const dir = folder();
     expect(writePreferences(dir, { technical: true })).toEqual({ ...DEFAULT_PREFERENCES, technical: true });
     expect(writePreferences(dir, { start: 'workspace', samples_read: ['practice'] }))
-      .toEqual({ technical: true, brief_open: true, start: 'workspace', samples_read: ['practice'], skipped_steps: {}, people: [], current_person: '' });
+      .toEqual({ technical: true, brief_open: true, start: 'workspace', samples_read: ['practice'], skipped_steps: {}, people: [], current_person: '', tried: [], tips_open: true });
     expect(JSON.parse(readFileSync(path.join(dir, 'preferences.json'), 'utf8'))).toEqual(readPreferences(dir));
   });
 
@@ -57,6 +57,20 @@ describe('设置, kept beside the appearance', () => {
     expect(readPreferences(dir).skipped_steps).toEqual({ [task]: ['close'] });
     writeFileSync(path.join(dir, 'preferences.json'), JSON.stringify({ skipped_steps: { [task]: ['scope'] } }));
     expect(readPreferences(dir).skipped_steps).toEqual({});
+  });
+
+  it('keeps the features used that no task records, each once, and whether 还没试过 is open', () => {
+    const dir = folder();
+    expect(preferencesPatchOf({ tried: ['present', 'source'] })).toEqual({ tried: ['present', 'source'] });
+    expect(preferencesPatchOf({ tips_open: false })).toEqual({ tips_open: false });
+    for (const bad of [['present', 'present'], ['teleport'], 'present', {}]) {
+      expect(() => preferencesPatchOf({ tried: bad })).toThrow(/bad value for tried/);
+    }
+    expect(() => preferencesPatchOf({ tips_open: 'no' })).toThrow(/bad value for tips_open/);
+    writePreferences(dir, { tried: ['source'], tips_open: false });
+    expect(readPreferences(dir)).toMatchObject({ tried: ['source'], tips_open: false });
+    writeFileSync(path.join(dir, 'preferences.json'), JSON.stringify({ tried: ['source', 'nope'] }));
+    expect(readPreferences(dir).tried).toEqual([]);
   });
 
   it('keeps the people who use this computer and who is signing now, each name on one line and each id once', () => {

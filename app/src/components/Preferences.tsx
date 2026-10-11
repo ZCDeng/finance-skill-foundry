@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { bridge, type Preferences } from '../bridge.js';
+import { bridge, type Feature, type Preferences } from '../bridge.js';
 
 /**
  * 设置's app-wide choices, read once at the shell and handed down. Technical details (ids, digests, scripts, raw
@@ -17,9 +17,13 @@ export type PreferencesState = {
   set(patch: Partial<Preferences>): Promise<void>;
 };
 
-const AS_BEFORE: Preferences = { technical: true, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people: [], current_person: '' };
+const AS_BEFORE: Preferences = {
+  technical: true, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people: [], current_person: '', tried: [], tips_open: true,
+};
 /** What a build that can keep the choices starts from until the saved file is read (electron/preferences.ts). */
-const DEFAULTS: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people: [], current_person: '' };
+const DEFAULTS: Preferences = {
+  technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people: [], current_person: '', tried: [], tips_open: true,
+};
 
 const PreferencesContext = createContext<PreferencesState>({ preferences: AS_BEFORE, available: false, loaded: true, set: async () => {} });
 
@@ -73,4 +77,16 @@ export function Technical({ children }: { children: ReactNode }) {
 export function useSigner(): string {
   const { preferences } = useContext(PreferencesContext);
   return preferences.people.find((person) => person.id === preferences.current_person)?.signature ?? '';
+}
+
+/**
+ * Marks a feature used that no task records (点一个数看来源, 汇报模式), once: 总览's 还没试过 stops offering it. Where the
+ * choice cannot be kept, or it is already marked, nothing is written.
+ */
+export function useMarkTried(): (feature: Feature) => void {
+  const { preferences, available, loaded, set } = useContext(PreferencesContext);
+  return useCallback((feature: Feature) => {
+    if (!available || !loaded || preferences.tried.includes(feature)) return;
+    void set({ tried: [...preferences.tried, feature] }).catch(() => undefined);
+  }, [available, loaded, preferences.tried, set]);
 }

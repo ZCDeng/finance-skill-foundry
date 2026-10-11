@@ -290,22 +290,46 @@ export interface OverviewRecomputed {
 export interface OverviewTask {
   task: TaskRow;
   headline?: { state: string; text: string; detail?: string };
-  blocks?: { key: string; label: string; state: 'done' | 'attention' | 'blocked' | 'not_started' }[];
+  blocks?: { key: string; label: string; state: 'done' | 'attention' | 'blocked' | 'not_started'; items?: OverviewBlockItem[] }[];
   conclusion?: { level: string; text: string };
   todo: OverviewTodo[];
   /** The board's cards last run again on newer files or carried from another task, with what changed. */
   dashboard?: { recomputed: OverviewRecomputed[] };
   /** What the steps after 勾稽 read of the task (overview.py _step_work), so 总览 places them as the task's steps do. */
   work?: OverviewWork;
+  /** The newest 回款健康's 风险雷达, counted by light (red, orange, yellow, green); null before one. */
+  health?: { run_id: string; levels: Partial<Record<'red' | 'orange' | 'yellow' | 'green', number>> } | null;
+  /** The features this task's records show were used (overview.py FEATURES). */
+  tried?: Feature[];
+  /** When the task was last worked on: 总览 opens on the newest. */
+  active_at?: string;
   /** The example reference task is still being built. */
   building?: boolean;
   /** This task could not be read; the others still are. */
   error?: string;
 }
 
+/** One row of a month-close block, as the 月结 page lists it. */
+export interface OverviewBlockItem {
+  text: string;
+  blocking: boolean;
+  attention?: boolean;
+  target?: string;
+  /** 范围: the confirmed values by key, so the period can be written in words. */
+  scope?: Record<string, string>;
+}
+
+/**
+ * What 还没试过 on 总览 points at: 点一个数看来源, 回款情景, 倒推, 收缴率下钻到账单 (a 收费明细), 汇报模式, 导出一页纸, 下月自动重算.
+ * A task's records show most of them; 点一个数看来源 and 汇报模式 leave none, and preferences keep those.
+ */
+export type Feature = import('../electron/preferences').Feature;
+
 /** Each run as much as the step rules read of it, the board's cards, the drafts and files counted. */
 export interface OverviewWork {
-  runs: { execution_status: string; engine?: string | null; role: string; columns: string[]; rows: boolean; outputs: boolean; scenario_kind?: string | null }[];
+  runs: { execution_status: string; engine?: string | null; role: string; columns: string[]; rows: boolean; outputs: boolean; scenario_kind?: string | null;
+    /** The version it ran for, and the question that version answers: the step's line on 总览 names them. */
+    analysis_id?: string | null; label?: string }[];
   cards: { state?: string; kind?: string }[];
   drafts: number;
   datasets: number;
