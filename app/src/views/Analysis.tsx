@@ -636,7 +636,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
             })} />
           {/* A result kept as a chart goes into a draft, so it is archived here, beside the drafts. */}
           {bridge()?.financeCall && view.runs.some((run) => run.execution_status === 'succeeded' || run.execution_status === 'success')
-            ? <FinanceChartPanel taskId={task.id} runs={view.runs} busy={busy} onRefresh={() => refresh(task.id)} /> : null}
+            ? <FinanceChartPanel taskId={task.id} runs={view.runs} busy={busy || Boolean(financeRunning[task.id])} onRefresh={() => refresh(task.id)} /> : null}
         </>}
         {view && place === 'methods' && <Methods state={view} busy={busy} onApply={(methodId, bindings, parameters) => void perform(async (taskId) => {
             const api = bridge(); if (!api?.analysisMethodApply) throw new Error('此版本暂不支持复用方法。');

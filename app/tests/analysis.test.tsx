@@ -3261,6 +3261,33 @@ ${canonicalAppendix} 已改写`;
     expect(financeCall.mock.calls.filter(([, command]) => command === 'run-metric')).toEqual([]);
   });
 
+  it('keeps 归档当前结果图 locked while a calculation started on 财务分析 is still running', async () => {
+    const context = { ...object, id: '4'.repeat(32), name: '八月经营口径', bindings: { actual: source.id },
+      scopes: { actual: { ledger: '总账', organization: '华东', period: '2026-08', currency: 'CNY', unit: '元', scenario: 'actual' } } };
+    const financeRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: context.id };
+    const gate = deferred<Answer<Record<string, unknown>>>();
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'list-finance-context') return success({ task_id: task.id, datasets: [source], contexts: [context], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['metrics'] });
+      if (command === 'run-metric') return gate.promise;
+      if (command === 'finance-adjustment-list') return success({ adjustments: [] });
+      if (command === 'chart-deliverable-list') return success({ charts: [] });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, analyses: [], runs: [financeRun], drafts: [] }), financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    // A result is already there, so the settings are folded; the rerun is inside them.
+    await waitFor(() => openFinanceSettings());
+    fireEvent.click(await screen.findByRole('button', { name: '按已保存范围重算损益表' }));
+    await screen.findByText('正在计算损益表…');
+    // The chart archived now would be the previous result's, not the one being calculated.
+    openTab(/文稿/);
+    await screen.findByRole('group', { name: '归档图' });
+    expect((screen.getByRole('button', { name: '归档当前结果图' }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => gate.resolve(success({ ...financeRun })));
+    await waitFor(() => expect((screen.getByRole('button', { name: '归档当前结果图' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(financeCall.mock.calls.filter(([, command]) => command === 'chart-deliverable-save')).toEqual([]);
+  });
+
   it('records a workbook circle-select as an invoice-basis revision', async () => {
     const context = { ...object, id: '4'.repeat(32), name: '八月经营口径', bindings: { actual: source.id } };
     const workbook = { ...source, id: '7'.repeat(32), source_name: 'plan.xlsx', name: '预算工作簿', metadata: { source_file: 'source.xlsx' } };
