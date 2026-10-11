@@ -22,7 +22,7 @@ function toggle(open: boolean) {
 
 it('draws one section heading with its note below and the fold under it', () => {
   render(<Harness />);
-  const heading = screen.getByRole('heading', { name: '设置与高级', level: 3 });
+  const heading = screen.getByRole('heading', { name: '自己动手算', level: 3 });
   expect(heading.nextElementSibling?.textContent).toBe('分区说明');
   expect(summary().textContent).toBe('范围与计算 · 入口说明');
   expect(screen.queryByRole('region', { name: '范围与计算' })).toBeNull();

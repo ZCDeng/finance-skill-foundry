@@ -149,7 +149,8 @@ describe('section 7 manager-facing scope copy', () => {
     </>);
 
     expect(await screen.findByText(/情景 累计实际/)).toBeTruthy();
-    expect(await screen.findByText(/每份文件读到的范围和时效在它那一行/)).toBeTruthy();
+    // Where each file's scope went is the guide's to say, one 「?」 away.
+    expect(await screen.findByRole('button', { name: '使用指南：资料时效与证据标签' })).toBeTruthy();
     expect(screen.getByText(/范围没声明齐/)).toBeTruthy();
     // The file's own scope, opened with its content in the file list.
     render(<FileReadinessFacts row={{ dataset_id: 'dataset-1', name: '月结套表', missing_fields: ['scenario'], can_run: [], blocked: [],

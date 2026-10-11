@@ -27,6 +27,7 @@ import { BillingPanel } from './analysis/BillingPanel.js';
 import { WorkbookPanel } from './analysis/WorkbookPanel.js';
 import { RollforwardPanel } from './analysis/RollforwardPanel.js';
 import { FinanceWorkbench, type FinanceOutcome, type ScopeRequest } from './analysis/FinanceWorkbench.js';
+import { FinanceChartPanel } from './analysis/FinanceChartPanel.js';
 import { SettingsGroup, SettingsPanel, useSettingsPanel } from './analysis/SettingsPanel.js';
 import { AnalysisEditor, type AnalysisEdit } from './analysis/AnalysisEditor.js';
 import { DraftEditor, type DraftEdit } from './analysis/DraftEditor.js';
@@ -34,10 +35,10 @@ import { Methods } from './analysis/Methods.js';
 import { unwrap, errorText } from './analysis/shared.js';
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '../components/ui/empty.js';
 import { DisclosureSummary } from '../components/Disclosure.js';
-import { Technical } from '../components/Preferences.js';
+import { Technical, usePreferences } from '../components/Preferences.js';
 import { Loading, SkeletonCards, SkeletonRows } from '../components/Loading.js';
-import { ReportNav, StepNav } from './analysis/StepNav.js';
-import { isOperationsAnalysis, isReportView, sectionOf, stepOf, stepStates, type AnalysisSection, type ReportView } from './analysis/steps.js';
+import { ReportNav, StepIntro, StepNav, StepNext } from './analysis/StepNav.js';
+import { isOperationsAnalysis, isReportView, isSkippable, nextStep, sectionOf, stepOf, stepStates, type AnalysisSection, type ReportView, type SkippableStep } from './analysis/steps.js';
 import { isCollectionHealthRun } from './analysis/CollectionHealthView.js';
 
 type Selection = { analysis?: string; draft?: string };
@@ -387,7 +388,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         const { [task.id]: _cleared, ...rest } = current;
         return rest;
       })}
-      onRefresh={() => refresh(task.id)}>{(close) => analysisDefinition(close)}</FinanceWorkbench>
+      onRefresh={() => refresh(task.id)} onScope={() => choose('scope')}>{(close) => analysisDefinition(close)}</FinanceWorkbench>
     : null;
   /** The snapshot a result's 依据 opened, under the result. */
   const sourcePreview = dataset ? <section aria-label="依据资料预览"><div className="analysis-section-heading"><h3>依据资料</h3>
@@ -426,8 +427,19 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         }) as Answer<FinanceDrilldown>);
       }} />;
   const reportCounts = { dashboard: board.dashboard?.cards.filter((card) => card.state !== 'explore').length ?? 0, drafts: view?.drafts.length ?? 0 };
-  const states = stepStates({ view, progress: progress?.task.id === task?.id ? progress : undefined, board: board.dashboard, scopeSaved: Boolean(analysisScope.current) });
   const readOnly = Boolean(task?.lifecycle_status && task.lifecycle_status !== 'active');
+  const preferences = usePreferences();
+  // 本期不做, kept per task in 设置's file: the step stays open, its state reads 本期不做, 下一步 passes it by.
+  const skipped: SkippableStep[] = (task && preferences.preferences.skipped_steps[task.id]) || [];
+  const states = { ...stepStates({ view, progress: progress?.task.id === task?.id ? progress : undefined, board: board.dashboard, scopeSaved: Boolean(analysisScope.current) }),
+    ...Object.fromEntries(skipped.map((item) => [item, 'skipped' as const])) };
+  const skip = (target: SkippableStep, on: boolean) => {
+    if (!task) return;
+    const { [task.id]: _current, ...others } = preferences.preferences.skipped_steps;
+    const marked = on ? [...skipped.filter((item) => item !== target), target] : skipped.filter((item) => item !== target);
+    void preferences.set({ skipped_steps: marked.length ? { ...others, [task.id]: marked } : others })
+      .catch(() => setError('没能保存「本期不做」，请再试一次。'));
+  };
   const canPin = Boolean(bridge()?.financeCall) && !readOnly;
   const pinBoard = useMemo(() => (canPin ? { pin: board.pin } : null), [canPin, board.pin]);
   /*
@@ -529,6 +541,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       <DashboardPinContext.Provider value={pinBoard}>
       <section role="tabpanel" id={`analysis-panel-${step}`} aria-labelledby={step === 'methods' ? undefined : `analysis-tab-${step}`}
         aria-label={step === 'methods' ? '方法库' : undefined} className="analysis-content">
+        {view && step !== 'methods' ? <StepIntro step={step} states={states} canSkip={preferences.available && !readOnly}
+          onSkip={(on) => { if (isSkippable(step)) skip(step, on); }} onScope={() => choose('scope')} /> : null}
         {step === 'report' && isReportView(place) ? <ReportNav view={place} counts={reportCounts} onView={choose} /> : null}
         {/* The first read draws the shape of the step; a refresh over what is already shown keeps the quiet line. */}
         {loading && (view ? <p role="status" className="analysis-note">正在读取任务资料与成果…</p>
@@ -620,12 +634,16 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               const result = unwrap(await api.analysisExport(taskId, id, format, mode));
               if (currentTask.current === taskId) setNotice(result.cancelled ? '已取消导出。' : `已导出${format === 'xlsx' ? '工作簿' : sourceFormatLabel(format)}${result.path ? `：${textValue(result.path)}` : '。'}`);
             })} />
+          {/* A result kept as a chart goes into a draft, so it is archived here, beside the drafts. */}
+          {bridge()?.financeCall && view.runs.some((run) => run.execution_status === 'succeeded' || run.execution_status === 'success')
+            ? <FinanceChartPanel taskId={task.id} runs={view.runs} busy={busy || Boolean(financeRunning[task.id])} onRefresh={() => refresh(task.id)} /> : null}
         </>}
         {view && place === 'methods' && <Methods state={view} busy={busy} onApply={(methodId, bindings, parameters) => void perform(async (taskId) => {
             const api = bridge(); if (!api?.analysisMethodApply) throw new Error('此版本暂不支持复用方法。');
             const next = unwrap(await api.analysisMethodApply(taskId, methodId, bindings, parameters)); await refresh(taskId);
             if (currentTask.current === taskId) { setSelectedAnalysis(next.id); choose('results'); setNotice('已生成分析版本，可以调整范围后计算。'); }
           })} />}
+        {view && step !== 'methods' && step !== 'report' ? <StepNext next={nextStep(step, skipped)} onStep={choose} /> : null}
       </section>
       </DashboardPinContext.Provider>
     </>}

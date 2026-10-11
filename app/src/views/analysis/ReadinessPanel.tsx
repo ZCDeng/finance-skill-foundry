@@ -213,10 +213,11 @@ export function ReadinessPanel({ taskId, refreshKey, readiness }: { taskId: stri
             )}
           </ul>
 
+          {/* One sentence; where each file's scope and freshness went is the guide's to say. */}
           <p className="analysis-note">
-            {report.erp_connected ? '' : '未接外部账套，数字全部来自这些文件。'}
-            文件更新时{report.file_identity_policy === 'business_key' ? '按业务键逐行比对' : '整份替换'}。
-            {perFile.length ? <>每份文件读到的范围和时效在它那一行，打开「查看内容」能看全。<HelpLink article="evidence" label="资料时效与证据标签" /></> : null}
+            {report.erp_connected ? '' : '未接外部账套，数字全部来自这些文件，'}
+            {report.erp_connected ? '文件' : ''}更新时{report.file_identity_policy === 'business_key' ? '按业务键逐行比对' : '整份替换'}。
+            {perFile.length ? <HelpLink article="evidence" label="资料时效与证据标签" /> : null}
           </p>
         </>
       )}

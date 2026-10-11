@@ -9,12 +9,12 @@ import { AccountingPeriodInput, DateInput, DecimalInput, FieldShell, MultiSelect
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { FinanceAdjustmentPanel } from './FinanceAdjustmentPanel.js';
-import { FinanceChartPanel } from './FinanceChartPanel.js';
 import { SettingsGroup, SettingsPanel, useSettingsPanel } from './SettingsPanel.js';
-import { PeriodPending, ScopeFields, pendingPeriods } from './ScopePanel.js';
-import { scenarioLabel as displayScenarioLabel } from './glossary.js';
+import { PeriodPending, pendingPeriods } from './ScopePanel.js';
+import { CURRENCY_OPTIONS } from './glossary.js';
 import { editableScope, SCOPE_LABELS, type AnalysisScope, type ScopeKey, type ScopeValues } from './scope.js';
-import { accountMapOptions, aliasOptions, aliasWords, contextOptions, datasetOptions, scopeFields, scopeSummary, unwrap, errorText } from './shared.js';
+import { accountMapOptions, aliasOptions, aliasWords, contextOptions, datasetOptions, scopeFields, scopeParts, scopeSummary, unwrap, errorText } from './shared.js';
+import { joinParts } from '../../components/PeriodWords.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
 
@@ -48,8 +48,10 @@ const agingStatusMapping = {
   written_off: ['核销', '已核销', 'written_off'],
 };
 
-const PRIMARY_FIELDS: readonly ScopeKey[] = ['period', 'organization', 'unit'];
-const MORE_FIELDS: readonly ScopeKey[] = ['currency', 'scenario', 'ledger'];
+/** What a calculation cannot do without; the rest of the scope narrows it when set. */
+const NEEDED_FIELDS: readonly ScopeKey[] = ['period', 'unit', 'currency'];
+/** The scope read out in the order 范围 lists it. */
+const SCOPE_ORDER = (['period', 'organization', 'unit', 'currency', 'scenario', 'ledger', 'granularity'] as ScopeKey[]).map((key) => SCOPE_LABELS[key]);
 
 export type ScopeRequest = { count: number; contextId?: string };
 type Calculation = 'pnl' | 'bridge';
@@ -84,12 +86,14 @@ export function calculationBlocker(kind: Calculation, state: {
 /** How the last finance operation ended: its name, the sentence shown for it, and when. */
 export type FinanceOutcome = { label: string; result: 'ok' | 'error'; message: string; at: string };
 
-export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysisScope, comparesBudget = false, openRequest = { count: 0 }, running = '', outcome, onRunning, onOutcome, onRefresh, children }: {
+export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysisScope, comparesBudget = false, openRequest = { count: 0 }, running = '', outcome, onRunning, onOutcome, onRefresh, onScope, children }: {
   taskId: string; datasets: DatasetSnapshot[]; runs: AnalysisRun[]; busy: boolean;
   /** The analysis compares against a budget (a variance, or a budget file bound): 计算预算差异 leads. */
   comparesBudget?: boolean;
-  /** The task's one scope; the fields here edit the same record as the 资料 page. */
+  /** The task's one scope, edited on 范围 alone; here it is read, and saved with the calculation. */
   scope: AnalysisScope;
+  /** Opens 范围, where the scope is changed. */
+  onScope?(): void;
   /** Bumped by 调整范围 on a result; each new count opens the settings on that result's scope. */
   openRequest?: ScopeRequest;
   /** What is running right now, in words; owned by the parent so it outlives this component. */
@@ -374,7 +378,11 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
     disabled={transient || Boolean(blockers[kind])} aria-describedby={describedBy(kind)} onClick={() => void saveContext(kind)}>{CALCULATION_NAMES[kind]}</Button>;
   const rerun = (kind: Calculation) => <Button key={kind} variant="outline" type="button" disabled={locked} aria-describedby={describedBy(`rerun-${kind}`)}
     onClick={() => void runExisting(kind)}>{RERUN_NAMES[kind]}</Button>;
-  const moreScopeSummary = MORE_FIELDS.map((key) => scope[key] ? `${SCOPE_LABELS[key]} ${key === 'scenario' ? displayScenarioLabel(scope[key]) : scope[key]}` : '').filter(Boolean).join(' · ');
+  // Read as 范围 shows it: the period in words, the currency by name (人民币, not CNY).
+  const scopeWords = scopeParts(scope).sort((left, right) => SCOPE_ORDER.indexOf(left.label) - SCOPE_ORDER.indexOf(right.label))
+    .map(({ label, text, period }) => period ? <>{label} <span className="fnd-period">{text}</span></>
+      : `${label} ${label === SCOPE_LABELS.currency ? CURRENCY_OPTIONS.find((option) => option.value === text)?.label ?? text : text}`);
+  const unconfirmed = NEEDED_FIELDS.filter((key) => !scope[key]).map((key) => SCOPE_LABELS[key]);
   const advancedChildren = typeof children === 'function' ? children(closeSetup) : children;
   const accountMapName = finance?.account_maps.find((item) => String(item.id ?? '') === accountMapId)?.name;
   const status = <>
@@ -385,7 +393,9 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
     {outcome?.result === 'error' && <p role="alert" className="analysis-message analysis-message--error">{outcome.message}</p>}
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
   </>;
-  return <SettingsGroup note="自己动手算的地方：选资料和范围后计算，确认考核调整，把结果归档成图。">{status}<SettingsPanel state={settings} scrollIntoView label="范围与计算" summary="选好实际资料（和预算资料），确认范围后计算">
+  // 考核调整 changes the next management P&L, so it sits with the result, before the group; 归档图 is 汇报's.
+  return <>{contextId ? <FinanceAdjustmentPanel taskId={taskId} contextId={contextId} busy={locked} onRefresh={onRefresh} /> : null}
+  <SettingsGroup note="选实际资料（和预算资料），按第 2 步的范围算损益表或预算差异；也能看和改计算定义。">{status}<SettingsPanel state={settings} scrollIntoView label="范围与计算" summary="选好实际资料（和预算资料），确认范围后计算">
     <fieldset className="analysis-fieldset" disabled={locked}><div className="analysis-edit-grid">
       <SearchableSelect label="实际资料" value={actual} options={datasetOptions(datasets)} onChange={(value) => {
         setActual(value);
@@ -397,13 +407,16 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
         onChange={setContextId} placeholder="搜索范围名称或期间" /> : null}
     </div>
     <PeriodPending scope={analysisScope} announce={false} />
-    <ScopeFields fields={PRIMARY_FIELDS} scope={scope} candidates={analysisScope.candidates} sources={analysisScope.candidateSources} ranks={analysisScope.candidateRanks} disabled={locked} onField={analysisScope.setField} />
+    {/* The scope is set on 范围 alone; here it is only read, so there is one place to change it. */}
+    <div className="analysis-scope-line" role="group" aria-label="计算用的范围">
+      <p><span className="analysis-scope-line__label">范围</span>{scopeWords.length ? joinParts(scopeWords) : '还没确认'}
+        {scopeWords.length && unconfirmed.length ? <span className="analysis-note">（{unconfirmed.join('、')}还没确认）</span> : null}</p>
+      {onScope ? <Button variant="link" size="sm" type="button" onClick={onScope}>到「范围」修改</Button> : null}
+    </div>
     {budget && <div className="analysis-edit-grid"><AccountingPeriodInput label="对比期间" value={comparePeriod} onChange={setComparePeriod}
       shortcutBaseValue={scope.period} shortcutBaseLabel="实际期间"
       help="留空时预算与实际取同一期间；填写后预算按这个期间取数。" /></div>}
-    <details className="analysis-details"><DisclosureSummary>更多范围{moreScopeSummary ? ` · ${moreScopeSummary}` : ''}</DisclosureSummary>
-      <ScopeFields fields={MORE_FIELDS} scope={scope} candidates={analysisScope.candidates} sources={analysisScope.candidateSources} ranks={analysisScope.candidateRanks} disabled={locked} onField={analysisScope.setField} />
-    </details></fieldset>
+    </fieldset>
     {/* One main action, at the right; which one is the analysis's choice, so nothing moves while she fills the form in. */}
     <div className="analysis-actions analysis-actions--end">
       <Button variant="outline" type="button" disabled={disabled} onClick={() => void saveContext()}>保存范围</Button>
@@ -466,7 +479,5 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
       <Button variant="outline" type="button" disabled={locked || !mapRows.trim()} onClick={() => void saveMap()}>保存映射</Button>
     </details>
   </SettingsPanel>
-  {contextId ? <FinanceAdjustmentPanel taskId={taskId} contextId={contextId} busy={locked} onRefresh={onRefresh} /> : null}
-  {contextId ? <FinanceChartPanel taskId={taskId} runs={runs} busy={locked} onRefresh={onRefresh} /> : null}
-  </SettingsGroup>;
+  </SettingsGroup></>;
 }

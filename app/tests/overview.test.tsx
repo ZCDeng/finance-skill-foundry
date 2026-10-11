@@ -264,7 +264,7 @@ describe('总览 in the app', () => {
   });
 
   it('opens on the workspace when 设置 says so, and ⌘, opens 设置 from there', async () => {
-    const preferences = { technical: false, brief_open: true, start: 'workspace' as const, samples_read: [] };
+    const preferences = { technical: false, brief_open: true, start: 'workspace' as const, samples_read: [], skipped_steps: {} };
     const api = {
       tasks: vi.fn(async () => ok([july, august])),
       task: vi.fn(async (id: string) => ok({ task: id === august.id ? august : july, windows: [], deliverables: [], sessions: [] })),

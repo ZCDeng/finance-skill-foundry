@@ -209,8 +209,9 @@ function Conclusion({ conclusion }: { conclusion: CloseConclusion }) {
     <div className="analysis-close-conclusion-head">
       <Icon size={16} strokeWidth={1.5} aria-hidden />
       <h3>套表可用结论：<span className="analysis-close-conclusion-level">{conclusion.text}</span></h3>
+      {/* How the conclusion is reached is the guide's to say; the page keeps the conclusion and its reasons. */}
+      <HelpLink article="page-close" label="套表可用结论怎么得出" />
     </div>
-    <p className="analysis-note">结论只根据你确认过的控制和处置得出；助手的类型建议不改变结论。</p>
     {basis && Object.values(basis).some((count) => count > 0) ? <p className="analysis-note">依据：你确认的 {basis.confirmed} 条控制，相符 {basis.passed} 条，已接受差异 {basis.waived} 条，仍挡住月结 {basis.open} 条。</p> : null}
     {reasons.length ? <ul className="analysis-close-conclusion-reasons">
       {reasons.slice(0, shown).map((reason, index) => <li key={index}>{reason.text}</li>)}

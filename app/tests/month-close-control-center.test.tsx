@@ -254,7 +254,9 @@ it('states the 可用结论 under the headline, apart from it, with reasons and 
   expect(await screen.findByRole('heading', { name: '需要复核：计算完成，但有 5 项来源冲突' })).toBeTruthy();
   const conclusion = screen.getByRole('region', { name: '套表可用结论' });
   expect(within(conclusion).getByRole('heading', { name: '套表可用结论：不可用' })).toBeTruthy();
-  expect(within(conclusion).getByText('结论只根据你确认过的控制和处置得出；助手的类型建议不改变结论。')).toBeTruthy();
+  // How it is reached is in the guide, one 「?」 away; the page keeps the conclusion, its basis and its reasons.
+  expect(within(conclusion).queryByText(/结论只根据你确认过的控制和处置得出/)).toBeNull();
+  expect(within(conclusion).getByRole('button', { name: '使用指南：套表可用结论怎么得出' })).toBeTruthy();
   expect(within(conclusion).getByText('依据：你确认的 7 条控制，相符 2 条，已接受差异 0 条，仍挡住月结 5 条。')).toBeTruthy();
   // Five reasons are all in view; only 按工作簿看 folds.
   const shown = conclusion.querySelector(':scope > ul')!;
@@ -270,8 +272,8 @@ it('states the 可用结论 under the headline, apart from it, with reasons and 
   expect(conclusion.textContent).not.toMatch(/完成|通过/);
   // Only the headline is announced as status.
   expect(screen.getAllByRole('status')[0].textContent).toBe('需要复核：计算完成，但有 5 项来源冲突');
-  // The guide sits beside the headline only.
-  expect(within(conclusion).queryByRole('button', { name: /^使用指南：/ })).toBeNull();
+  // The headline's guide is how the close goes; the conclusion's is how it is reached.
+  expect(within(conclusion).getAllByRole('button', { name: /^使用指南：/ })).toHaveLength(1);
   expect(screen.getByRole('button', { name: '使用指南：月结怎么走一遍' })).toBeTruthy();
 });
 

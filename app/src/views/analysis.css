@@ -41,7 +41,22 @@
   .analysis-steps__group { display: none; }
   .analysis-steps > [data-state='inactive'] .analysis-steps__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
+.analysis-steps [data-state-step='skipped'] { color: var(--fnd-muted); }
 .analysis-report-tabs { gap: 20px; }
+/* Every step's top (StepIntro): what it is for and its state on one line, then what it stands on; its bottom, the next step. */
+.analysis-step-intro { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.analysis-step-intro__line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 16px; min-width: 0; }
+.analysis-step-intro__line p { margin: 0; min-width: 0; color: var(--fnd-muted); font-size: var(--fnd-size-body); line-height: 24px; overflow-wrap: anywhere; }
+.analysis-step-intro__side { display: flex; align-items: center; gap: 8px; }
+.analysis-step-intro__state { color: var(--fnd-muted); font-size: var(--fnd-size-label); line-height: 20px; white-space: nowrap; }
+.analysis-step-intro__state[data-state-step='done'] { color: var(--fnd-level-ok); }
+.analysis-step-intro__state[data-state-step='attention'] { color: var(--fnd-level-watch); }
+.analysis-step-intro__state[data-state-step='todo'] { color: var(--fnd-warning); }
+.analysis-step-flag { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; padding: 8px 12px; border-left: 2px solid var(--fnd-level-watch); background: var(--fnd-surface); font-size: var(--fnd-size-small); line-height: 20px; color: var(--fnd-ink); overflow-wrap: anywhere; }
+.analysis-step-flag svg { align-self: center; flex: none; color: var(--fnd-level-watch); }
+.analysis-step-flag b { font-weight: var(--fnd-weight-strong); }
+.analysis-step-gate { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; margin: 0; }
+.analysis-step-next { display: flex; justify-content: flex-end; padding-top: 16px; border-top: 1px solid var(--fnd-line); }
 .analysis-content { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .analysis-empty { padding: 32px 0; }
 .analysis-empty h3 { font-size: var(--fnd-size-title); line-height: 1.4; }
@@ -232,7 +247,7 @@
   color: var(--fnd-muted);
   font-size: var(--fnd-size-label);
 }
-/* 设置与高级 (DESIGN.md 分区与标题层级): a section heading with its note below, then folds drawn as one list. */
+/* 自己动手算 (DESIGN.md 分区与标题层级): a section heading with its note below, then folds drawn as one list. */
 .analysis-settings-group { display: flex; flex-direction: column; gap: 12px; min-width: 0; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--fnd-line); }
 .analysis-settings-group__head .analysis-note { margin-top: 4px; }
 .analysis-settings-group > details + details { margin-top: -8px; }
@@ -321,6 +336,10 @@
 .analysis-structure-error { font-size: var(--fnd-size-body); }
 
 /* Readiness: what this batch of files can answer for, and what is missing. */
+/* 范围与计算 reads the task's scope in one line and sends changes to 范围. */
+.analysis-scope-line { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; min-width: 0; }
+.analysis-scope-line p { margin: 0; min-width: 0; font-size: var(--fnd-size-body); line-height: 24px; color: var(--fnd-ink); overflow-wrap: anywhere; }
+.analysis-scope-line__label { margin-right: 8px; color: var(--fnd-muted); }
 .analysis-readiness { display: grid; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--fnd-line); }
 .analysis-readiness-capabilities { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
 .analysis-readiness-capabilities li { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: var(--fnd-size-body); }
@@ -425,9 +444,9 @@
 .analysis-close-conclusion .analysis-note { margin: 0; }
 .analysis-close-conclusion-reasons, .analysis-close-conclusion-books { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: var(--fnd-size-body); overflow-wrap: anywhere; }
 .analysis-close-conclusion-books { padding-left: 0; list-style: none; }
-.analysis-close-conclusion--not_usable :is(.analysis-close-conclusion-head svg, .analysis-close-conclusion-head .analysis-close-conclusion-level),
+.analysis-close-conclusion--not_usable :is(.analysis-close-conclusion-head > svg, .analysis-close-conclusion-head .analysis-close-conclusion-level),
 .analysis-close-conclusion-book--not_usable .analysis-close-conclusion-level { color: var(--fnd-warning); }
-.analysis-close-conclusion--not_assessable :is(.analysis-close-conclusion-head svg, .analysis-close-conclusion-head .analysis-close-conclusion-level),
+.analysis-close-conclusion--not_assessable :is(.analysis-close-conclusion-head > svg, .analysis-close-conclusion-head .analysis-close-conclusion-level),
 .analysis-close-conclusion-book--not_assessable .analysis-close-conclusion-level { color: var(--fnd-muted); }
 
 /* Evidence labels, 证据等级 and dataset freshness (2026-10-04). Problem labels and stale or

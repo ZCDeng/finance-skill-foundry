@@ -274,7 +274,7 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
   return <div className="dashboard" ref={root}>
     {tour ? <TourHint at={tourAt} onStep={setTourAt} onEnd={tour.onEnd} /> : null}
     <div className="analysis-section-heading"><h3>看板</h3></div>
-    <p className="analysis-note">每张卡都读自这个任务已经算好的结果，点数字能看到它从哪来。看过没问题就点「认可」。</p>
+    <p className="analysis-note">每张卡都读自这个任务已经算好的结果，看过没问题就点「认可」。</p>
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
     {said && <p role="status" className="analysis-message">{said}</p>}
     {news ? <NewsLine news={news} onDismiss={dismiss} /> : null}

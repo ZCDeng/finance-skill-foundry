@@ -20,9 +20,10 @@ vi.mock('pdfjs-dist', () => ({
   getDocument: pdfjsMock.getDocument,
 }));
 import { Analysis } from '../src/views/Analysis.js';
+import { PreferencesProvider } from '../src/components/Preferences.js';
 import { DraftBody } from '../src/views/analysis/DraftBody.js';
 import { documentFromMarkdown, documentToMarkdown } from '../electron/reports/format.js';
-import type { Answer, AnalysisDraft, AnalysisRevision, AnalysisRun, AnalysisState, Bridge, DatasetSnapshot, HarnessCardAction, TaskRow } from '../src/bridge.js';
+import type { Answer, AnalysisDraft, AnalysisRevision, AnalysisRun, AnalysisState, Bridge, DatasetSnapshot, HarnessCardAction, OverviewTask, Preferences, TaskRow } from '../src/bridge.js';
 import { acrossElements } from './text-match.js';
 import healthFixture from './fixtures/collection-health-run.json';
 
@@ -52,6 +53,13 @@ function openTab(name: RegExp) {
   if (/文稿|看板|写回/.test(name.source) && !screen.queryByRole('tab', { name })) openTab(/汇报/);
   fireEvent.click(screen.getByRole('tab', { name }));
 }
+/** Sets the task scope where it is set now, on 范围, and comes back to 财务分析. */
+async function setScope(fields: Record<string, string>) {
+  openTab(/范围/);
+  await screen.findByRole('region', { name: '分析范围' });
+  for (const [label, value] of Object.entries(fields)) fireEvent.change(screen.getByLabelText(`分析范围${label}`), { target: { value } });
+  openTab(/财务分析/);
+}
 function openDraftEditor() {
   openTab(/文稿/);
   const edit = screen.queryByRole('tab', { name: '编辑', selected: false });
@@ -63,7 +71,7 @@ function openAnalysisEditor() {
   const adjust = screen.queryByText('调整参数、假设与资料');
   if (adjust?.closest('details')) (adjust.closest('details') as HTMLDetailsElement).open = true;
 }
-/** 设置与高级 holds one fold that picks scope and calculates: 范围与计算, or 计算定义与参数 for a non-finance analysis. */
+/** 自己动手算 holds one fold that picks scope and calculates: 范围与计算, or 计算定义与参数 for a non-finance analysis. */
 const SETTINGS = /^(范围与计算|计算定义与参数)$/;
 function settingsSummary() {
   return document.querySelector<HTMLElement>('details.analysis-finance-setup > summary');
@@ -134,6 +142,59 @@ function deferred<T>() {
 }
 const props = { task, tasks: [task], onPick: vi.fn(), onNew: vi.fn(), onChat: vi.fn() };
 afterEach(() => { cleanup(); delete (globalThis as unknown as { foundry?: Bridge }).foundry; vi.clearAllMocks(); vi.useRealTimers(); sessionStorage.clear(); });
+
+describe('every step: its purpose on top, 本期不做, 未经月结勾稽 and 下一步', () => {
+  /** 总览's month-close blocks for this task: 来源 and 结构 done, 范围 done, 控制 still open. */
+  const progress = { task, headline: { state: 'not_ready', text: '' }, conclusion: { level: 'not_assessable', text: '' }, todo: [],
+    blocks: [['scope', 'done'], ['source', 'done'], ['structure', 'done'], ['controls', 'blocked'], ['exceptions', 'done']]
+      .map(([key, state]) => ({ key, label: key, state })) } as unknown as OverviewTask;
+  function mountWithPreferences() {
+    let saved: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {} };
+    const preferencesSet = vi.fn(async (patch: Partial<Preferences>) => success(saved = { ...saved, ...patch }));
+    mountBridge({ preferencesGet: vi.fn(async () => success(saved)), preferencesSet });
+    render(<PreferencesProvider><Analysis {...props} embedded section="scope" progress={progress} /></PreferencesProvider>);
+    return preferencesSet;
+  }
+
+  it('says what the step is for, and only the steps after 范围 can be left out this period', async () => {
+    mountWithPreferences();
+    expect(await screen.findByText('确认算哪个月、哪个组织、什么单位和币种，后面每一步都按这个范围算。')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '本期不做' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '下一步：3 勾稽' }));
+    expect(screen.getByRole('tab', { name: '3 勾稽，待处理' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByText('核对套表的勾稽关系和差异，做到「可提交经理复核」。')).toBeTruthy();
+  });
+
+  it('marks 勾稽 本期不做 for this task, passes it by, and says the analyses rest on figures it has not checked', async () => {
+    const preferencesSet = mountWithPreferences();
+    await screen.findByText(/后面每一步都按这个范围算/);
+    openTab(/勾稽/);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '本期不做' })); });
+    expect(preferencesSet).toHaveBeenCalledWith({ skipped_steps: { [task.id]: ['close'] } });
+    expect(screen.getByRole('tab', { name: '3 勾稽，本期不做' })).toBeTruthy();
+    // The step stays open to read; the mark can be taken back.
+    expect(screen.getByRole('button', { name: '恢复这一步' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^下一步/ })?.textContent).toBe('下一步：4 财务分析');
+    openTab(/范围/);
+    fireEvent.click(screen.getByRole('button', { name: '下一步：4 财务分析' }));
+    const flag = screen.getByText('未经月结勾稽').parentElement!;
+    expect(flag.textContent).toContain('第 3 步勾稽本期不做，这里用到的套表数字没有经过勾稽。');
+    openTab(/勾稽/);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '恢复这一步' })); });
+    expect(preferencesSet).toHaveBeenLastCalledWith({ skipped_steps: {} });
+    openTab(/财务分析/);
+    // Back on the main line, 勾稽 is still open, and the analyses still say so.
+    expect(screen.getByText('未经月结勾稽').parentElement!.textContent).toContain('第 3 步勾稽还没到「可提交经理复核」');
+  });
+
+  it('offers no 本期不做 where the choice cannot be kept, and no 下一步 after 汇报', async () => {
+    mountBridge();
+    render(<Analysis {...props} embedded section="drafts" />);
+    expect(await screen.findByText('把认可的关键数字和文稿整理好，拿给老板看。')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '本期不做' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^下一步/ })).toBeNull();
+  });
+});
 
 describe('analysis workbench', () => {
   it('shows a complete workbook as sheets instead of an empty flat table', async () => {
@@ -684,7 +745,7 @@ describe('analysis workbench', () => {
     render(<Analysis {...props} />); await screen.findByText('本月实际');
     openAnalysisEditor();
     expect(settingsButton()).toBeTruthy();
-    expect(screen.getByRole('heading', { name: '设置与高级' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '自己动手算' })).toBeTruthy();
     fireEvent.keyDown(screen.getByRole('region', { name: SETTINGS }), { key: 'Escape' });
     await waitFor(() => expectFinanceSettingsClosed());
     expect(document.activeElement).toBe(settingsButton());
@@ -1174,11 +1235,13 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, budgetSource] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
     await waitForSettingsButton();
+    await setScope({ 账簿: '经营总账', 组织: '华东', 期间: '2026-08' });
+    await waitForSettingsButton();
     openFinanceSettings();
+    // 范围与计算 reads the scope set on 范围 and sends changes back there.
+    expect(screen.getByRole('group', { name: '计算用的范围' }).textContent).toContain('期间 2026 年 8 月 · 组织 华东 · 账簿 经营总账');
+    expect(screen.queryByLabelText('期间')).toBeNull();
     chooseSearchable('预算资料（可选）', /本月预算/);
-    fireEvent.change(screen.getByLabelText('账簿'), { target: { value: '经营总账' } });
-    fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
-    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-08' } });
     fireEvent.click(screen.getByRole('button', { name: '对比期间设为实际期间上期' }));
     fireEvent.click(screen.getByText('管理科目映射'));
     // The mapping is edited as rows now: one line per account code, with the
@@ -1228,17 +1291,17 @@ ${canonicalAppendix} 已改写`;
       return success({});
     });
     mountBridge({ analysisState: vi.fn(async () => success(backend)), financeCall });
-    render(<Analysis {...props} embedded section="results" />);
+    render(<Analysis {...props} embedded section="scope" />);
     expect(await screen.findByDisplayValue('2026-08')).toBeTruthy();
 
     backend = { ...backend, datasets: [{ ...source, name: '刷新后实际' }] };
     fireEvent.click(screen.getByRole('button', { name: '刷新' }));
     expect(await screen.findByDisplayValue('2026-09')).toBeTruthy();
 
-    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-10' } });
+    fireEvent.change(screen.getByLabelText('分析范围期间'), { target: { value: '2026-10' } });
     fireEvent.click(screen.getByRole('button', { name: '刷新' }));
     await waitFor(() => expect(financeCall.mock.calls.filter(([, command]) => command === 'analysis-requirements-list').length).toBeGreaterThanOrEqual(3));
-    expect((screen.getByLabelText('期间') as HTMLInputElement).value).toBe('2026-10');
+    expect((screen.getByLabelText('分析范围期间') as HTMLInputElement).value).toBe('2026-10');
   });
 
   it('keeps finance actions locked when the task scope cannot be read', async () => {
@@ -1274,13 +1337,19 @@ ${canonicalAppendix} 已改写`;
     const reason = document.getElementById(calculate.getAttribute('aria-describedby')!)!;
     expect(reason.textContent).toBe('先确认任务期间，资料写的期间见上方提示。');
     expect(screen.getByRole('button', { name: '计算预算差异' }).getAttribute('aria-describedby')).toBe(reason.id);
-    fireEvent.click(screen.getAllByRole('button', { name: '采用资料里的期间 2026-08' })[0]);
+    // The month is taken on 范围, the one place the scope is set.
+    expect(screen.queryByRole('button', { name: '采用资料里的期间 2026-08' })).toBeNull();
+    openTab(/范围/);
+    fireEvent.click(await screen.findByRole('button', { name: '采用资料里的期间 2026-08' }));
+    openTab(/财务分析/);
+    await waitForSettingsEntryOrDialog();
+    if (!screen.queryByRole('region', { name: SETTINGS })) openFinanceSettings();
     await waitFor(() => expect((screen.getByRole('button', { name: '计算损益表' }) as HTMLButtonElement).disabled).toBe(false));
     expect(screen.queryByText('先确认任务期间，资料写的期间见上方提示。')).toBeNull();
     expect(screen.getByRole('button', { name: '计算损益表' }).hasAttribute('aria-describedby')).toBe(false);
   });
 
-  describe('the calculation buttons in 设置与高级', () => {
+  describe('the calculation buttons in 自己动手算', () => {
     const context = (datasets: DatasetSnapshot[]) => success({ task_id: task.id, datasets, contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['metrics', 'variance'] });
     const actionRow = (dialog: HTMLElement) => within(dialog).getByRole('button', { name: '保存范围' }).parentElement as HTMLElement;
     const order = (dialog: HTMLElement) => within(actionRow(dialog)).getAllByRole('button').map((button) => [button.textContent, button.getAttribute('data-variant')]);
@@ -1513,7 +1582,9 @@ ${canonicalAppendix} 已改写`;
     const setup = openFinanceSettings();
     expect(setup.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole('region', { name: SETTINGS })).toBeTruthy();
-    expect(screen.getByLabelText('账簿').closest('details')?.open).toBe(false);
+    // The scope is only read here; it is changed on 范围.
+    expect(screen.getByRole('group', { name: '计算用的范围' }).textContent).toContain('还没确认');
+    expect(screen.queryByLabelText('账簿')).toBeNull();
   });
 
   it('says what is running while a finance run is pending and keeps the outcome readable after the settings fold', async () => {
@@ -1589,7 +1660,7 @@ ${canonicalAppendix} 已改写`;
     await waitFor(() => expect(screen.getByRole('region', { name: SETTINGS })).toBeTruthy());
     const setup = screen.getByRole('region', { name: SETTINGS });
     expect(document.activeElement).toBe(setup);
-    expect((screen.getByLabelText('期间') as HTMLInputElement).value).toBe('2026-07');
+    expect(within(setup).getByRole('group', { name: '计算用的范围' }).textContent).toContain('期间 2026 年 7 月');
     fireEvent.click(screen.getByRole('button', { name: '按已保存范围重算损益表' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'run-metric', expect.objectContaining({ context_id: julyContext.id })));
     // A remount with the request already counted must not open the settings again.
@@ -1618,7 +1689,7 @@ ${canonicalAppendix} 已改写`;
     await waitForSettingsButton();
     await waitFor(() => expect(lists).toBe(1));
     fireEvent.click(screen.getByRole('button', { name: '调整范围' }));
-    await waitFor(() => expect((screen.getByLabelText('期间') as HTMLInputElement).value).toBe('2026-07'));
+    await waitFor(() => expect(screen.getByRole('group', { name: '计算用的范围' }).textContent).toContain('期间 2026 年 7 月'));
     // The map is named, not shown as its identifier.
     expect(screen.getByText('计算损益表时使用管理科目映射：已保存的映射。')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '保存范围' }));
@@ -1790,10 +1861,10 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, budgetSource] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
     await waitForSettingsButton();
+    await setScope({ 组织: '华东', 期间: '2026-09' });
+    await waitForSettingsButton();
     openFinanceSettings();
     chooseSearchable('预算资料（可选）', /本月预算/);
-    fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
-    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-09' } });
     fireEvent.click(screen.getByRole('button', { name: '计算预算差异' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'explain-variance', expect.objectContaining({
       context_id: '4'.repeat(32), actual_scenario: 'actual', baseline_scenario: 'budget',
@@ -3178,7 +3249,8 @@ ${canonicalAppendix} 已改写`;
       return success({});
     });
     mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun] }), financeCall });
-    render(<Analysis {...props} embedded section="results" />);
+    // 归档图 is 汇报's: archived beside the drafts it goes into, not in 财务分析.
+    render(<Analysis {...props} embedded section="drafts" />);
     await screen.findByRole('group', { name: '归档图' });
     fireEvent.click(screen.getByRole('button', { name: '归档当前结果图' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'chart-deliverable-save', { run_id: financeRun.id }));
@@ -3187,6 +3259,33 @@ ${canonicalAppendix} 已改写`;
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'chart-deliverable-open', { id: listed.id }));
     expect(screen.getByText('30')).toBeTruthy();
     expect(financeCall.mock.calls.filter(([, command]) => command === 'run-metric')).toEqual([]);
+  });
+
+  it('keeps 归档当前结果图 locked while a calculation started on 财务分析 is still running', async () => {
+    const context = { ...object, id: '4'.repeat(32), name: '八月经营口径', bindings: { actual: source.id },
+      scopes: { actual: { ledger: '总账', organization: '华东', period: '2026-08', currency: 'CNY', unit: '元', scenario: 'actual' } } };
+    const financeRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: context.id };
+    const gate = deferred<Answer<Record<string, unknown>>>();
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'list-finance-context') return success({ task_id: task.id, datasets: [source], contexts: [context], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['metrics'] });
+      if (command === 'run-metric') return gate.promise;
+      if (command === 'finance-adjustment-list') return success({ adjustments: [] });
+      if (command === 'chart-deliverable-list') return success({ charts: [] });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, analyses: [], runs: [financeRun], drafts: [] }), financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    // A result is already there, so the settings are folded; the rerun is inside them.
+    await waitFor(() => openFinanceSettings());
+    fireEvent.click(await screen.findByRole('button', { name: '按已保存范围重算损益表' }));
+    await screen.findByText('正在计算损益表…');
+    // The chart archived now would be the previous result's, not the one being calculated.
+    openTab(/文稿/);
+    await screen.findByRole('group', { name: '归档图' });
+    expect((screen.getByRole('button', { name: '归档当前结果图' }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => gate.resolve(success({ ...financeRun })));
+    await waitFor(() => expect((screen.getByRole('button', { name: '归档当前结果图' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(financeCall.mock.calls.filter(([, command]) => command === 'chart-deliverable-save')).toEqual([]);
   });
 
   it('records a workbook circle-select as an invoice-basis revision', async () => {

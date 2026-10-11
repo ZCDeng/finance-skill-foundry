@@ -148,8 +148,10 @@ const assert = require('node:assert/strict');
     const assertScopeFields = async (prefix, expected) => {
       for (const [label, value] of Object.entries(expected)) assert.equal(await fieldValue(`${prefix}${label}`), scopeDisplay(label, value), `${prefix}${label} shows ${value}`);
     };
-    const assertPlainScopeFields = async (expected, rootLocator = page) => {
-      for (const [label, value] of Object.entries(expected)) assert.equal(await fieldValue(label, rootLocator), scopeDisplay(label, value), `${label} shows ${value}`);
+    /** 范围与计算 reads the task's scope as one line; it is changed on 范围. */
+    const assertScopeLine = async (rootLocator, parts) => {
+      const line = (await rootLocator.getByRole('group', { name: '计算用的范围' }).innerText()).replace(/\s+/g, ' ');
+      for (const part of parts) assert.ok(line.includes(part), `the scope line reads ${part}: ${line}`);
     };
     const chooseOption = async (label, option, rootLocator = page) => {
       await rootLocator.getByLabel(label, { exact: true }).click();
@@ -255,19 +257,19 @@ const assert = require('node:assert/strict');
         const financeSettings = page.getByRole('region', { name: /^(范围与计算|计算定义与参数)$/ });
         await financeSettings.waitFor();
         assert.equal(await page.getByRole('region', { name: /^(范围与计算|计算定义与参数)$/ }).count(), 1, 'one 范围与计算 fold');
-        await assertPlainScopeFields({ 期间: '2026-08', 组织: '华东公司', 单位: '万元' }, financeSettings);
+        await assertScopeLine(financeSettings, ['期间 2026 年 8 月', '组织 华东公司', '单位 万元']);
         await financeSettings.getByRole('region', { name: '计算定义', exact: true }).waitFor();
         await capture('finance-settings-light-1280', 1280, 800);
         await capture('finance-settings-dark-1080', 1080, 800, true);
-        await financeSettings.getByLabel('组织', { exact: true }).fill('未保存组织');
+        assert.equal(await financeSettings.getByLabel('组织', { exact: true }).count(), 0, 'the scope is changed on 范围 only');
         await page.keyboard.press('Escape');
         assert.equal(await financeSettings.isVisible(), false, 'Escape closes settings');
         assert.equal(await page.getByRole('button', { name: '调整范围', exact: true }).evaluate(node => node === document.activeElement), true, 'Escape returns focus to 调整范围');
         await page.locator('details.analysis-finance-setup > summary').first().click();
         await financeSettings.waitFor();
-        assert.equal(await fieldValue('组织', financeSettings), '未保存组织', 'closing and reopening preserves unfinished scope edits');
+        await assertScopeLine(financeSettings, ['期间 2026 年 8 月', '组织 华东公司']);
         await page.keyboard.press('Escape');
-        checks.push('调整范围 opens one drawer with the selected calculation scope and definition; Escape restores trigger focus and reopening keeps unsaved edits');
+        checks.push('调整范围 opens one drawer that reads the selected calculation scope beside its definition; the scope has no fields there; Escape restores trigger focus');
       }
     }
     if (!phases.includes('workspace')) { console.log(JSON.stringify(writeEvidence({}))); return; }
@@ -300,9 +302,7 @@ const assert = require('node:assert/strict');
     await page.locator('details.analysis-finance-setup > summary').first().click();
     const settings = page.getByRole('region', { name: /^(范围与计算|计算定义与参数)$/ });
     await settings.waitFor();
-    await assertPlainScopeFields({ 期间: '2026-08', 组织: '华东', 单位: '万元' }, settings);
-    await settings.getByText('更多范围').click();
-    await assertPlainScopeFields({ 币种: '人民币', 情景: '实际', 账簿: '经营总账' }, settings);
+    await assertScopeLine(settings, ['期间 2026 年 8 月', '组织 华东', '单位 万元', '币种 人民币', '情景 实际', '账簿 经营总账']);
     await reloadWorkspace();
     await openTask('华东八月经营分析');
     await page.getByRole('tab', { name: /范围/ }).click();
@@ -312,7 +312,7 @@ const assert = require('node:assert/strict');
     await assertScopeFields('分析范围', { 账簿: '经营总账', 粒度: '区域' });
     await page.getByRole('tab', { name: /财务分析/ }).click();
     await page.getByRole('table', { name: '业务结果' }).waitFor({ timeout: 30000 });
-    checks.push('真实合成资料 metadata/scope_hints 一键采用为分析范围；保存写入 requirements，结果页设置与高级同步，重载后持久化');
+    checks.push('真实合成资料 metadata/scope_hints 一键采用为分析范围；保存写入 requirements，财务分析「自己动手算」读出同一范围，重载后持久化');
     // 本月三句话 (#166) opens at the top of the task; once folded, the results own the first screen again.
     const brief = page.locator('details.analysis-brief');
     assert.equal(await brief.getAttribute('open'), '', '本月三句话 opens expanded at the top of the task');
