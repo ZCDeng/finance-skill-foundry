@@ -17,9 +17,9 @@ export type PreferencesState = {
   set(patch: Partial<Preferences>): Promise<void>;
 };
 
-const AS_BEFORE: Preferences = { technical: true, brief_open: true, start: 'overview', samples_read: [] };
+const AS_BEFORE: Preferences = { technical: true, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {} };
 /** What a build that can keep the choices starts from until the saved file is read (electron/preferences.ts). */
-const DEFAULTS: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [] };
+const DEFAULTS: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {} };
 
 const PreferencesContext = createContext<PreferencesState>({ preferences: AS_BEFORE, available: false, loaded: true, set: async () => {} });
 

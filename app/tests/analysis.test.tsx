@@ -20,9 +20,10 @@ vi.mock('pdfjs-dist', () => ({
   getDocument: pdfjsMock.getDocument,
 }));
 import { Analysis } from '../src/views/Analysis.js';
+import { PreferencesProvider } from '../src/components/Preferences.js';
 import { DraftBody } from '../src/views/analysis/DraftBody.js';
 import { documentFromMarkdown, documentToMarkdown } from '../electron/reports/format.js';
-import type { Answer, AnalysisDraft, AnalysisRevision, AnalysisRun, AnalysisState, Bridge, DatasetSnapshot, HarnessCardAction, TaskRow } from '../src/bridge.js';
+import type { Answer, AnalysisDraft, AnalysisRevision, AnalysisRun, AnalysisState, Bridge, DatasetSnapshot, HarnessCardAction, OverviewTask, Preferences, TaskRow } from '../src/bridge.js';
 import { acrossElements } from './text-match.js';
 import healthFixture from './fixtures/collection-health-run.json';
 
@@ -141,6 +142,59 @@ function deferred<T>() {
 }
 const props = { task, tasks: [task], onPick: vi.fn(), onNew: vi.fn(), onChat: vi.fn() };
 afterEach(() => { cleanup(); delete (globalThis as unknown as { foundry?: Bridge }).foundry; vi.clearAllMocks(); vi.useRealTimers(); sessionStorage.clear(); });
+
+describe('every step: its purpose on top, 本期不做, 未经月结勾稽 and 下一步', () => {
+  /** 总览's month-close blocks for this task: 来源 and 结构 done, 范围 done, 控制 still open. */
+  const progress = { task, headline: { state: 'not_ready', text: '' }, conclusion: { level: 'not_assessable', text: '' }, todo: [],
+    blocks: [['scope', 'done'], ['source', 'done'], ['structure', 'done'], ['controls', 'blocked'], ['exceptions', 'done']]
+      .map(([key, state]) => ({ key, label: key, state })) } as unknown as OverviewTask;
+  function mountWithPreferences() {
+    let saved: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {} };
+    const preferencesSet = vi.fn(async (patch: Partial<Preferences>) => success(saved = { ...saved, ...patch }));
+    mountBridge({ preferencesGet: vi.fn(async () => success(saved)), preferencesSet });
+    render(<PreferencesProvider><Analysis {...props} embedded section="scope" progress={progress} /></PreferencesProvider>);
+    return preferencesSet;
+  }
+
+  it('says what the step is for, and only the steps after 范围 can be left out this period', async () => {
+    mountWithPreferences();
+    expect(await screen.findByText('确认算哪个月、哪个组织、什么单位和币种，后面每一步都按这个范围算。')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '本期不做' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '下一步：3 勾稽' }));
+    expect(screen.getByRole('tab', { name: '3 勾稽，待处理' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByText('核对套表的勾稽关系和差异，做到「可提交经理复核」。')).toBeTruthy();
+  });
+
+  it('marks 勾稽 本期不做 for this task, passes it by, and says the analyses rest on figures it has not checked', async () => {
+    const preferencesSet = mountWithPreferences();
+    await screen.findByText(/后面每一步都按这个范围算/);
+    openTab(/勾稽/);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '本期不做' })); });
+    expect(preferencesSet).toHaveBeenCalledWith({ skipped_steps: { [task.id]: ['close'] } });
+    expect(screen.getByRole('tab', { name: '3 勾稽，本期不做' })).toBeTruthy();
+    // The step stays open to read; the mark can be taken back.
+    expect(screen.getByRole('button', { name: '恢复这一步' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^下一步/ })?.textContent).toBe('下一步：4 财务分析');
+    openTab(/范围/);
+    fireEvent.click(screen.getByRole('button', { name: '下一步：4 财务分析' }));
+    const flag = screen.getByText('未经月结勾稽').parentElement!;
+    expect(flag.textContent).toContain('第 3 步勾稽本期不做，这里用到的套表数字没有经过勾稽。');
+    openTab(/勾稽/);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '恢复这一步' })); });
+    expect(preferencesSet).toHaveBeenLastCalledWith({ skipped_steps: {} });
+    openTab(/财务分析/);
+    // Back on the main line, 勾稽 is still open, and the analyses still say so.
+    expect(screen.getByText('未经月结勾稽').parentElement!.textContent).toContain('第 3 步勾稽还没到「可提交经理复核」');
+  });
+
+  it('offers no 本期不做 where the choice cannot be kept, and no 下一步 after 汇报', async () => {
+    mountBridge();
+    render(<Analysis {...props} embedded section="drafts" />);
+    expect(await screen.findByText('把认可的关键数字和文稿整理好，拿给老板看。')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '本期不做' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^下一步/ })).toBeNull();
+  });
+});
 
 describe('analysis workbench', () => {
   it('shows a complete workbook as sheets instead of an empty flat table', async () => {

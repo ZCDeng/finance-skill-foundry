@@ -9,19 +9,37 @@ import * as path from 'node:path';
  * brief_open: whether 本月三句话 opens expanded at the top of a task.
  * start: which screen the app opens on.
  * samples_read: example-task notes already read.
+ * skipped_steps: the steps a task marks 本期不做, by task.
  */
 export type Preferences = {
   technical: boolean; brief_open: boolean; start: 'overview' | 'workspace';
   /** The kinds of example task whose note the manager has read (知道了); theirs fold to a 示例 tag. */
   samples_read: SampleKind[];
+  /**
+   * Per task, the steps this period does without (本期不做): a task with no month close, or no report. A task is
+   * one period, so the mark is the period's. Only the steps after 范围 can be left out; a task without a mark has no entry.
+   */
+  skipped_steps: Record<string, SkippableStep[]>;
 };
 type SampleKind = 'practice' | 'reference' | 'next_month' | 'legacy';
+export type SkippableStep = 'close' | 'results' | 'operations' | 'report';
 
-export const DEFAULT_PREFERENCES: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [] };
+export const DEFAULT_PREFERENCES: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {} };
 
 const FILE = 'preferences.json';
 const STARTS = ['overview', 'workspace'] as const;
 const SAMPLES: readonly SampleKind[] = ['practice', 'reference', 'next_month', 'legacy'];
+export const SKIPPABLE_STEPS: readonly SkippableStep[] = ['close', 'results', 'operations', 'report'];
+const TASK_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** A map of task to marked steps, each list without repeats and never empty; anything else is not one. */
+function skippedOf(value: unknown): Record<string, SkippableStep[]> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const entries = Object.entries(value as Record<string, unknown>);
+  const valid = entries.every(([task, steps]) => TASK_ID.test(task) && Array.isArray(steps) && steps.length > 0
+    && steps.every((step) => (SKIPPABLE_STEPS as readonly unknown[]).includes(step)) && new Set(steps).size === steps.length);
+  return valid ? Object.fromEntries(entries) as Record<string, SkippableStep[]> : null;
+}
 
 /** Only known keys with values of their own type survive; anything else keeps the default. */
 function clean(raw: unknown, base: Preferences): Preferences {
@@ -32,6 +50,7 @@ function clean(raw: unknown, base: Preferences): Preferences {
     start: (STARTS as readonly unknown[]).includes(value.start) ? value.start as Preferences['start'] : base.start,
     samples_read: Array.isArray(value.samples_read) && value.samples_read.every((kind) => (SAMPLES as readonly unknown[]).includes(kind))
       ? [...new Set(value.samples_read as SampleKind[])] : base.samples_read,
+    skipped_steps: skippedOf(value.skipped_steps) ?? base.skipped_steps,
   };
 }
 

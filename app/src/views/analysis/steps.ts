@@ -53,8 +53,37 @@ export function isOperationsAnalysis(analysis: AnalysisRevision, runs: AnalysisR
     || runs.some((run) => run.analysis_id === analysis.id && isCollectionHealthRun(run));
 }
 
-export type StepState = 'done' | 'todo' | 'attention' | 'not_started';
-export const STEP_WORDS: Record<StepState, string> = { done: '已完成', todo: '待处理', attention: '请留意', not_started: '未开始' };
+export type StepState = 'done' | 'todo' | 'attention' | 'not_started' | 'skipped';
+export const STEP_WORDS: Record<StepState, string> = { done: '已完成', todo: '待处理', attention: '请留意', not_started: '未开始', skipped: '本期不做' };
+
+/** What each step is for, in one sentence at its top. */
+export const STEP_INTROS: Record<Step, string> = {
+  materials: '把这个月的资料加进来，确认每份表的结构，看它们能算什么。',
+  scope: '确认算哪个月、哪个组织、什么单位和币种，后面每一步都按这个范围算。',
+  close: '核对套表的勾稽关系和差异，做到「可提交经理复核」。',
+  results: '把财务结果讲清楚：管理损益、预算差异和明细分析。',
+  operations: '看经营上发生了什么、风险在哪：回款与现金、收缴率。',
+  report: '把认可的关键数字和文稿整理好，拿给老板看。',
+};
+
+/** The steps a period can do without (本期不做). 资料 and 范围 are what every other step stands on. */
+export type SkippableStep = Extract<Step, 'close' | 'results' | 'operations' | 'report'>;
+export const SKIPPABLE: readonly SkippableStep[] = ['close', 'results', 'operations', 'report'];
+export const isSkippable = (step: Step): step is SkippableStep => (SKIPPABLE as readonly Step[]).includes(step);
+
+/** The step after this one that the period does, if any. */
+export function nextStep(step: Step, skipped: readonly Step[]): Step | null {
+  const order = STEPS.map((item) => item.step);
+  return order.slice(order.indexOf(step) + 1).find((item) => !skipped.includes(item)) ?? null;
+}
+
+/**
+ * Whether what this step concludes rests on figures 勾稽 has not checked: 勾稽 is not done, or this period does
+ * without it. Only the steps after it are concerned, and only where the task has files to check.
+ */
+export function unreconciled(step: Step, states: Record<Step, StepState>): boolean {
+  return (step === 'results' || step === 'operations' || step === 'report') && states.materials !== 'not_started' && states.close !== 'done';
+}
 
 type Block = NonNullable<OverviewTask['blocks']>[number];
 const worst = (blocks: (Block | undefined)[]): StepState | null => {

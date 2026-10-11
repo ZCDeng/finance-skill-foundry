@@ -12,7 +12,7 @@ afterEach(() => { cleanup(); delete (globalThis as { foundry?: unknown }).foundr
 
 /** A bridge that keeps preferences the way main does: a patch over what is saved. */
 function install(saved: Partial<Preferences> = {}) {
-  let preferences: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [], ...saved };
+  let preferences: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, ...saved };
   const api = {
     preferencesGet: vi.fn(async () => ({ ok: true, value: preferences })),
     preferencesSet: vi.fn(async (patch: Partial<Preferences>) => { preferences = { ...preferences, ...patch }; return { ok: true, value: preferences }; }),

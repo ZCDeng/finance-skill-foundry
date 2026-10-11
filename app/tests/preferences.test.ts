@@ -21,7 +21,7 @@ beforeEach(() => { mocks.handlers.clear(); mocks.openPath.mockClear(); });
 describe('设置, kept beside the appearance', () => {
   it('starts with technical details off, and a missing, broken or foreign file reads as the defaults', () => {
     const dir = folder();
-    expect(readPreferences(dir)).toEqual({ technical: false, brief_open: true, start: 'overview', samples_read: [] });
+    expect(readPreferences(dir)).toEqual({ technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {} });
     writeFileSync(path.join(dir, 'preferences.json'), '{not json');
     expect(readPreferences(dir)).toEqual(DEFAULT_PREFERENCES);
     writeFileSync(path.join(dir, 'preferences.json'), JSON.stringify({ technical: 'yes', start: 'tasks', samples_read: ['practice', 'other'], extra: 1 }));
@@ -32,7 +32,7 @@ describe('设置, kept beside the appearance', () => {
     const dir = folder();
     expect(writePreferences(dir, { technical: true })).toEqual({ ...DEFAULT_PREFERENCES, technical: true });
     expect(writePreferences(dir, { start: 'workspace', samples_read: ['practice'] }))
-      .toEqual({ technical: true, brief_open: true, start: 'workspace', samples_read: ['practice'] });
+      .toEqual({ technical: true, brief_open: true, start: 'workspace', samples_read: ['practice'], skipped_steps: {} });
     expect(JSON.parse(readFileSync(path.join(dir, 'preferences.json'), 'utf8'))).toEqual(readPreferences(dir));
   });
 
@@ -43,6 +43,20 @@ describe('设置, kept beside the appearance', () => {
     expect(() => preferencesPatchOf({ start: 'tasks' })).toThrow(/bad value for start/);
     expect(() => preferencesPatchOf({ samples_read: ['practice', 'practice'] })).toThrow(/bad value for samples_read/);
     expect(() => preferencesPatchOf([])).toThrow(/must be an object/);
+  });
+
+  it('keeps 本期不做 per task, only for the steps after 范围, each list without repeats and never empty', () => {
+    const dir = folder();
+    const task = 'a'.repeat(32);
+    expect(preferencesPatchOf({ skipped_steps: { [task]: ['close', 'report'] } })).toEqual({ skipped_steps: { [task]: ['close', 'report'] } });
+    expect(preferencesPatchOf({ skipped_steps: {} })).toEqual({ skipped_steps: {} });
+    for (const bad of [{ [task]: ['materials'] }, { [task]: ['scope'] }, { [task]: [] }, { [task]: ['close', 'close'] }, { 'not a task id': ['close'] }, [], 'close']) {
+      expect(() => preferencesPatchOf({ skipped_steps: bad })).toThrow(/bad value for skipped_steps/);
+    }
+    writePreferences(dir, { skipped_steps: { [task]: ['close'] } });
+    expect(readPreferences(dir).skipped_steps).toEqual({ [task]: ['close'] });
+    writeFileSync(path.join(dir, 'preferences.json'), JSON.stringify({ skipped_steps: { [task]: ['scope'] } }));
+    expect(readPreferences(dir).skipped_steps).toEqual({});
   });
 
   it('answers over IPC, says which version this is and where its data lives, and opens that folder', async () => {
