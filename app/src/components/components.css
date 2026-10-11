@@ -13,7 +13,7 @@
   .fnd-head__logo { background-image: url('../assets/logo.svg'); }
 }
 .fnd-head__mark { font-family: var(--fnd-font-brand); font-size: 22px; line-height: 1; font-weight: 700; white-space: nowrap; color: var(--fnd-selected); }
-.fnd-head__nav { align-self: stretch; display: flex; gap: 4px; }
+.fnd-head__nav { position: relative; align-self: stretch; display: flex; gap: 4px; anchor-scope: --fnd-head-tab; }
 .fnd-head__tab { border: 0; background: transparent; border-radius: var(--fnd-radius-control); padding: 0 16px; height: var(--fnd-button-height); font-size: var(--fnd-size-body); font-weight: 500; color: var(--fnd-muted); cursor: pointer; transition: color var(--fnd-transition), background var(--fnd-transition); }
 .fnd-head__tab:hover {
   color: var(--fnd-ink);
@@ -36,11 +36,20 @@
  */
 .fnd-head .fnd-head__tab {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   align-self: stretch;
   height: auto;
   padding: 0 16px;
   border-radius: 0;
+  color: var(--fnd-ink);
+  font-size: var(--fnd-size-reading);
   font-weight: var(--fnd-weight-strong);
+}
+
+.fnd-head .fnd-head__tab-icon {
+  flex: 0 0 auto;
 }
 
 .fnd-head .fnd-head__tab::after {
@@ -80,6 +89,46 @@
 }
 
 /*
+ * The current tab's line is one element for the bar, placed on the current tab
+ * by anchor positioning as the page tabs' is: it slides to a newly chosen tab on
+ * the shell transition with a soft gold light under it (borrowed from cult-ui's
+ * halo-tabs, in the app's gold), then stops; nothing repaints while it sits.
+ * Without anchor positioning the current tab keeps drawing its own line.
+ */
+.fnd-head .fnd-head__tab[aria-current='page'] {
+  anchor-name: --fnd-head-tab;
+}
+
+.fnd-head__indicator {
+  display: none;
+}
+
+@supports (anchor-name: --fnd-head-tab) and (anchor-scope: --fnd-head-tab) {
+  .fnd-head__indicator {
+    position: absolute;
+    position-anchor: --fnd-head-tab;
+    left: calc(anchor(left) + 14px);
+    right: calc(anchor(right) + 14px);
+    bottom: -1px;
+    height: 2px;
+    background: var(--fnd-selected);
+    box-shadow: var(--fnd-glow-selected);
+    pointer-events: none;
+    transition: left var(--fnd-transition), right var(--fnd-transition);
+  }
+
+  /* Drawn only while a tab is current: on 设置 and the other screens none is, and a line with nothing to anchor to
+     would sit at the start of the bar as a stray glow (position-visibility cannot hide it in this Chromium). */
+  .fnd-head__nav:has(> .fnd-head__tab[aria-current='page']) > .fnd-head__indicator {
+    display: block;
+  }
+
+  .fnd-head .fnd-head__tab[aria-current='page']::after {
+    visibility: hidden;
+  }
+}
+
+/*
  * Page tabs (ui/tabs.tsx, line variant): words on one rule, the current one in
  * body colour at the strong weight. The gold line under it is one element per
  * list, Base UI's Tabs.Indicator drawn with anchor positioning: it follows the
@@ -108,17 +157,21 @@
 
 @supports (anchor-name: --fnd-tab) and (anchor-scope: --fnd-tab) {
   [data-slot='tabs-indicator'] {
-    display: block;
     position: absolute;
     position-anchor: --fnd-tab;
-    position-visibility: anchors-valid;
     left: anchor(left);
     right: anchor(right);
     bottom: anchor(bottom);
     height: 2px;
     background: var(--fnd-selected);
+    box-shadow: var(--fnd-glow-selected);
     pointer-events: none;
     transition: left var(--fnd-transition), right var(--fnd-transition), bottom var(--fnd-transition);
+  }
+
+  /* Drawn only while a trigger is active, as the title bar's line is. */
+  [data-slot='tabs-list'][data-variant='line']:has(> [data-slot='tabs-trigger'][data-state='active']) > [data-slot='tabs-indicator'] {
+    display: block;
   }
 }
 
@@ -711,9 +764,15 @@ textarea.fnd-field {
 
 /*
  * The tabs stay on the window's centre line: the bar is three columns, the two
- * sides always equal. When zoom leaves too little room, the sides give way
- * first: the name goes (still read out), then 使用指南 keeps only its icon.
+ * sides always equal. When zoom leaves too little room, the tabs' icons go
+ * first, then the name (still read out), then 使用指南 keeps only its icon.
  */
+@media (max-width: 860px) {
+  .fnd-head .fnd-head__tab-icon {
+    display: none;
+  }
+}
+
 @media (max-width: 760px) {
   .fnd-head__mark {
     position: absolute;

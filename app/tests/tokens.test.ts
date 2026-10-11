@@ -470,10 +470,14 @@ describe('the title bar gold', () => {
     expect(declarations(COMPONENTS, '.fnd-head__mark').color).toBe('var(--fnd-selected)');
   });
 
-  it('leaves a tab at rest in the secondary text colour and turns it gold on hover', () => {
+  it('leaves a title-bar tab at rest in body colour (the reused button in the secondary colour) and turns it gold on hover', () => {
     expect(declarations(COMPONENTS, '.fnd-head__tab')).toMatchObject({
       color: 'var(--fnd-muted)',
       background: 'transparent',
+    });
+    expect(declarations(COMPONENTS, '.fnd-head .fnd-head__tab')).toMatchObject({
+      color: 'var(--fnd-ink)',
+      'font-size': 'var(--fnd-size-reading)',
     });
     expect(declarations(COMPONENTS, HOVER)).toMatchObject({
       color: 'var(--fnd-selected)',
@@ -506,6 +510,31 @@ describe('the title bar gold', () => {
     });
     expect(declarations(COMPONENTS, `${CURRENT}::after`).transform).toBe('scaleX(1)');
     expect(declarations(COMPONENTS, '.fnd-head .fnd-head__tab:hover:not(:disabled)::after').transform).toBe('scaleX(1)');
+  });
+
+  it('slides one gold line with a soft light to the current tab where anchor positioning works', () => {
+    // Both rules sit in the @supports block; the flat reader finds rules nested one level down.
+    expect(COMPONENTS).toContain('@supports (anchor-name: --fnd-head-tab) and (anchor-scope: --fnd-head-tab)');
+    expect(declarations(COMPONENTS, '.fnd-head__indicator')).toMatchObject({
+      height: '2px',
+      background: 'var(--fnd-selected)',
+      'box-shadow': 'var(--fnd-glow-selected)',
+      transition: 'left var(--fnd-transition), right var(--fnd-transition)',
+    });
+    // The current tab hands its own line to the indicator; without support it keeps drawing it.
+    expect(declarations(COMPONENTS, `${CURRENT}::after`).visibility).toBe('hidden');
+    expect(declarations(COMPONENTS, CURRENT)['anchor-name']).toBe('--fnd-head-tab');
+  });
+
+  it('draws a sliding line only while something is current, never as a stray glow with nothing to anchor to', () => {
+    // On 设置 no title-bar tab is current. position-visibility: anchors-valid would hide an unanchored line, but
+    // Chromium does not take that value, so the lines are shown only when a current tab or trigger is there.
+    expect(COMPONENTS).not.toMatch(/position-visibility\s*:/);
+    expect(declarations(COMPONENTS, '.fnd-head__indicator').display).toBe('none');
+    expect(declarations(COMPONENTS, ".fnd-head__nav:has(> .fnd-head__tab[aria-current='page']) > .fnd-head__indicator").display).toBe('block');
+    expect(declarations(COMPONENTS, "[data-slot='tabs-indicator']").display).toBe('none');
+    expect(declarations(COMPONENTS,
+      "[data-slot='tabs-list'][data-variant='line']:has(> [data-slot='tabs-trigger'][data-state='active']) > [data-slot='tabs-indicator']").display).toBe('block');
   });
 
   it('keeps the tabs on the window centre line: two equal sides around them', () => {
