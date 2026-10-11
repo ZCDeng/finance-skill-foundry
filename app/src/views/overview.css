@@ -52,10 +52,13 @@
 .fnd-overview__progress-row:focus-visible { outline: 2px solid var(--fnd-focus); outline-offset: 2px; }
 .fnd-overview__progress-name { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
 .fnd-overview__dots { display: inline-flex; gap: 4px; align-items: center; }
+/* 本月进度's six marks: 月结's three together, then a hairline before each analysis and 汇报, as on the task screen. */
+.fnd-overview__step { display: inline-flex; align-items: center; }
+.fnd-overview__step[data-opens-group]::before { content: ''; width: 1px; height: 12px; margin: 0 4px; background: var(--fnd-line); }
 .fnd-overview__dot { color: var(--fnd-muted); }
 .fnd-overview__dot[data-state='done'] { color: var(--fnd-level-ok); }
 .fnd-overview__dot[data-state='attention'] { color: var(--fnd-level-watch); }
-.fnd-overview__dot[data-state='blocked'] { color: var(--fnd-warning); }
+.fnd-overview__dot[data-state='todo'] { color: var(--fnd-warning); }
 .fnd-overview__headline { grid-column: 1; font-size: var(--fnd-size-small); color: var(--fnd-ink); }
 .fnd-overview__conclusion { grid-column: 2; justify-self: end; font-size: var(--fnd-size-small); color: var(--fnd-muted); white-space: nowrap; }
 

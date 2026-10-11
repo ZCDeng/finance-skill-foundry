@@ -138,7 +138,41 @@ def _task_overview(task, row: dict) -> dict:
         "conclusion": {key: status["conclusion"][key] for key in ("level", "text")},
         "todo": close_todo(task, status),
         "dashboard": _dashboard_overview(finance),
+        "work": _step_work(task, finance),
     }
+
+
+def _role(run: dict) -> str:
+    """The role a run declares, first one set, as businessResults.ts explicitRole reads it."""
+    result = run.get("result") if isinstance(run.get("result"), dict) else {}
+    for value in (run.get("result_role"), run.get("run_role"), run.get("activity_role"), result.get("result_role"), result.get("role")):
+        if value is not None:
+            return str(value).lower()
+    return ""
+
+
+def _step_work(task, finance) -> dict:
+    """What 总览 needs to place 财务分析, 经营分析 and 汇报 as the task's own steps do (steps.ts stepStates): each run
+    as much as runPresentationRole and isCollectionHealthRun read of it, the board's cards, and how many drafts. The
+    rules stay in steps.ts; this is only what they read, so 总览 and the steps never disagree."""
+    from foundry.analysis import AnalysisStore
+
+    analysis = AnalysisStore(task)
+    runs = []
+    for run in analysis._list("runs"):
+        result = run.get("result") if isinstance(run.get("result"), dict) else {}
+        runs.append({
+            "execution_status": run.get("execution_status"),
+            "engine": run.get("engine"),
+            "role": _role(run),
+            "columns": [str(column.get("name")) for column in result.get("columns") or [] if isinstance(column, dict)],
+            "rows": bool(result.get("rows")),
+            "outputs": bool(run.get("outputs")) or bool(run.get("output_hash")),
+            "scenario_kind": result.get("scenario_kind"),
+        })
+    board = finance._dashboard() or {}
+    cards = [{"state": card.get("state"), "kind": card.get("kind")} for card in board.get("cards", [])]
+    return {"runs": runs, "cards": cards, "drafts": len(analysis._list("drafts")), "datasets": len(analysis.published_datasets())}
 
 
 def close_todo(task, status: dict) -> list[dict]:

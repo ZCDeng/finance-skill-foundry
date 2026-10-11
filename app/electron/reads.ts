@@ -203,6 +203,8 @@ export interface OverviewTask {
   todo: OverviewTodo[];
   /** The board's cards last run again on newer files or carried from another task, with what changed. */
   dashboard?: { recomputed: OverviewRecomputed[] };
+  /** What the steps after 勾稽 read of the task (overview.py _step_work), passed through to 总览 as it is. */
+  work?: Record<string, unknown>;
   /** The example reference task is still being built. */
   building?: boolean;
   /** This task could not be read; the others still are. */

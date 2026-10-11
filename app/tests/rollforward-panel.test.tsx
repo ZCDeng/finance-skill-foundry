@@ -118,7 +118,7 @@ it('previews the mapping, writes the copy as the manager and says what it did an
   // The copy goes where she saves it; the filed one stays as it was made.
   fireEvent.click(screen.getByRole('button', { name: '导出下月副本' }));
   await waitFor(() => expect(rollforwardExport).toHaveBeenCalledWith('t', 'plan-1', '八月套表（2026-09 滚动）.xlsx'));
-  expect(await screen.findByText(/已导出「八月套表（2026-09 滚动）.xlsx」。在 Excel 里打开、检查并保存后，再到资料页重新添加.*重新添加后会取代列表里的副本。/)).toBeTruthy();
+  expect(await screen.findByText(/已导出「八月套表（2026-09 滚动）.xlsx」。在 Excel 里打开、检查并保存后，再到「资料」重新添加.*重新添加后会取代列表里的副本。/)).toBeTruthy();
   // Saved under another name, the file added again is a separate one, and the message says so.
   rollforwardExport.mockResolvedValueOnce({ ok: true as const, value: { exported: true, filename: '九月套表.xlsx' } });
   fireEvent.click(screen.getByRole('button', { name: '导出下月副本' }));

@@ -115,7 +115,7 @@ const RULES: Rule[] = [
   [/rollforward workbook has parts a copy would lose/i, '这本工作簿含有图表、图片、批注、外部链接、宏，或迷你图、部分下拉列表、条件格式等扩展内容，复制后会丢失，所以没有生成副本。请按预览清单在 Excel 里手工更新。'],
   [/rollforward template name/i, '模板名称写一行，最多 80 个字。'],
   [/rollforward template integrity check failed|rollforward template is unavailable/i, '下月模板文件被改动过或已损坏，无法读取；请重新保存模板。'],
-  [/only the manager can export a roll-forward copy|rollforward export requires the task editor/i, '下月副本只能由你在资料页「滚动到下月」里导出。'],
+  [/only the manager can export a roll-forward copy|rollforward export requires the task editor/i, '下月副本只能由你在「资料」的「滚动到下月」里导出。'],
   [/rollforward export needs a destination/i, '请在保存对话框里选择导出位置。'],
   [/rollforward export destination must be an absolute \.xlsx path/i, '请把文件名保存为 .xlsx 结尾的 Excel 工作簿。'],
   [/rollforward export destination cannot be inside the store/i, '不能导出到本应用自己的数据文件夹里，请换一个位置。'],
@@ -183,7 +183,7 @@ const RULES: Rule[] = [
   [/source batch is not published|snapshot is unavailable/i, '这份来源还没有可用的数据快照，请先完成来源更新。'],
   [/source batch publication does not match snapshot/i, '来源更新与登记的资料不一致，请重新执行一次来源更新。'],
   [/structure confirmation produced no table/i, '按这个表结构没有读到数据行，请检查表头行和数据区域。'],
-  [/pending_structure|表结构等经理确认/i, '这份资料的表结构还没有确认，请先在资料页确认表结构。'],
+  [/pending_structure|表结构等经理确认/i, '这份资料的表结构还没有确认，请先在第 1 步「资料」确认表结构。'],
   [/management[_ ]account|mapping[_ ]incomplete|account map/i, '管理科目还没有映射齐（收入、成本、费用），请在「管理科目映射」里补齐后再计算。'],
   // Workbook writes.
   [/workbook output already exists/i, '这个 Excel 结果文件已经存在，请换一个文件名或先移走旧文件。'],

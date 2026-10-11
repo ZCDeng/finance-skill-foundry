@@ -4,7 +4,9 @@ import { Button } from '../../components/ui/button.js';
 import { Tabs, TabsList, TabsTrigger } from '../../components/ui/tabs.js';
 import { REPORT_VIEWS, STEPS, STEP_INTROS, STEP_WORDS, isSkippable, unreconciled, type ReportView, type Step, type StepState } from './steps.js';
 
-const ICONS = { done: CircleCheck, todo: CircleSlash, attention: CircleAlert, not_started: CircleDashed, skipped: CircleMinus } as const;
+/** Each state's mark, here and on 总览's 本月进度. */
+export const STEP_ICONS = { done: CircleCheck, todo: CircleSlash, attention: CircleAlert, not_started: CircleDashed, skipped: CircleMinus } as const;
+const ICONS = STEP_ICONS;
 const numberOf = (step: Step) => STEPS.findIndex((item) => item.step === step) + 1;
 const labelOf = (step: Step) => STEPS.find((item) => item.step === step)!.label;
 

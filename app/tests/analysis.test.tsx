@@ -1403,7 +1403,7 @@ ${canonicalAppendix} 已改写`;
       render(<Analysis {...props} embedded section="results" />);
       await waitForSettingsEntryOrDialog();
       const dialog = openFinanceSettings();
-      const line = await within(dialog).findByText('先到资料页「分析范围」处理冲突。');
+      const line = await within(dialog).findByText('先到第 2 步「范围」处理冲突。');
       for (const name of ['计算损益表', '计算预算差异', '按已保存范围重算损益表', '按已保存范围计算预算差异']) {
         const button = within(dialog).getByRole('button', { name }) as HTMLButtonElement;
         expect(button.disabled, name).toBe(true);
@@ -1420,7 +1420,7 @@ ${canonicalAppendix} 已改写`;
       render(<Analysis {...props} embedded section="results" />);
       await waitForSettingsEntryOrDialog();
       openFinanceSettings();
-      expect(await screen.findByText('先到资料页「分析范围」处理冲突。')).toBeTruthy();
+      expect(await screen.findByText('先到第 2 步「范围」处理冲突。')).toBeTruthy();
       expect((screen.getByRole('button', { name: '计算损益表' }) as HTMLButtonElement).disabled).toBe(true);
     });
 

@@ -75,7 +75,7 @@ export function calculationBlocker(kind: Calculation, state: {
   conflicts: boolean; scopeError: boolean; actual: string; periodPending: boolean; budget: string;
 }): string {
   // The conflict and its 清空 button live on the 资料 page; the fields here are locked.
-  if (state.conflicts) return '先到资料页「分析范围」处理冲突。';
+  if (state.conflicts) return '先到第 2 步「范围」处理冲突。';
   if (state.scopeError) return '分析范围没有读出来，见下方提示。';
   if (!state.actual) return '先选实际资料。';
   // PeriodPending above names the months; the line does not repeat them.
@@ -354,7 +354,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
     periodPending: pendingPeriods(analysisScope).length > 0, budget,
   })])) as Record<Calculation, string>;
   // The saved-scope reruns need no form, only a readable scope without conflicts.
-  const rerunBlocker = analysisScope.conflicts.length > 0 ? '先到资料页「分析范围」处理冲突。'
+  const rerunBlocker = analysisScope.conflicts.length > 0 ? '先到第 2 步「范围」处理冲突。'
     : analysisScope.error ? '分析范围没有读出来，见下方提示。' : '';
   const reasonId = useId();
   // Every closed button says why. A reason several buttons share is one line; a profit task that only lacks a

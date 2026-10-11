@@ -204,7 +204,7 @@ export function RollforwardPanel({ taskId, datasets, runs, busy, onApplied }: {
     const replaces = saved.filename === applied.output_name
       ? '保存时保留这个文件名，重新添加后会取代列表里的副本。'
       : `这个文件名和列表里的副本「${named}」不同，重新添加后会成为另一份资料，不会取代副本；要取代副本，请在 Excel 里另存为「${named}」再添加。`;
-    setMessage(`已导出「${saved.filename ?? '下月副本'}」。在 Excel 里打开、检查并保存后，再到资料页重新添加，本应用才能读到公式结果。${replaces}`);
+    setMessage(`已导出「${saved.filename ?? '下月副本'}」。在 Excel 里打开、检查并保存后，再到「资料」重新添加，本应用才能读到公式结果。${replaces}`);
   });
   const copy = (text: string | undefined, done: string) => track('正在复制…', async () => {
     if (!text) throw new Error('没有可复制的记录。');
