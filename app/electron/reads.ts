@@ -198,13 +198,17 @@ export interface OverviewRecomputed {
 export interface OverviewTask {
   task: TaskRow;
   headline?: { state: string; text: string; detail?: string };
-  blocks?: { key: string; label: string; state: 'done' | 'attention' | 'blocked' | 'not_started' }[];
+  blocks?: { key: string; label: string; state: 'done' | 'attention' | 'blocked' | 'not_started'; items?: Record<string, unknown>[] }[];
   conclusion?: { level: string; text: string };
   todo: OverviewTodo[];
   /** The board's cards last run again on newer files or carried from another task, with what changed. */
   dashboard?: { recomputed: OverviewRecomputed[] };
   /** What the steps after 勾稽 read of the task (overview.py _step_work), passed through to 总览 as it is. */
   work?: Record<string, unknown>;
+  /** The newest 回款健康's 风险雷达 counted by light, which features the task used, and when it was last worked on. */
+  health?: { run_id: string; levels: Record<string, number> } | null;
+  tried?: string[];
+  active_at?: string;
   /** The example reference task is still being built. */
   building?: boolean;
   /** This task could not be read; the others still are. */

@@ -286,7 +286,7 @@ it('signs a disposition and offers the review with the current person\'s 署名,
   const calls = mount((command) => command === 'finance-controls-list' ? listOf([broken]) : {});
   const foundry = (globalThis as { foundry?: Partial<Bridge> }).foundry!;
   Object.assign(foundry, {
-    preferencesGet: vi.fn(async () => ({ ok: true, value: { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people, current_person: 'p1' } })),
+    preferencesGet: vi.fn(async () => ({ ok: true, value: { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people, current_person: 'p1', tried: [], tips_open: true } })),
     preferencesSet: vi.fn(),
   });
   const { unmount } = render(<PreferencesProvider><ControlsPanel taskId="t" /></PreferencesProvider>);
@@ -319,7 +319,7 @@ it('reads the decider and the current 署名 as one person the way the backend d
   const people = [{ id: 'p1', name: 'Alice', role: 'reviewer' as const, signature: 'Alice Chen' }];
   const waiting: ControlRow = { ...broken, issue: { state: 'awaiting_review', blocking: true, disposition: { id: 'd1', decision: 'waived', reason: '已知', decided_by_name: ' alice chen' } } };
   mount((command) => command === 'finance-controls-list' ? listOf([waiting], true) : {});
-  const preferencesGet = vi.fn(async () => ({ ok: true, value: { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people, current_person: 'p1' } }));
+  const preferencesGet = vi.fn(async () => ({ ok: true, value: { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people, current_person: 'p1', tried: [], tips_open: true } }));
   Object.assign((globalThis as { foundry?: Partial<Bridge> }).foundry!, { preferencesGet, preferencesSet: vi.fn() });
   render(<PreferencesProvider><ControlsPanel taskId="t" /></PreferencesProvider>);
   expect(await screen.findByText(/处置人  ?alice chen/)).toBeTruthy();

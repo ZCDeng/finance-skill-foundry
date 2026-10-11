@@ -130,16 +130,42 @@ def _task_overview(task, row: dict) -> dict:
     from foundry.finance_service import FinanceStore
     from foundry.structure_records import MANAGER
 
+    from foundry.analysis import AnalysisStore
+
     finance = FinanceStore(task, actor=MANAGER)
+    analysis = AnalysisStore(task)
     status = finance.finance_close_status({})
+    board = finance._dashboard() or {}
+    runs = analysis._list("runs")
+    revisions = analysis._list("revisions")
+    datasets = analysis.published_datasets()
+    drafts = analysis._list("drafts")
     return {
         "headline": status["headline"],
-        "blocks": [{"key": block["key"], "label": block["label"], "state": block["state"]} for block in status["blocks"]],
+        # Each block's rows as the 月结 page lists them (the digest's hint aside): 总览 writes each step's line from them.
+        "blocks": [{"key": block["key"], "label": block["label"], "state": block["state"],
+                    "items": [{key: value for key, value in item.items() if key != "hint"} for item in block["items"]]}
+                   for block in status["blocks"]],
         "conclusion": {key: status["conclusion"][key] for key in ("level", "text")},
         "todo": close_todo(task, status),
         "dashboard": _dashboard_overview(finance),
-        "work": _step_work(task, finance),
+        "work": _step_work(runs, revisions, board, drafts, datasets),
+        "health": _health_overview(finance),
+        "tried": _tried(task, board),
+        "active_at": _active_at(task, row, (runs, revisions, drafts, datasets, analysis._list("requirements"),
+                                            finance._list("dashboards"), finance._list("contexts"))),
     }
+
+
+def _active_at(task, row: dict, records: tuple) -> str:
+    """When the task was last worked on: made or restored, a file added, the scope saved, a version, run, draft or
+    board saved, or a conversation opened or moved on. 总览 opens on the task worked on last."""
+    stamps = [row.get("created_at"), row.get("restored_at")]
+    for listed in records:
+        stamps.extend(record.get("created_at") for record in listed)
+    for session in task.sessions():
+        stamps.extend((session.get("opened_at"), session.get("context_updated_at")))
+    return max((stamp for stamp in stamps if isinstance(stamp, str) and stamp), default="")
 
 
 def _role(run: dict) -> str:
@@ -151,17 +177,16 @@ def _role(run: dict) -> str:
     return ""
 
 
-def _step_work(task, finance) -> dict:
+def _step_work(runs: list[dict], revisions: list[dict], board: dict, drafts: list[dict], datasets: list[dict]) -> dict:
     """What 总览 needs to place 财务分析, 经营分析 and 汇报 as the task's own steps do (steps.ts stepStates): each run
     as much as runPresentationRole and isCollectionHealthRun read of it, the board's cards, and how many drafts. The
-    rules stay in steps.ts; this is only what they read, so 总览 and the steps never disagree."""
-    from foundry.analysis import AnalysisStore
-
-    analysis = AnalysisStore(task)
-    runs = []
-    for run in analysis._list("runs"):
+    rules stay in steps.ts; this is only what they read, so 总览 and the steps never disagree. Each run also carries the
+    question it answered, for the step's line."""
+    questions = {revision["id"]: revision.get("question") for revision in revisions}
+    digests = []
+    for run in runs:
         result = run.get("result") if isinstance(run.get("result"), dict) else {}
-        runs.append({
+        digests.append({
             "execution_status": run.get("execution_status"),
             "engine": run.get("engine"),
             "role": _role(run),
@@ -169,10 +194,47 @@ def _step_work(task, finance) -> dict:
             "rows": bool(result.get("rows")),
             "outputs": bool(run.get("outputs")) or bool(run.get("output_hash")),
             "scenario_kind": result.get("scenario_kind"),
+            "analysis_id": run.get("analysis_id"),
+            "label": str(run.get("question") or questions.get(run.get("analysis_id")) or ""),
         })
-    board = finance._dashboard() or {}
     cards = [{"state": card.get("state"), "kind": card.get("kind")} for card in board.get("cards", [])]
-    return {"runs": runs, "cards": cards, "drafts": len(analysis._list("drafts")), "datasets": len(analysis.published_datasets())}
+    return {"runs": digests, "cards": cards, "drafts": len(drafts), "datasets": len(datasets)}
+
+
+def _health_overview(finance) -> dict | None:
+    """The newest 回款健康's 风险雷达, counted by light: 经营分析's line on 总览. The same run 本月三句话's 风险 reads."""
+    from foundry.month_brief import _latest_health
+
+    run = _latest_health(finance)
+    if run is None:
+        return None
+    levels: dict[str, int] = {}
+    for row in run["result"]["rows"]:
+        if isinstance(row, dict) and row.get("metric_key") == "risk_score" and row.get("scenario") == "本期" and row.get("level"):
+            levels[str(row["level"])] = levels.get(str(row["level"]), 0) + 1
+    return {"run_id": run["id"], "levels": levels}
+
+
+# What 总览's 还没试过 can point at, as the task's own records show it was used. 点一个数看来源 and 汇报模式 leave no
+# record on a task; the desktop keeps those in its preferences (electron/preferences.ts tried).
+FEATURES = ("source", "scenario", "goal", "billing", "present", "snapshot", "recompute")
+
+
+def _tried(task, board: dict) -> list[str]:
+    """The features this task's records show were used: a 回款情景 or 倒推 card on the board, a 收费明细 added, the board
+    exported to one page, a card run again on newer files or carried from last month."""
+    from foundry.billing_detail import BillingDetailStore
+    from foundry.dashboard_snapshot import snapshots
+
+    cards = [card for card in board.get("cards", []) if card.get("state") != "explore"]
+    used = {
+        "scenario": any(card.get("kind") == "scenario" for card in cards),
+        "goal": any(card.get("kind") in ("goal", "sensitivity") for card in cards),
+        "billing": bool(BillingDetailStore(task).list()),
+        "snapshot": bool(snapshots(task)),
+        "recompute": any(card.get("recomputed") for card in cards),
+    }
+    return [feature for feature in FEATURES if used.get(feature)]
 
 
 def close_todo(task, status: dict) -> list[dict]:

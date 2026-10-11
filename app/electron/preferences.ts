@@ -11,6 +11,7 @@ import * as path from 'node:path';
  * samples_read: example-task notes already read.
  * skipped_steps: the steps a task marks 本期不做, by task.
  * people, current_person: who uses this computer, and who is signing now (使用者).
+ * tried, tips_open: the features used that no task records (总览's 还没试过), and whether that block is open.
  */
 export type Preferences = {
   technical: boolean; brief_open: boolean; start: 'overview' | 'workspace';
@@ -29,7 +30,16 @@ export type Preferences = {
   people: Person[];
   /** The person signing now, by id; '' or an id no longer in the list is nobody, and every name is typed. */
   current_person: string;
+  /**
+   * The features used that leave no record on a task: 点一个数看来源 (source) and 汇报模式 (present). The rest a task's
+   * records show (foundry/overview.py FEATURES); 还没试过 on 总览 reads both.
+   */
+  tried: Feature[];
+  /** Whether 还没试过 on 总览 is open; folding it is the way to say no more of it. */
+  tips_open: boolean;
 };
+/** What 还没试过 on 总览 points at (foundry/overview.py FEATURES). */
+export type Feature = 'source' | 'scenario' | 'goal' | 'billing' | 'present' | 'snapshot' | 'recompute';
 export type Person = { id: string; name: string; role: PersonRole; signature: string };
 /** 经理, 财务分析, 复核人: what the person does, shown beside the name. It grants nothing. */
 export type PersonRole = 'manager' | 'analyst' | 'reviewer';
@@ -38,12 +48,14 @@ export type SkippableStep = 'close' | 'results' | 'operations' | 'report';
 
 export const DEFAULT_PREFERENCES: Preferences = {
   technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people: [], current_person: '',
+  tried: [], tips_open: true,
 };
 
 const FILE = 'preferences.json';
 const STARTS = ['overview', 'workspace'] as const;
 const SAMPLES: readonly SampleKind[] = ['practice', 'reference', 'next_month', 'legacy'];
 export const SKIPPABLE_STEPS: readonly SkippableStep[] = ['close', 'results', 'operations', 'report'];
+export const FEATURES: readonly Feature[] = ['source', 'scenario', 'goal', 'billing', 'present', 'snapshot', 'recompute'];
 const TASK_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const ROLES: readonly PersonRole[] = ['manager', 'analyst', 'reviewer'];
 export const MAX_PEOPLE = 20;
@@ -84,6 +96,9 @@ function clean(raw: unknown, base: Preferences): Preferences {
     people: peopleOf(value.people) ?? base.people,
     current_person: value.current_person === '' || (typeof value.current_person === 'string' && TASK_ID.test(value.current_person))
       ? value.current_person : base.current_person,
+    tried: Array.isArray(value.tried) && value.tried.every((feature) => (FEATURES as readonly unknown[]).includes(feature))
+      && new Set(value.tried).size === value.tried.length ? [...value.tried as Feature[]] : base.tried,
+    tips_open: typeof value.tips_open === 'boolean' ? value.tips_open : base.tips_open,
   };
 }
 
