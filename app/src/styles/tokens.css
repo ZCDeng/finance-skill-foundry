@@ -70,6 +70,8 @@
   --fnd-shadow-lg: 0 16px 40px rgb(32 41 76 / 16%), 0 2px 6px rgb(32 41 76 / 8%);
   --fnd-shadow-menu: var(--fnd-shadow-md);
   --fnd-shadow-guide: 0 24px 60px -30px rgb(32 41 76 / 45%);
+  /* The soft gold light under a sliding position line (title bar, page tabs). It reads the theme's own gold. */
+  --fnd-glow-selected: 0 0 8px color-mix(in srgb, var(--fnd-selected) 45%, transparent), 0 0 20px color-mix(in srgb, var(--fnd-selected) 20%, transparent);
   --fnd-mark-outside: #8a6729;
   --fnd-mark-outside-line: #a67e3c;
   --fnd-mark-outside-fill: #a67e3c1f;

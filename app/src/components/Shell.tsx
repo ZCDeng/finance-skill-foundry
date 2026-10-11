@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { BookOpen, Settings } from 'lucide-react';
+import { BookOpen, BriefcaseBusiness, LayoutDashboard, Library, Settings } from 'lucide-react';
 import './components.css';
 import { Button } from './ui/button.js';
 import { ThemeSwitch } from './ThemeSwitch.js';
@@ -31,11 +31,13 @@ export function Shell({ screen, onScreen, strip, onGuide, onSettings, covered, o
         </span>
         <nav className="fnd-head__nav" aria-label="主导航">
           {overview ? <button type="button" className="fnd-head__tab" aria-current={screen === 'overview' ? 'page' : undefined}
-            onClick={() => onScreen('overview')}>总览</button> : null}
+            onClick={() => onScreen('overview')}><LayoutDashboard className="fnd-head__tab-icon" size={16} strokeWidth={1.75} aria-hidden />总览</button> : null}
           <button type="button" className="fnd-head__tab" aria-current={workspace ? 'page' : undefined}
-            onClick={() => onScreen('analysis')}>工作区</button>
+            onClick={() => onScreen('analysis')}><BriefcaseBusiness className="fnd-head__tab-icon" size={16} strokeWidth={1.75} aria-hidden />工作区</button>
           <button type="button" className="fnd-head__tab" aria-current={screen === 'deliverables' ? 'page' : undefined}
-            onClick={() => onScreen('deliverables')}>成果库</button>
+            onClick={() => onScreen('deliverables')}><Library className="fnd-head__tab-icon" size={16} strokeWidth={1.75} aria-hidden />成果库</button>
+          {/* The current tab's gold line, one for the bar: it slides to the tab chosen (components.css). */}
+          <span className="fnd-head__indicator" aria-hidden />
         </nav>
         <span className="fnd-head__end">
           {/* Neutral at rest, gold on hover (R14); the ghost variant's own hover would win over components.css. Below 620px only the icon stays. */}
