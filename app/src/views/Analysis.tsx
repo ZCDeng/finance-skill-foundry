@@ -9,7 +9,7 @@ import { isBudgetAlias, isSuccessfulRun, runPresentationRole } from './analysis/
 import { ScopePanel } from './analysis/ScopePanel.js';
 import { useAnalysisScope } from './analysis/scope.js';
 import { WorkbookOverview } from './analysis/WorkbookOverview.js';
-import { ReadinessPanel } from './analysis/ReadinessPanel.js';
+import { ReadinessPanel, useReadiness } from './analysis/ReadinessPanel.js';
 import { MonthCloseControlCenter, type CloseTarget } from './analysis/MonthCloseControlCenter.js';
 import { AskLink, HelpLink } from './guide/GuideHub.js';
 import { readCopy, removeCopy, writeCopy } from './analysis/workingCopy.js';
@@ -298,6 +298,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   const replacedKey = (view?.superseded_datasets ?? []).join(',');
   const boardLoad = board.load;
   useEffect(() => { if (replacedKey) void boardLoad().catch(() => undefined); }, [replacedKey, boardLoad]);
+  // Read while 资料 is open, as the panel did when it lived alone: the summary and each file's row share it.
+  const readiness = useReadiness(task && view && place === 'materials' ? task.id : null, view?.datasets);
   const referencedRuns = view?.drafts.at(-1)?.run_ids ?? [];
   const lastSuccessful = view && (referencedRuns.map((id) => view.runs.find((run) => run.id === id && runPresentationRole(run) === 'business')).find(Boolean)
     ?? [...view.runs].reverse().find((row) => runPresentationRole(row) === 'business')
@@ -488,8 +490,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
             onAddFiles={embedded ? () => void perform(addFiles) : undefined}
             onChat={() => void chat(question.trim() || undefined)} />}
           {/* What these files can answer and what still waits on the manager, then the files. */}
-          <ReadinessPanel taskId={task.id} refreshKey={view.datasets} />
-          <MaterialsFileList taskId={task.id} datasets={view.datasets} busy={busy} preview={dataset} refreshKey={materialsRefresh}
+          <ReadinessPanel taskId={task.id} readiness={readiness} />
+          <MaterialsFileList taskId={task.id} datasets={view.datasets} readiness={readiness.report?.datasets} busy={busy} preview={dataset} refreshKey={materialsRefresh}
             onPreview={(source) => void perform(async (taskId) => {
               const api = bridge(); if (!api?.analysisReadDataset) throw new Error('此版本暂不支持资料预览。');
               const content = unwrap(await api.analysisReadDataset(taskId, source.id));

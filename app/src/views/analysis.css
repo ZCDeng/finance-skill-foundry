@@ -327,12 +327,10 @@
 .analysis-readiness-capabilities li svg { align-self: center; flex: none; }
 .analysis-readiness-ready { color: var(--fnd-ink); }
 .analysis-readiness-blocked { color: var(--fnd-muted); }
-.analysis-readiness-table { width: 100%; border-collapse: collapse; font-size: var(--fnd-size-small); }
-.analysis-readiness-table caption { text-align: left; padding-bottom: 6px; }
-.analysis-readiness-table th,
-.analysis-readiness-table td { border: 1px solid var(--fnd-line); padding: 4px 8px; text-align: left; vertical-align: top; }
-.analysis-readiness-table thead th { background: var(--fnd-selection-surface); color: var(--fnd-ink); font-weight: 600; }
-.analysis-readiness-table tbody th { font-weight: 600; overflow-wrap: anywhere; }
+/* What the readiness check read from one file, above its content when 查看内容 is open. */
+.analysis-file-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 24px; margin: 0; font-size: var(--fnd-size-small); line-height: 20px; }
+.analysis-file-facts dt { color: var(--fnd-muted); }
+.analysis-file-facts dd { margin: 0; color: var(--fnd-ink); overflow-wrap: anywhere; }
 
 /* Which ledger accounts count as revenue, cost and expense. */
 .analysis-account-map { display: grid; gap: 8px; }
@@ -438,7 +436,7 @@
 .analysis-readiness-freshness svg { align-self: center; flex: none; }
 .analysis-readiness-freshness--warning { color: var(--fnd-warning); }
 .analysis-readiness-freshness--unknown { color: var(--fnd-muted); }
-.analysis-readiness-table caption .fnd-help-link { vertical-align: middle; }
+.analysis-readiness .analysis-note .fnd-help-link { vertical-align: middle; }
 .analysis-evidence-posture { display: grid; gap: 4px; padding: 12px 12px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); }
 .analysis-evidence-posture-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; font-size: var(--fnd-size-body); }
 .analysis-evidence-posture-line svg { flex: none; }

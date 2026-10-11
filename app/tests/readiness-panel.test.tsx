@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
-import { ReadinessPanel } from '../src/views/analysis/ReadinessPanel.js';
+import { FileReadinessFacts, FileReadinessStates, ReadinessPanel } from '../src/views/analysis/ReadinessPanel.js';
 
 afterEach(() => cleanup());
 
@@ -50,14 +50,25 @@ describe('readiness panel', () => {
     expect(screen.getAllByText('合计校验').length).toBeGreaterThan(0);
     expect(screen.getByText(/02·GL科目余额表范围没声明齐：缺币种/)).toBeTruthy();
 
-    // Each file's own scope, including the unit that only the title declared.
-    const budget = screen.getByRole('row', { name: /年度预算台账/ });
-    expect(budget.textContent).toContain('单位 万元');
-    expect(budget.textContent).toContain('期间、币种');
-    const ledger = screen.getByRole('row', { name: /02·GL科目余额表/ });
-    expect(ledger.textContent).toContain('期间 2026 年 8 月');
-    // The worded period never breaks across lines in the narrow cells; the line breaks at 「 · 」.
-    expect(Array.from(ledger.querySelectorAll('.fnd-period')).map((span) => span.textContent)).toEqual(['2026 年 8 月', '2026 年 8 月']);
+    // Each file's own scope now sits on its row in the file list, not in a second table here.
+    expect(screen.queryByRole('table')).toBeNull();
+  });
+
+  it('puts what is missing on the file\'s row and the rest of what it read beside its content', () => {
+    const { container, unmount } = render(<FileReadinessStates row={report.datasets[1] as never} />);
+    expect(container.textContent).toBe('还缺期间、币种');
+    unmount();
+    // A file that is fine adds nothing to its row.
+    const fine = render(<FileReadinessStates row={{ ...report.datasets[0], missing_fields: [], freshness: { state: 'current', reasons: [] } } as never} />);
+    expect(fine.container.textContent).toBe('');
+    fine.unmount();
+    render(<FileReadinessFacts row={report.datasets[0] as never} />);
+    const facts = screen.getByLabelText('这份资料读到的范围');
+    expect(facts.textContent).toContain('期间 2026 年 8 月');
+    expect(facts.textContent).toContain('单位 元');
+    expect(facts.textContent).toContain('合计校验');
+    // The worded period never breaks across lines; the line breaks at 「 · 」.
+    expect(Array.from(facts.querySelectorAll('.fnd-period')).map((span) => span.textContent)).toEqual(['2026 年 8 月', '2026 年 8 月']);
   });
 
   it('sits on the page as a section with a rule under it, not as a clickable card', async () => {

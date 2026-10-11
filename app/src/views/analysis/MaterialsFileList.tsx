@@ -1,10 +1,11 @@
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ChevronDown, TriangleAlert } from 'lucide-react';
-import { when, type DatasetSnapshot } from '../../bridge.js';
+import { when, type DatasetSnapshot, type ReadinessDataset } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { formatPeriod } from '../../lib/period.js';
 import { DatasetPreview } from './DatasetPreview.js';
 import { FormulaHealthDetails, issuesOf, useFormulaHealth } from './FormulaHealthPanel.js';
+import { FileReadinessFacts, FileReadinessStates } from './ReadinessPanel.js';
 import { StructurePendingStrip, StructureProposalCard } from './StructureProposalCard.js';
 import { isStructureTodo, useStructureTodos, type StructureTodo } from './StructurePanel.js';
 import { textValue } from './presentation.js';
@@ -63,8 +64,10 @@ const controlling = (id: string) => `[aria-controls="${id}"]`;
  * A closed detail stays mounted and only hidden, so a half-answered structure form
  * is still there when it is opened again.
  */
-export function MaterialsFileList({ taskId, datasets, busy, preview, refreshKey = 0, onPreview, onClosePreview, onRefresh }: {
+export function MaterialsFileList({ taskId, datasets, readiness, busy, preview, refreshKey = 0, onPreview, onClosePreview, onRefresh }: {
   taskId: string; datasets: DatasetSnapshot[]; busy: boolean;
+  /** Each file's scope, as-of and freshness from the readiness check: trouble on the row, the rest with the content. */
+  readiness?: ReadinessDataset[];
   /** The file whose content is open, if any; owned by the page so 结果 can open one too. */
   preview: MaterialsPreview | null;
   /** Bumped by the page's 刷新: reads the structure to-dos again although the files are the same. */
@@ -133,6 +136,7 @@ export function MaterialsFileList({ taskId, datasets, busy, preview, refreshKey 
     const entry = dataset ? health.entryOf(dataset) : null;
     const showing = Boolean(dataset && preview?.source.id === id);
     const hinted = Boolean(entry?.health && issuesOf(entry.health).length);
+    const ready = readiness?.find((item) => item.dataset_id === id);
     return <li key={id} className="analysis-file-row" data-structure-todo={isStructureTodo(todo) ? '' : undefined}>
       <div className="analysis-file-row-head">
         <div className="analysis-file-row-name">
@@ -148,6 +152,7 @@ export function MaterialsFileList({ taskId, datasets, busy, preview, refreshKey 
             <span className="analysis-file-status-label">公式体检</span>
             <span className="analysis-file-state">{healthNow.word}</span>{healthNow.action}
           </span>}
+          <FileReadinessStates row={ready} />
           {dataset && <Toggle expanded={showing} controls={rowId(id, 'content')} name={`查看内容：${name}`} disabled={busy}
             onClick={() => (showing ? onClosePreview() : onPreview(dataset))}>查看内容</Toggle>}
         </div>
@@ -163,6 +168,7 @@ export function MaterialsFileList({ taskId, datasets, busy, preview, refreshKey 
         <FormulaHealthDetails taskId={taskId} dataset={dataset} health={entry.health} />
       </div>}
       {dataset && <div id={rowId(id, 'content')} className="analysis-file-row-detail" hidden={!showing} onKeyDown={closeOnEscape(id, 'content')}>
+        {showing ? <FileReadinessFacts row={ready} /> : null}
         {showing && preview ? <DatasetPreview source={preview.source} content={preview.content} headingHidden /> : null}
       </div>}
     </li>;
