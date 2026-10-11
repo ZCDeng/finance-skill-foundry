@@ -52,6 +52,13 @@ function openTab(name: RegExp) {
   if (/文稿|看板|写回/.test(name.source) && !screen.queryByRole('tab', { name })) openTab(/汇报/);
   fireEvent.click(screen.getByRole('tab', { name }));
 }
+/** Sets the task scope where it is set now, on 范围, and comes back to 财务分析. */
+async function setScope(fields: Record<string, string>) {
+  openTab(/范围/);
+  await screen.findByRole('region', { name: '分析范围' });
+  for (const [label, value] of Object.entries(fields)) fireEvent.change(screen.getByLabelText(`分析范围${label}`), { target: { value } });
+  openTab(/财务分析/);
+}
 function openDraftEditor() {
   openTab(/文稿/);
   const edit = screen.queryByRole('tab', { name: '编辑', selected: false });
@@ -1174,11 +1181,13 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, budgetSource] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
     await waitForSettingsButton();
+    await setScope({ 账簿: '经营总账', 组织: '华东', 期间: '2026-08' });
+    await waitForSettingsButton();
     openFinanceSettings();
+    // 范围与计算 reads the scope set on 范围 and sends changes back there.
+    expect(screen.getByRole('group', { name: '计算用的范围' }).textContent).toContain('期间 2026 年 8 月 · 组织 华东 · 账簿 经营总账');
+    expect(screen.queryByLabelText('期间')).toBeNull();
     chooseSearchable('预算资料（可选）', /本月预算/);
-    fireEvent.change(screen.getByLabelText('账簿'), { target: { value: '经营总账' } });
-    fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
-    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-08' } });
     fireEvent.click(screen.getByRole('button', { name: '对比期间设为实际期间上期' }));
     fireEvent.click(screen.getByText('管理科目映射'));
     // The mapping is edited as rows now: one line per account code, with the
@@ -1228,17 +1237,17 @@ ${canonicalAppendix} 已改写`;
       return success({});
     });
     mountBridge({ analysisState: vi.fn(async () => success(backend)), financeCall });
-    render(<Analysis {...props} embedded section="results" />);
+    render(<Analysis {...props} embedded section="scope" />);
     expect(await screen.findByDisplayValue('2026-08')).toBeTruthy();
 
     backend = { ...backend, datasets: [{ ...source, name: '刷新后实际' }] };
     fireEvent.click(screen.getByRole('button', { name: '刷新' }));
     expect(await screen.findByDisplayValue('2026-09')).toBeTruthy();
 
-    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-10' } });
+    fireEvent.change(screen.getByLabelText('分析范围期间'), { target: { value: '2026-10' } });
     fireEvent.click(screen.getByRole('button', { name: '刷新' }));
     await waitFor(() => expect(financeCall.mock.calls.filter(([, command]) => command === 'analysis-requirements-list').length).toBeGreaterThanOrEqual(3));
-    expect((screen.getByLabelText('期间') as HTMLInputElement).value).toBe('2026-10');
+    expect((screen.getByLabelText('分析范围期间') as HTMLInputElement).value).toBe('2026-10');
   });
 
   it('keeps finance actions locked when the task scope cannot be read', async () => {
@@ -1274,7 +1283,13 @@ ${canonicalAppendix} 已改写`;
     const reason = document.getElementById(calculate.getAttribute('aria-describedby')!)!;
     expect(reason.textContent).toBe('先确认任务期间，资料写的期间见上方提示。');
     expect(screen.getByRole('button', { name: '计算预算差异' }).getAttribute('aria-describedby')).toBe(reason.id);
-    fireEvent.click(screen.getAllByRole('button', { name: '采用资料里的期间 2026-08' })[0]);
+    // The month is taken on 范围, the one place the scope is set.
+    expect(screen.queryByRole('button', { name: '采用资料里的期间 2026-08' })).toBeNull();
+    openTab(/范围/);
+    fireEvent.click(await screen.findByRole('button', { name: '采用资料里的期间 2026-08' }));
+    openTab(/财务分析/);
+    await waitForSettingsEntryOrDialog();
+    if (!screen.queryByRole('region', { name: SETTINGS })) openFinanceSettings();
     await waitFor(() => expect((screen.getByRole('button', { name: '计算损益表' }) as HTMLButtonElement).disabled).toBe(false));
     expect(screen.queryByText('先确认任务期间，资料写的期间见上方提示。')).toBeNull();
     expect(screen.getByRole('button', { name: '计算损益表' }).hasAttribute('aria-describedby')).toBe(false);
@@ -1513,7 +1528,9 @@ ${canonicalAppendix} 已改写`;
     const setup = openFinanceSettings();
     expect(setup.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole('region', { name: SETTINGS })).toBeTruthy();
-    expect(screen.getByLabelText('账簿').closest('details')?.open).toBe(false);
+    // The scope is only read here; it is changed on 范围.
+    expect(screen.getByRole('group', { name: '计算用的范围' }).textContent).toContain('还没确认');
+    expect(screen.queryByLabelText('账簿')).toBeNull();
   });
 
   it('says what is running while a finance run is pending and keeps the outcome readable after the settings fold', async () => {
@@ -1589,7 +1606,7 @@ ${canonicalAppendix} 已改写`;
     await waitFor(() => expect(screen.getByRole('region', { name: SETTINGS })).toBeTruthy());
     const setup = screen.getByRole('region', { name: SETTINGS });
     expect(document.activeElement).toBe(setup);
-    expect((screen.getByLabelText('期间') as HTMLInputElement).value).toBe('2026-07');
+    expect(within(setup).getByRole('group', { name: '计算用的范围' }).textContent).toContain('期间 2026 年 7 月');
     fireEvent.click(screen.getByRole('button', { name: '按已保存范围重算损益表' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'run-metric', expect.objectContaining({ context_id: julyContext.id })));
     // A remount with the request already counted must not open the settings again.
@@ -1618,7 +1635,7 @@ ${canonicalAppendix} 已改写`;
     await waitForSettingsButton();
     await waitFor(() => expect(lists).toBe(1));
     fireEvent.click(screen.getByRole('button', { name: '调整范围' }));
-    await waitFor(() => expect((screen.getByLabelText('期间') as HTMLInputElement).value).toBe('2026-07'));
+    await waitFor(() => expect(screen.getByRole('group', { name: '计算用的范围' }).textContent).toContain('期间 2026 年 7 月'));
     // The map is named, not shown as its identifier.
     expect(screen.getByText('计算损益表时使用管理科目映射：已保存的映射。')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '保存范围' }));
@@ -1790,10 +1807,10 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, budgetSource] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
     await waitForSettingsButton();
+    await setScope({ 组织: '华东', 期间: '2026-09' });
+    await waitForSettingsButton();
     openFinanceSettings();
     chooseSearchable('预算资料（可选）', /本月预算/);
-    fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
-    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-09' } });
     fireEvent.click(screen.getByRole('button', { name: '计算预算差异' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'explain-variance', expect.objectContaining({
       context_id: '4'.repeat(32), actual_scenario: 'actual', baseline_scenario: 'budget',

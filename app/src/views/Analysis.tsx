@@ -387,7 +387,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         const { [task.id]: _cleared, ...rest } = current;
         return rest;
       })}
-      onRefresh={() => refresh(task.id)}>{(close) => analysisDefinition(close)}</FinanceWorkbench>
+      onRefresh={() => refresh(task.id)} onScope={() => choose('scope')}>{(close) => analysisDefinition(close)}</FinanceWorkbench>
     : null;
   /** The snapshot a result's 依据 opened, under the result. */
   const sourcePreview = dataset ? <section aria-label="依据资料预览"><div className="analysis-section-heading"><h3>依据资料</h3>

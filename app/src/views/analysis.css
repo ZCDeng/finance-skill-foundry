@@ -321,6 +321,10 @@
 .analysis-structure-error { font-size: var(--fnd-size-body); }
 
 /* Readiness: what this batch of files can answer for, and what is missing. */
+/* 范围与计算 reads the task's scope in one line and sends changes to 范围. */
+.analysis-scope-line { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; min-width: 0; }
+.analysis-scope-line p { margin: 0; min-width: 0; font-size: var(--fnd-size-body); line-height: 24px; color: var(--fnd-ink); overflow-wrap: anywhere; }
+.analysis-scope-line__label { margin-right: 8px; color: var(--fnd-muted); }
 .analysis-readiness { display: grid; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--fnd-line); }
 .analysis-readiness-capabilities { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
 .analysis-readiness-capabilities li { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: var(--fnd-size-body); }
