@@ -181,6 +181,12 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
 
 type FindingSpec = { finding_type: FindingType; note?: string };
 
+/** Two names are one person the way finance_controls.same_person reads them: trimmed, case folded (ß as ss). */
+function samePerson(left: string, right: string): boolean {
+  const fold = (text: string) => text.trim().toUpperCase().toLowerCase();
+  return Boolean(left.trim()) && fold(left) === fold(right);
+}
+
 function IssueRow({ row, locked, requireReview, onDecide, onReview, onRetire, onFinding }: {
   row: ControlRow; locked: boolean; requireReview: boolean;
   onDecide(spec: { decision: Decision; reason: string; counterparty?: string; decided_by_name?: string }): void;
@@ -200,7 +206,7 @@ function IssueRow({ row, locked, requireReview, onDecide, onReview, onRetire, on
   const issue = row.issue!;
   const name = typedName ?? signer;
   // The one who accepted a difference cannot review it, so their own 署名 is never offered as the reviewer.
-  const reviewer = typedReviewer ?? (signer && signer.trim() !== issue.disposition?.decided_by_name?.trim() ? signer : '');
+  const reviewer = typedReviewer ?? (signer && !samePerson(signer, issue.disposition?.decided_by_name ?? '') ? signer : '');
   const result = row.result;
   const decidable = result && (result.status === 'break' || result.status === 'error') && issue.state !== 'stale';
   // A range that cannot be read is fixed in the file, never accepted.

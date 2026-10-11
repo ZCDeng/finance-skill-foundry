@@ -29,9 +29,13 @@ export function Settings({ onWorkspace }: { onWorkspace(): void }) {
     void api.appInfo().then((answer) => { if (live && answer.ok) setInfo(answer.value); }).catch(() => {});
     return () => { live = false; };
   }, [api]);
-  const change = (patch: Parameters<typeof set>[0]) => {
+  /** Saves a change; says why not and answers false when it was not kept. */
+  const change = (patch: Parameters<typeof set>[0]): Promise<boolean> => {
     setProblem('');
-    void set(patch).catch((failure: unknown) => setProblem(`没有保存：${failure instanceof Error ? failure.message : String(failure)}`));
+    return set(patch).then(() => true, (failure: unknown) => {
+      setProblem(`没有保存：${failure instanceof Error ? failure.message : String(failure)}`);
+      return false;
+    });
   };
   const reveal = () => {
     setProblem('');
@@ -94,11 +98,11 @@ export function Settings({ onWorkspace }: { onWorkspace(): void }) {
 
 /**
  * 使用者 on this computer: a name, what they do and the 署名 a record is signed with, and who is signing now. Disposing
- * of a difference, its review, a board card's 认可 and the one-page board fill that 署名 in, and it can still be changed
- * there. There is no password: this is who signed, not who may.
+ * of a difference and its review fill that 署名 in, where it can still be changed; a board card's 认可 and the one-page
+ * board record it. There is no password: this is who signed, not who may.
  */
 function People({ available, people, current, change }: {
-  available: boolean; people: Person[]; current: string; change(patch: Partial<Preferences>): void;
+  available: boolean; people: Person[]; current: string; change(patch: Partial<Preferences>): Promise<boolean>;
 }) {
   // The person being changed, or 'new' for one being added; null while the list is only read.
   const [editing, setEditing] = useState<string | null>(null);
@@ -107,15 +111,16 @@ function People({ available, people, current, change }: {
     const known = people.some((row) => row.id === person.id);
     change({ people: known ? people.map((row) => (row.id === person.id ? person : row)) : [...people, person],
       // The first person added signs from then on; nobody has to pick them as well.
-      ...(!known && !people.length ? { current_person: person.id } : {}) });
-    setEditing(null);
+      ...(!known && !people.length ? { current_person: person.id } : {}) })
+      // A form that was not saved stays open with what was typed in it.
+      .then((saved) => { if (saved) setEditing(null); });
   };
-  const remove = (person: Person) => change({ people: people.filter((row) => row.id !== person.id), ...(person.id === current ? { current_person: '' } : {}) });
+  const remove = (person: Person) => void change({ people: people.filter((row) => row.id !== person.id), ...(person.id === current ? { current_person: '' } : {}) });
   return <>
-    <Row label="当前使用者" note="处置差异、复核、认可看板卡和导出一页纸时，自动填上这个人的署名，填上后仍可改。同一台电脑上切换使用者不要密码：这是署名，不是权限。">
+    <Row label="当前使用者" note="处置差异和复核时自动填上这个人的署名，填上后仍可改；认可看板卡和导出一页纸时记下这个署名。同一台电脑上切换使用者不要密码：这是署名，不是权限。">
       {(id) => <NativeSelect id={id} className="fnd-settings__select" value={signing} disabled={!available || !people.length}
         onChange={(event) => change({ current_person: event.target.value })}>
-        <option value="">没有选（每次自己填）</option>
+        <option value="">没有选（不自动署名）</option>
         {people.map((person) => <option key={person.id} value={person.id}>{`${person.name} · ${ROLE_WORDS[person.role]}`}</option>)}
       </NativeSelect>}
     </Row>

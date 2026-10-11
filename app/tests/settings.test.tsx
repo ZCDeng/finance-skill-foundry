@@ -138,3 +138,20 @@ it('keeps the people on this computer, signs as the first one added, and says a 
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: '删除「张三」' })); });
   expect(api.preferencesSet).toHaveBeenLastCalledWith({ people: [], current_person: '' });
 });
+
+it('keeps a person being added on screen, with what was typed, when it could not be saved', async () => {
+  const api = install();
+  api.preferencesSet.mockResolvedValueOnce({ ok: false, message: '磁盘已满' } as never);
+  render(<PreferencesProvider><Settings onWorkspace={() => {}} /></PreferencesProvider>);
+  await act(async () => { fireEvent.click(await screen.findByRole('button', { name: '添加使用者' })); });
+  const form = screen.getByRole('form', { name: '添加使用者' });
+  fireEvent.change(within(form).getByLabelText('姓名'), { target: { value: '张三' } });
+  fireEvent.change(within(form).getByLabelText('署名'), { target: { value: '财务部 张三' } });
+  await act(async () => { fireEvent.click(within(form).getByRole('button', { name: '添加' })); });
+  expect(await screen.findByText('没有保存：磁盘已满')).toBeTruthy();
+  const still = screen.getByRole('form', { name: '添加使用者' });
+  expect((within(still).getByLabelText('署名') as HTMLInputElement).value).toBe('财务部 张三');
+  await act(async () => { fireEvent.click(within(still).getByRole('button', { name: '添加' })); });
+  await waitFor(() => expect(screen.queryByRole('form', { name: '添加使用者' })).toBeNull());
+  expect(screen.getByText('经理 · 署名「财务部 张三」 · 当前使用者')).toBeTruthy();
+});
