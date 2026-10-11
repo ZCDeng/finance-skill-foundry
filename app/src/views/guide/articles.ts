@@ -6,7 +6,7 @@
 
 import type { AskId } from './ask.js';
 
-export type GuideTarget = 'datasets' | 'scope' | 'structure' | 'billing' | 'results' | 'dashboard' | 'drafts' | 'workbook' | 'close';
+export type GuideTarget = 'datasets' | 'scope' | 'structure' | 'billing' | 'results' | 'operations' | 'dashboard' | 'drafts' | 'workbook' | 'close';
 
 export type GuideBlock =
   | { kind: 'p'; text: string }
@@ -196,18 +196,18 @@ export const GUIDE_ARTICLES: GuideArticle[] = [
     ],
   },
   {
-    id: 'follow-6', section: '跟着做：华宸物业 8 月', title: '6. 回款与现金', appliesTo: '财务分析 · 回款与现金',
+    id: 'follow-6', section: '跟着做：华宸物业 8 月', title: '6. 回款与现金', appliesTo: '经营分析 · 回款与现金',
     keywords: ['跟着做', '回款', '收缴率', '生死线', '风险雷达', '城市公司'],
     body: [
       { kind: 'p', text: '让助手对月结套表做回款健康分析：集团数取「01·核心指标看板」，城市公司取「11·城市公司明细表」，合计行不算一家公司。' },
       { kind: 'ask', ask: 'collection-health', label: '让助手做回款健康分析' },
-      { kind: 'open', target: 'results', label: '打开财务分析' },
+      { kind: 'open', target: 'operations', label: '打开经营分析' },
       { kind: 'expect', items: [
         '收缴率生死线 91.14%（= 1 − 毛利率 + 费用率）。',
         '本年账单收缴率低于生死线 3.22 个百分点，综合收缴率低 8.74 个百分点，都标红。',
         '风险雷达：50 家城市公司加集团主体，红 1、橙 4、黄 27、绿 19。红黄绿只是筛查提示，不计入月结。',
       ] },
-      { kind: 'reference', target: 'results', label: '对照参考结果的财务分析' },
+      { kind: 'reference', target: 'operations', label: '对照参考结果的经营分析' },
     ],
   },
   {
@@ -458,10 +458,10 @@ export const GUIDE_ARTICLES: GuideArticle[] = [
     ],
   },
   {
-    id: 'collection-health', section: '月结工作流', title: '回款与现金：生死线、应收天数和风险雷达', appliesTo: '财务分析 · 回款与现金',
+    id: 'collection-health', section: '月结工作流', title: '回款与现金：生死线、应收天数和风险雷达', appliesTo: '经营分析 · 回款与现金',
     keywords: ['回款', '收缴率', '生死线', '现金经营利润率', '应收天数', '周转天数', '反推回款率', '现金回收比', '减值', '拨备', '全年', 'LE', '线性外推', '续约', '退场', '人效', '风险雷达', '城市公司'],
     body: [
-      { kind: 'p', text: '让助手对月结套表做「回款健康」分析：它按单元格取数，公式和阈值都在系统里，每个数都能下钻到取数位置。结果页显示为「回款与现金」区块。' },
+      { kind: 'p', text: '让助手对月结套表做「回款健康」分析：它按单元格取数，公式和阈值都在系统里，每个数都能下钻到取数位置。结果在第 5 步「经营分析」的「回款与现金」。' },
       { kind: 'list', items: [
         '生死线收缴率 = 1 − 毛利率 + 期间费用率。收缴率低于它，每收 100 元物业费要倒贴现金；距生死线就是现金经营利润率。默认用本年账单收缴率，综合收缴率（含清欠）并列显示，通常更高。',
         '应收天数 =（应收账款 + 合同资产）÷ 近 12 个月收入 × 365。套表只有本年累计和上年同期时，近 12 个月收入按「上年全年 − 上年同期累计 + 本年累计」推算，标估算。',
@@ -473,7 +473,7 @@ export const GUIDE_ARTICLES: GuideArticle[] = [
         '敏感性矩阵给出不同毛利率和收缴率下的现金经营利润率，框出的格最接近当前位置（按本年账单收缴率），当前位置不在表内时不框。要矩阵时让助手为该主体打开敏感性分析。',
       ] },
       { kind: 'ask', ask: 'collection-health', label: '让助手做回款健康分析' },
-      { kind: 'open', target: 'results', label: '打开财务分析' },
+      { kind: 'open', target: 'operations', label: '打开经营分析' },
     ],
   },
   {

@@ -1,4 +1,4 @@
-import type { AnalysisState, OverviewTask } from '../../bridge.js';
+import type { AnalysisRevision, AnalysisRun, AnalysisState, OverviewTask } from '../../bridge.js';
 import { isWhatIf, type Dashboard } from './dashboardModel.js';
 import { runPresentationRole } from './businessResults.js';
 import { isCollectionHealthRun } from './CollectionHealthView.js';
@@ -45,6 +45,12 @@ export function sectionOf(target: string): AnalysisSection {
     case 'methods': return 'methods';
     default: return 'materials';
   }
+}
+
+/** 回款健康 belongs to 经营分析: a version saved for it, or one whose runs are its. Every other analysis is 财务分析's. */
+export function isOperationsAnalysis(analysis: AnalysisRevision, runs: AnalysisRun[]): boolean {
+  return analysis.finance_spec?.kind === 'collection_health'
+    || runs.some((run) => run.analysis_id === analysis.id && isCollectionHealthRun(run));
 }
 
 export type StepState = 'done' | 'todo' | 'attention' | 'not_started';

@@ -24,6 +24,7 @@ import { DraftBody } from '../src/views/analysis/DraftBody.js';
 import { documentFromMarkdown, documentToMarkdown } from '../electron/reports/format.js';
 import type { Answer, AnalysisDraft, AnalysisRevision, AnalysisRun, AnalysisState, Bridge, DatasetSnapshot, HarnessCardAction, TaskRow } from '../src/bridge.js';
 import { acrossElements } from './text-match.js';
+import healthFixture from './fixtures/collection-health-run.json';
 
 const task: TaskRow = { id: 'a'.repeat(32), title: '华东经营分析', period: null, skill_id: null, created_at: '2026-09-05T00:00:00Z', windows: 0 };
 const object = { task_id: task.id, schema_version: 1, created_at: task.created_at };
@@ -1463,6 +1464,21 @@ ${canonicalAppendix} 已改写`;
     render(<Analysis {...props} embedded section="materials" />);
     expect(await screen.findByRole('button', { name: `查看原因：${orphan}` })).toBeTruthy();
     expect(screen.getByText('把手头的资料加进来')).toBeTruthy();
+  });
+
+  it('shows 回款健康 on 经营分析 and leaves 财务分析 to the other results', async () => {
+    const healthAnalysis = { ...analysis, id: '9'.repeat(32), question: '回款健康', operation: 'scenario' as const, finance_spec: { kind: 'collection_health' } };
+    const health = { ...(healthFixture as unknown as AnalysisRun), task_id: task.id, analysis_id: healthAnalysis.id, created_at: '2026-09-06T00:00:00Z' };
+    mountBridge({ analysisState: async () => success({ ...initial, analyses: [analysis, healthAnalysis], runs: [run, health] }) });
+    const { rerender } = render(<Analysis {...props} embedded section="results" />);
+    // The newest run is 回款健康's, yet 财务分析 opens on its own result, counting only its own versions.
+    await screen.findByText('900,719,925,474,099.99');
+    expect(screen.queryByRole('table', { name: /生死线定位/ })).toBeNull();
+    expect(screen.getByText(/第 1 版（共 1 版）/)).toBeTruthy();
+    rerender(<Analysis {...props} embedded section="operations" />);
+    expect(await screen.findByRole('table', { name: /生死线定位/ })).toBeTruthy();
+    expect(screen.queryByText('900,719,925,474,099.99')).toBeNull();
+    expect(screen.getByRole('tab', { name: /5 经营分析，已完成/ }).getAttribute('aria-selected')).toBe('true');
   });
 
   it('keeps 资料 to the files and their sources, with the scope on 范围 and the workbook under 汇报', async () => {
