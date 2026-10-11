@@ -273,7 +273,7 @@
 .analysis-kpi-list > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; }
 .analysis-kpi-list dt { color: var(--fnd-muted); font-size: var(--fnd-size-small); }
 .analysis-kpi-list dd { margin: 0; text-align: right; font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.analysis-headline { display: grid; gap: 8px; padding-left: 12px; border-left: 1px solid var(--fnd-line-hover); font-family: var(--fnd-font-prose); }
+.analysis-headline { display: grid; gap: 8px; padding-left: 24px; border-left: 1px solid var(--fnd-line-hover); font-family: var(--fnd-font-prose); }
 .analysis-headline-line { display: grid; gap: 2px; }
 .analysis-headline-text { margin: 0; font-size: var(--fnd-size-conclusion); line-height: 32px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 /* The first conclusion leads; the ones after it stay above body text but no longer compete with it. */
