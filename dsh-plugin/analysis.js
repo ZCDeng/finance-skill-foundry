@@ -24,6 +24,10 @@ const runScope = {
 };
 const requirementsId = string("analysis_requirements_save 返回的要求版本 id；用于把运行与当前问题/范围绑定");
 // The result-row contract the backend checks when it declares a script run's rows (foundry/result_semantics.py).
+const scriptTopic = {
+  type: "string", enum: ["collection_health"],
+  description: "可选：脚本替哪种引擎分析出草稿。只在回款健康因表结构待确认（pending_structure）跑不了财务引擎、经理选了先出脚本草稿时写 collection_health；结果放在「经营分析」并标为脚本草稿，不进看板情景卡、月结和下月自动重算。",
+};
 const resultRowContract = "结果行约定（写 result_file 时遵守；不合约定时运行照常成功，提示写在运行记录 row_declarations.warnings，后台任务的完成回报也在 warnings 里带回 code 和中文 message，按提示改脚本后重跑）：长表每行一个数，列为 metric_key、scenario、value、unit，另写 organization、period、metric_label、basis；同一比较的实际、预算、差异、达成率行用相同的 metric_key、organization、period 和期间后缀。metric_key 用约定指标名 revenue、operating_profit、profit、gross_profit、period_expense、expense、cost 等，或需求版本 items 里列出的 metric；差异和达成率可写成 revenue_variance、revenue_achievement_ratio。scenario 用约定情景名：实际 actual、actual_ytd、actual_month，预算 budget、budget_ytd、budget_month，估算预算 estimated_budget，差异 variance，达成率 achievement_ratio 或 achievement_pct（是小数还是百分数只看 unit 列：小数写「比率」，百分数写 %）；带期间后缀的写法 actual_1_8（1-8 月累计）、budget_2026_08（2026 年 8 月单月）、variance_1_8 表示同一比较期间；其他情景名（如 budget_bud_fy）不参与配对，确需保留时先列进需求版本的 scenarios，否则收到提示。unit 按单位表：「比率」或 ratio 为小数（0.945 即 94.5%），%、pct 或「百分比」为百分数（文稿正文里，比率行和 %、pct、百分比行不用事实占位符，手写百分数并在 claim 里带 presentation：比率行 scale 用 percent，%、pct、百分比行 scale 用 identity、写展示值加 %，如 3.30%），两个比率之差写「百分点」（3.3 即 3.3 个百分点，不乘 100，收缴率缺口这类差值用它），金额写实际单位（万元、元）；「-」表示未标单位，比率行不写单位也算未标单位；这样的行不参与金额配对并收到提示，应避免。metric_label 写这一行的口径标签，要写出对象（如「营业收入 1-8 月预算」「营业利润完成率」），结果区按它显示指标；没有进入实际与预算配对的行里，同一组织、同一期间的两行显示出来的指标名相同（估算行会补「（估算）」，写成 revenue 这类指标代码的显示为中文名）而指标键不同（指标键取 metric、metric_key、business_key、result_key、item、name、指标 中第一个不为 null 的列），就收到 label_ambiguous 提示，结果区只能在名字后补中文名或指标键区分；需求版本列出的 metric 是 ratio 这类泛称时，metric_label 也必须写出对象。估算行在 basis 列写 estimate（可另写估算方法列），不要只靠文字里的估算、推算字样。";
 const relationship = {
   type: "object",
@@ -283,6 +287,7 @@ const SPECS = {
         requirements_id: requirementsId,
         result_role: resultRole,
         scope: runScope,
+        topic: scriptTopic,
         assumptions: { type: "array", items: {} },
         timeout_seconds: { type: "integer", minimum: 1, maximum: 120 },
       },
@@ -295,7 +300,7 @@ const SPECS = {
       code: string("完整代码；通过环境变量 FOUNDRY_INPUTS 读输入，在当前工作目录写输出"), language: { type: "string", enum: ["python", "shell"] },
       bindings: { type: "object", additionalProperties: { type: "string" } }, question: string("业务问题"),
       result_file: string("可选：本次输出的 CSV/JSON 表格相对路径，用于可引用结果行；金额用字符串；行按上面的结果行约定写"),
-      requirements_id: requirementsId, result_role: resultRole, scope: runScope,
+      requirements_id: requirementsId, result_role: resultRole, scope: runScope, topic: scriptTopic,
       assumptions: { type: "array", items: {} }, timeout_seconds: { type: "integer", minimum: 1, maximum: 120 },
     } } }),
     kind: "execute", argv: (input) => ["analysis-script-start", "--spec", json(input.spec)],

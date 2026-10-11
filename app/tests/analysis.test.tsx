@@ -1550,6 +1550,24 @@ ${canonicalAppendix} 已改写`;
     expect(screen.getByRole('tab', { name: /5 经营分析，已完成/ }).getAttribute('aria-selected')).toBe('true');
   });
 
+  it('shows a 回款健康 script draft on 经营分析, marked as not the engine\'s, and says what holds the engine back', async () => {
+    const draft = { ...analysis, id: '8'.repeat(32), question: '回款健康（脚本草稿）', engine: 'python' as const, topic: 'collection_health' as const };
+    const drafted = { ...run, id: '7'.repeat(32), analysis_id: draft.id, engine: 'python', created_at: '2026-09-06T00:00:00Z' } as AnalysisRun;
+    const progress = { task, todo: [{ kind: 'structure' as const, text: '物业套表.xlsx 的表结构等你确认', target: 'structure' }] };
+    const onOpenTarget = vi.fn();
+    mountBridge({ analysisState: async () => success({ ...initial, analyses: [analysis, draft], runs: [run, drafted] }) });
+    const { rerender } = render(<Analysis {...props} embedded section="operations" progress={progress} onOpenTarget={onOpenTarget} />);
+    expect(await screen.findByText('脚本草稿')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '确认表结构后用引擎重算' })).toBeTruthy();
+    expect(screen.getByText(/先确认 1 份资料的表结构/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '去确认表结构' }));
+    expect(onOpenTarget).toHaveBeenCalledWith('structure');
+    // 财务分析 keeps to its own results: the draft is 经营分析's.
+    rerender(<Analysis {...props} embedded section="results" progress={progress} onOpenTarget={onOpenTarget} />);
+    await screen.findByText('900,719,925,474,099.99');
+    expect(screen.queryByText('脚本草稿')).toBeNull();
+  });
+
   it('keeps 资料 to the files and their sources, with the scope on 范围 and the workbook under 汇报', async () => {
     mountBridge({ analysisState: async () => success(initial),
       financeCall: async (_taskId: string, command: string) => command === 'finance-source-list' ? success({ batches: [] }) : success({}) });

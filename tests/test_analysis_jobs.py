@@ -357,3 +357,18 @@ def test_job_that_never_started_measures_from_creation(tmp_path: Path, monkeypat
     failed = jobs.settle(row["id"], "failed", {"error": "harness runtime stopped"},
                          session_id="parent", child_session_id=row["child_session_id"])
     assert failed["duration_seconds"] == 4.0
+
+
+def test_script_topic_marks_a_collection_health_draft_and_refuses_any_other(tmp_path: Path, monkeypatch):
+    # 回款健康 by script while the workbook's structure waits: the version says so, and 经营分析 shows it as a draft.
+    task, context = _context(tmp_path)
+    _runner_reporting(monkeypatch, [0.1, 0.1])
+    store = AnalysisStore(task)
+    run = store.run_script({"code": "print('ok')", "bindings": {}, "topic": "collection_health"})
+    assert store.get_analysis(run["analysis_id"])["topic"] == "collection_health"
+    plain = store.run_script({"code": "print('ok')", "bindings": {}})
+    assert "topic" not in store.get_analysis(plain["analysis_id"])
+    with pytest.raises(FoundryError, match="script topic"):
+        store.run_script({"code": "print('ok')", "bindings": {}, "topic": "receivables_aging"})
+    with pytest.raises(FoundryError, match="script topic"):
+        JobStore(task).create(context, "script", {"code": "print('ok')", "bindings": {}, "topic": "anything"})

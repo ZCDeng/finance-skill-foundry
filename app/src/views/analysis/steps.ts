@@ -47,11 +47,18 @@ export function sectionOf(target: string): AnalysisSection {
   }
 }
 
-/** 回款健康 belongs to 经营分析: a version saved for it, or one whose runs are its. Every other analysis is 财务分析's. */
+/**
+ * 回款健康 belongs to 经营分析: a version saved for it, one whose runs are its, or a script drawn in its place while
+ * the workbook's structure waits (a script draft). Every other analysis is 财务分析's.
+ */
 export function isOperationsAnalysis(analysis: AnalysisRevision, runs: AnalysisRun[]): boolean {
-  return analysis.finance_spec?.kind === 'collection_health'
+  return analysis.finance_spec?.kind === 'collection_health' || isScriptDraft(analysis)
     || runs.some((run) => run.analysis_id === analysis.id && isCollectionHealthRun(run));
 }
+
+/** 回款健康 drawn by a script: shown on 经营分析, marked as not the engine's, and read by nothing else there. */
+export const isScriptDraft = (analysis: AnalysisRevision): boolean =>
+  analysis.topic === 'collection_health' && analysis.engine !== 'finance';
 
 export type StepState = 'done' | 'todo' | 'attention' | 'not_started' | 'skipped';
 export const STEP_WORDS: Record<StepState, string> = { done: '已完成', todo: '待处理', attention: '请留意', not_started: '未开始', skipped: '本期不做' };

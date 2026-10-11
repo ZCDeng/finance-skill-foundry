@@ -692,6 +692,8 @@ export interface AnalysisRevision extends AnalysisObject {
   /** Finance-engine versions: which calculation (metric, variance, scenario) and the spec it ran. */
   operation?: 'metric' | 'variance' | 'scenario';
   finance_spec?: Record<string, unknown>;
+  /** A script that stands in for an engine analysis not yet runnable: 回款健康 while the workbook's structure waits. */
+  topic?: 'collection_health';
   bindings: Record<string, string>;
   parameters: unknown[] | Record<string, unknown>;
   timeout_seconds?: number;
