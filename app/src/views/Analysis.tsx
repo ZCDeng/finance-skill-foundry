@@ -315,7 +315,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   const analysis = financeAnalyses.find((row) => row.id === selectedAnalysis)
     ?? financeAnalyses.find((row) => row.id === lastSuccessful?.analysis_id) ?? financeAnalyses.at(-1);
   const operationsAnalysis = operationsAnalyses.find((row) => row.id === selectedAnalysis) ?? operationsAnalyses.at(-1);
-  // 回款健康 runs on the engine only once each workbook's structure is settled: what 总览 lists as waiting on it.
+  // 回款健康 runs on the engine only once each workbook's structure is settled: what 总览 lists as waiting on it. An
+  // earlier engine run does not lift it: the files added since wait all the same.
   const structureWaits = progress?.task.id === task?.id ? progress?.todo.filter((item) => item.kind === 'structure') ?? [] : [];
   const engineHealth = (view?.runs ?? []).some((run) => operational.has(run.analysis_id) && isCollectionHealthRun(run));
   const draft = view?.drafts.find((row) => row.id === selectedDraft) ?? view?.drafts.at(-1);
@@ -580,9 +581,9 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         {view && place === 'operations' && <>
           <div className="analysis-section-heading"><div><h3>回款与现金</h3><p className="analysis-note">收缴率、清欠和收费明细这些业务上的事放在这一步。</p></div>
             {view.datasets.length && !readOnly ? <AskLink ask="collection-health" label={operationsAnalysis ? '让助手重算回款健康' : '让助手做回款健康分析'} disabled={busy} /> : null}</div>
-          {structureWaits.length && !engineHealth && !readOnly ? <p className="analysis-step-flag" role="note">
+          {structureWaits.length && !readOnly ? <p className="analysis-step-flag" role="note">
             <TriangleAlert size={14} strokeWidth={1.5} aria-hidden /><b>表结构待确认</b>
-            回款健康要用财务引擎算，先确认 {structureWaits.length} 份资料的表结构。确认一次，下个月同样形状的表自动采用。
+            {engineHealth ? '重算' : ''}回款健康要用财务引擎算，先确认 {structureWaits.length} 份资料的表结构。确认一次，下个月同样形状的表自动采用。
             <Button variant="link" size="sm" type="button" onClick={() => onOpenTarget ? onOpenTarget('structure') : choose('materials')}>去确认表结构</Button>
             <AskLink ask="structure-for-engine" label="让助手整理表结构提议" disabled={busy} />
           </p> : null}

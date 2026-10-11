@@ -345,6 +345,21 @@ def test_a_query_without_the_month_in_it_moves_to_the_new_month(tmp_path):
     assert revision["scope"] == {"period": "2026-09"} and revision["parent_id"] == saved["id"]
 
 
+def test_a_script_drawn_in_place_of_collection_health_is_not_run_again_on_new_files():
+    from types import SimpleNamespace
+
+    from foundry.dashboard_recompute import NotRerun, recipe_of
+
+    # Run again it would land on 财务分析 as a plain script; next month 回款健康 is the engine's to draw.
+    revision = {"id": "r1", "engine": "python", "topic": "collection_health", "code": "print(1)", "bindings": {"kpi": "d1"}}
+    source = SimpleNamespace(analysis=SimpleNamespace(get_analysis=lambda _id: revision))
+    with pytest.raises(NotRerun, match="脚本草稿"):
+        recipe_of(source, {"analysis_id": "r1"}, elsewhere=False)
+    plain = {key: value for key, value in revision.items() if key != "topic"}
+    source = SimpleNamespace(analysis=SimpleNamespace(get_analysis=lambda _id: plain))
+    assert recipe_of(source, {"analysis_id": "r1"}, elsewhere=False)["engine"] == "python"
+
+
 def test_a_calculation_waits_until_every_file_it_reads_is_the_new_month(tmp_path):
     manager, _, _ = _board(tmp_path)
     ledger = _readd(manager, tmp_path, "ledger", [{**row, "期间": "2026-08"} for row in KPI])

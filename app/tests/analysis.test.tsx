@@ -1568,6 +1568,17 @@ ${canonicalAppendix} 已改写`;
     expect(screen.queryByText('脚本草稿')).toBeNull();
   });
 
+  it('still says a structure holds the engine back when an earlier 回款健康 ran on it', async () => {
+    const healthAnalysis = { ...analysis, id: '9'.repeat(32), question: '回款健康', operation: 'scenario' as const, finance_spec: { kind: 'collection_health' } };
+    const health = { ...(healthFixture as unknown as AnalysisRun), task_id: task.id, analysis_id: healthAnalysis.id, created_at: '2026-09-06T00:00:00Z' };
+    // A corrected workbook came in after the run: its structure waits, so the engine cannot run 回款健康 again yet.
+    const progress = { task, todo: [{ kind: 'structure' as const, text: '物业套表（更正）.xlsx 的表结构等你确认', target: 'structure' }] };
+    mountBridge({ analysisState: async () => success({ ...initial, analyses: [analysis, healthAnalysis], runs: [run, health] }) });
+    render(<Analysis {...props} embedded section="operations" progress={progress} />);
+    expect(await screen.findByRole('table', { name: /生死线定位/ })).toBeTruthy();
+    expect(screen.getByText(/重算回款健康要用财务引擎算，先确认 1 份资料的表结构/)).toBeTruthy();
+  });
+
   it('keeps 资料 to the files and their sources, with the scope on 范围 and the workbook under 汇报', async () => {
     mountBridge({ analysisState: async () => success(initial),
       financeCall: async (_taskId: string, command: string) => command === 'finance-source-list' ? success({ batches: [] }) : success({}) });
