@@ -105,10 +105,8 @@
 
 @supports (anchor-name: --fnd-head-tab) and (anchor-scope: --fnd-head-tab) {
   .fnd-head__indicator {
-    display: block;
     position: absolute;
     position-anchor: --fnd-head-tab;
-    position-visibility: anchors-valid;
     left: calc(anchor(left) + 14px);
     right: calc(anchor(right) + 14px);
     bottom: -1px;
@@ -117,6 +115,12 @@
     box-shadow: var(--fnd-glow-selected);
     pointer-events: none;
     transition: left var(--fnd-transition), right var(--fnd-transition);
+  }
+
+  /* Drawn only while a tab is current: on 设置 and the other screens none is, and a line with nothing to anchor to
+     would sit at the start of the bar as a stray glow (position-visibility cannot hide it in this Chromium). */
+  .fnd-head__nav:has(> .fnd-head__tab[aria-current='page']) > .fnd-head__indicator {
+    display: block;
   }
 
   .fnd-head .fnd-head__tab[aria-current='page']::after {
@@ -153,10 +157,8 @@
 
 @supports (anchor-name: --fnd-tab) and (anchor-scope: --fnd-tab) {
   [data-slot='tabs-indicator'] {
-    display: block;
     position: absolute;
     position-anchor: --fnd-tab;
-    position-visibility: anchors-valid;
     left: anchor(left);
     right: anchor(right);
     bottom: anchor(bottom);
@@ -165,6 +167,11 @@
     box-shadow: var(--fnd-glow-selected);
     pointer-events: none;
     transition: left var(--fnd-transition), right var(--fnd-transition), bottom var(--fnd-transition);
+  }
+
+  /* Drawn only while a trigger is active, as the title bar's line is. */
+  [data-slot='tabs-list'][data-variant='line']:has(> [data-slot='tabs-trigger'][data-state='active']) > [data-slot='tabs-indicator'] {
+    display: block;
   }
 }
 

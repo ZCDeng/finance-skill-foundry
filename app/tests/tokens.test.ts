@@ -526,6 +526,17 @@ describe('the title bar gold', () => {
     expect(declarations(COMPONENTS, CURRENT)['anchor-name']).toBe('--fnd-head-tab');
   });
 
+  it('draws a sliding line only while something is current, never as a stray glow with nothing to anchor to', () => {
+    // On 设置 no title-bar tab is current. position-visibility: anchors-valid would hide an unanchored line, but
+    // Chromium does not take that value, so the lines are shown only when a current tab or trigger is there.
+    expect(COMPONENTS).not.toMatch(/position-visibility\s*:/);
+    expect(declarations(COMPONENTS, '.fnd-head__indicator').display).toBe('none');
+    expect(declarations(COMPONENTS, ".fnd-head__nav:has(> .fnd-head__tab[aria-current='page']) > .fnd-head__indicator").display).toBe('block');
+    expect(declarations(COMPONENTS, "[data-slot='tabs-indicator']").display).toBe('none');
+    expect(declarations(COMPONENTS,
+      "[data-slot='tabs-list'][data-variant='line']:has(> [data-slot='tabs-trigger'][data-state='active']) > [data-slot='tabs-indicator']").display).toBe('block');
+  });
+
   it('keeps the tabs on the window centre line: two equal sides around them', () => {
     expect(declarations(COMPONENTS, '.fnd-head')).toMatchObject({
       display: 'grid',
