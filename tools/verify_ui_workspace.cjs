@@ -262,6 +262,8 @@ const assert = require('node:assert/strict');
         await capture('finance-settings-light-1280', 1280, 800);
         await capture('finance-settings-dark-1080', 1080, 800, true);
         assert.equal(await financeSettings.getByLabel('组织', { exact: true }).count(), 0, 'the scope is changed on 范围 only');
+        // Escape is handled inside the drawer. The 组织 field this used to fill put focus there; with no field left, focus the drawer.
+        await financeSettings.focus();
         await page.keyboard.press('Escape');
         assert.equal(await financeSettings.isVisible(), false, 'Escape closes settings');
         assert.equal(await page.getByRole('button', { name: '调整范围', exact: true }).evaluate(node => node === document.activeElement), true, 'Escape returns focus to 调整范围');
