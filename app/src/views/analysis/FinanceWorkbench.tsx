@@ -397,12 +397,12 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
         onChange={setContextId} placeholder="搜索范围名称或期间" /> : null}
     </div>
     <PeriodPending scope={analysisScope} announce={false} />
-    <ScopeFields fields={PRIMARY_FIELDS} scope={scope} candidates={analysisScope.candidates} sources={analysisScope.candidateSources} disabled={locked} onField={analysisScope.setField} />
+    <ScopeFields fields={PRIMARY_FIELDS} scope={scope} candidates={analysisScope.candidates} sources={analysisScope.candidateSources} ranks={analysisScope.candidateRanks} disabled={locked} onField={analysisScope.setField} />
     {budget && <div className="analysis-edit-grid"><AccountingPeriodInput label="对比期间" value={comparePeriod} onChange={setComparePeriod}
       shortcutBaseValue={scope.period} shortcutBaseLabel="实际期间"
       help="留空时预算与实际取同一期间；填写后预算按这个期间取数。" /></div>}
     <details className="analysis-details"><DisclosureSummary>更多范围{moreScopeSummary ? ` · ${moreScopeSummary}` : ''}</DisclosureSummary>
-      <ScopeFields fields={MORE_FIELDS} scope={scope} candidates={analysisScope.candidates} sources={analysisScope.candidateSources} disabled={locked} onField={analysisScope.setField} />
+      <ScopeFields fields={MORE_FIELDS} scope={scope} candidates={analysisScope.candidates} sources={analysisScope.candidateSources} ranks={analysisScope.candidateRanks} disabled={locked} onField={analysisScope.setField} />
     </details></fieldset>
     {/* One main action, at the right; which one is the analysis's choice, so nothing moves while she fills the form in. */}
     <div className="analysis-actions analysis-actions--end">

@@ -134,6 +134,60 @@ export function inferCandidateSources(report?: ReadinessReport | null): ScopeCan
   return found;
 }
 
+/** How strongly the files back one candidate: how many files declare it, and a score weighing where each read it. */
+export type CandidateRank = { files: number; score: number };
+export type ScopeCandidateRanks = Partial<Record<ScopeKey, Record<string, CandidateRank>>>;
+
+/**
+ * A period read from a confirmed structure or a period column is what the numbers are for; one read only from a
+ * sheet title may be a contract or plan date, so it counts for less. The file name and declared metadata sit between.
+ */
+const PERIOD_WEIGHT: Record<string, number> = { confirmed: 3, column: 3, title: 1 };
+
+/** Each candidate's backing, one vote per file at the strongest place that file declares it. */
+export function rankScopeCandidates(datasets: DatasetSnapshot[], report?: ReadinessReport | null): ScopeCandidateRanks {
+  const votes: Partial<Record<ScopeKey, Map<string, Map<string, number>>>> = {};
+  const vote = (key: ScopeKey, value: unknown, file: string, weight: number) => {
+    if (value == null || typeof value === 'object') return;
+    const text = textValue(value).trim();
+    if (!text || text === '—') return;
+    const byValue = votes[key] ?? (votes[key] = new Map());
+    const byFile = byValue.get(text) ?? new Map<string, number>();
+    byFile.set(file, Math.max(byFile.get(file) ?? 0, weight));
+    byValue.set(text, byFile);
+  };
+  for (const source of datasets) {
+    const metadata = source.metadata ?? {};
+    const hints = metadata.scope_hints && typeof metadata.scope_hints === 'object' ? metadata.scope_hints as Record<string, unknown> : {};
+    for (const key of SCOPE_KEYS) { vote(key, metadata[key], source.id, 2); vote(key, hints[key], source.id, 2); }
+  }
+  for (const row of report?.datasets ?? []) {
+    const scope = (row.scope ?? {}) as Record<string, unknown>;
+    for (const key of SCOPE_KEYS) {
+      vote(key, scope[key], row.dataset_id, key === 'period' ? PERIOD_WEIGHT[row.scope_sources?.period?.origin ?? ''] ?? 2 : 2);
+    }
+    vote('period', row.name_scope?.period, row.dataset_id, 2);
+  }
+  const ranks: ScopeCandidateRanks = {};
+  for (const key of SCOPE_KEYS) {
+    const byValue = votes[key];
+    if (!byValue) continue;
+    ranks[key] = Object.fromEntries([...byValue].map(([value, byFile]) =>
+      [value, { files: byFile.size, score: [...byFile.values()].reduce((sum, weight) => sum + weight, 0) }]));
+  }
+  return ranks;
+}
+
+/** Candidates strongest first; the first is recommended only when it outweighs the next one. */
+export function orderCandidates(values: string[], ranks?: Record<string, CandidateRank>): { ordered: string[]; recommended?: string } {
+  const score = (value: string) => ranks?.[value]?.score ?? 0;
+  const ordered = values.map((value, index) => ({ value, index }))
+    .sort((left, right) => score(right.value) - score(left.value) || left.index - right.index).map(({ value }) => value);
+  const [first, second] = ordered;
+  const recommended = first !== undefined && (second === undefined || score(first) > score(second)) ? first : undefined;
+  return { ordered, recommended };
+}
+
 export type AnalysisScope = {
   /** The saved requirements record the fields were loaded from, if any. */
   current: ScopeRecord | null;
@@ -141,6 +195,8 @@ export type AnalysisScope = {
   candidates: ScopeCandidates;
   /** Where each candidate was read; absent where nothing says. */
   candidateSources?: ScopeCandidateSources;
+  /** How strongly the files back each candidate; absent where nothing was read. */
+  candidateRanks?: ScopeCandidateRanks;
   conflicts: ScopeConflict[];
   loading: boolean;
   saving: boolean;
@@ -321,6 +377,7 @@ export function useAnalysisScope(taskId: string | undefined, question: string, d
     current, scope, conflicts: scopeConflicts(current?.items, scope), loading, saving, message, error,
     candidates: inferScopeCandidates(datasets, report),
     candidateSources: inferCandidateSources(report),
+    candidateRanks: rankScopeCandidates(datasets, report),
     setField, setFields, applyRecord, save,
   };
 }
