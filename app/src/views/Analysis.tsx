@@ -27,6 +27,7 @@ import { BillingPanel } from './analysis/BillingPanel.js';
 import { WorkbookPanel } from './analysis/WorkbookPanel.js';
 import { RollforwardPanel } from './analysis/RollforwardPanel.js';
 import { FinanceWorkbench, type FinanceOutcome, type ScopeRequest } from './analysis/FinanceWorkbench.js';
+import { FinanceChartPanel } from './analysis/FinanceChartPanel.js';
 import { SettingsGroup, SettingsPanel, useSettingsPanel } from './analysis/SettingsPanel.js';
 import { AnalysisEditor, type AnalysisEdit } from './analysis/AnalysisEditor.js';
 import { DraftEditor, type DraftEdit } from './analysis/DraftEditor.js';
@@ -620,6 +621,9 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               const result = unwrap(await api.analysisExport(taskId, id, format, mode));
               if (currentTask.current === taskId) setNotice(result.cancelled ? '已取消导出。' : `已导出${format === 'xlsx' ? '工作簿' : sourceFormatLabel(format)}${result.path ? `：${textValue(result.path)}` : '。'}`);
             })} />
+          {/* A result kept as a chart goes into a draft, so it is archived here, beside the drafts. */}
+          {bridge()?.financeCall && view.runs.some((run) => run.execution_status === 'succeeded' || run.execution_status === 'success')
+            ? <FinanceChartPanel taskId={task.id} runs={view.runs} busy={busy} onRefresh={() => refresh(task.id)} /> : null}
         </>}
         {view && place === 'methods' && <Methods state={view} busy={busy} onApply={(methodId, bindings, parameters) => void perform(async (taskId) => {
             const api = bridge(); if (!api?.analysisMethodApply) throw new Error('此版本暂不支持复用方法。');

@@ -70,7 +70,7 @@ function openAnalysisEditor() {
   const adjust = screen.queryByText('调整参数、假设与资料');
   if (adjust?.closest('details')) (adjust.closest('details') as HTMLDetailsElement).open = true;
 }
-/** 设置与高级 holds one fold that picks scope and calculates: 范围与计算, or 计算定义与参数 for a non-finance analysis. */
+/** 自己动手算 holds one fold that picks scope and calculates: 范围与计算, or 计算定义与参数 for a non-finance analysis. */
 const SETTINGS = /^(范围与计算|计算定义与参数)$/;
 function settingsSummary() {
   return document.querySelector<HTMLElement>('details.analysis-finance-setup > summary');
@@ -691,7 +691,7 @@ describe('analysis workbench', () => {
     render(<Analysis {...props} />); await screen.findByText('本月实际');
     openAnalysisEditor();
     expect(settingsButton()).toBeTruthy();
-    expect(screen.getByRole('heading', { name: '设置与高级' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '自己动手算' })).toBeTruthy();
     fireEvent.keyDown(screen.getByRole('region', { name: SETTINGS }), { key: 'Escape' });
     await waitFor(() => expectFinanceSettingsClosed());
     expect(document.activeElement).toBe(settingsButton());
@@ -1295,7 +1295,7 @@ ${canonicalAppendix} 已改写`;
     expect(screen.getByRole('button', { name: '计算损益表' }).hasAttribute('aria-describedby')).toBe(false);
   });
 
-  describe('the calculation buttons in 设置与高级', () => {
+  describe('the calculation buttons in 自己动手算', () => {
     const context = (datasets: DatasetSnapshot[]) => success({ task_id: task.id, datasets, contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['metrics', 'variance'] });
     const actionRow = (dialog: HTMLElement) => within(dialog).getByRole('button', { name: '保存范围' }).parentElement as HTMLElement;
     const order = (dialog: HTMLElement) => within(actionRow(dialog)).getAllByRole('button').map((button) => [button.textContent, button.getAttribute('data-variant')]);
@@ -3195,7 +3195,8 @@ ${canonicalAppendix} 已改写`;
       return success({});
     });
     mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun] }), financeCall });
-    render(<Analysis {...props} embedded section="results" />);
+    // 归档图 is 汇报's: archived beside the drafts it goes into, not in 财务分析.
+    render(<Analysis {...props} embedded section="drafts" />);
     await screen.findByRole('group', { name: '归档图' });
     fireEvent.click(screen.getByRole('button', { name: '归档当前结果图' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'chart-deliverable-save', { run_id: financeRun.id }));

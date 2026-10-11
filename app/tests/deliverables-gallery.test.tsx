@@ -489,7 +489,7 @@ describe('the 成果库 side panel', () => {
     panel = screen.getByRole('complementary');
     expect(panel.textContent).toContain('82.12%');
     expect(panel.textContent).toContain('口径还没有经理确认');
-    fireEvent.click(within(panel).getByRole('button', { name: '在资料页查看' }));
+    fireEvent.click(within(panel).getByRole('button', { name: '在「经营分析」查看' }));
     expect(onOpenTask).toHaveBeenCalledWith(A, 'billing');
   });
 });

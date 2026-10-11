@@ -26,15 +26,16 @@ export function useSettingsPanel(initialOpen = false) {
 export type SettingsPanelState = ReturnType<typeof useSettingsPanel>;
 
 /**
- * 设置与高级 (DESIGN.md 分区与标题层级): one section heading with its note on
- * the line below, then the folds it groups, all drawn the same way. Status
+ * 自己动手算 (DESIGN.md 分区与标题层级): one section heading with its note on
+ * the line below, then the folds it groups, all drawn the same way. Named so it is
+ * not taken for the app's 设置 page. Status
  * lines a run leaves go between the heading and the folds, so a run that
  * closes a fold still leaves its outcome in view.
  */
 export function SettingsGroup({ note, children }: { note: string; children: ReactNode }) {
   const heading = useId();
   return <section className="analysis-settings-group" aria-labelledby={heading}>
-    <div className="analysis-settings-group__head"><h3 id={heading}>设置与高级</h3><p className="analysis-note">{note}</p></div>
+    <div className="analysis-settings-group__head"><h3 id={heading}>自己动手算</h3><p className="analysis-note">{note}</p></div>
     {children}
   </section>;
 }

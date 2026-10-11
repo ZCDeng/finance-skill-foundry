@@ -9,7 +9,6 @@ import { AccountingPeriodInput, DateInput, DecimalInput, FieldShell, MultiSelect
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { FinanceAdjustmentPanel } from './FinanceAdjustmentPanel.js';
-import { FinanceChartPanel } from './FinanceChartPanel.js';
 import { SettingsGroup, SettingsPanel, useSettingsPanel } from './SettingsPanel.js';
 import { PeriodPending, pendingPeriods } from './ScopePanel.js';
 import { CURRENCY_OPTIONS } from './glossary.js';
@@ -394,7 +393,9 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
     {outcome?.result === 'error' && <p role="alert" className="analysis-message analysis-message--error">{outcome.message}</p>}
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
   </>;
-  return <SettingsGroup note="自己动手算的地方：选资料和范围后计算，确认考核调整，把结果归档成图。">{status}<SettingsPanel state={settings} scrollIntoView label="范围与计算" summary="选好实际资料（和预算资料），确认范围后计算">
+  // 考核调整 changes the next management P&L, so it sits with the result, before the group; 归档图 is 汇报's.
+  return <>{contextId ? <FinanceAdjustmentPanel taskId={taskId} contextId={contextId} busy={locked} onRefresh={onRefresh} /> : null}
+  <SettingsGroup note="选实际资料（和预算资料），按第 2 步的范围算损益表或预算差异；也能看和改计算定义。">{status}<SettingsPanel state={settings} scrollIntoView label="范围与计算" summary="选好实际资料（和预算资料），确认范围后计算">
     <fieldset className="analysis-fieldset" disabled={locked}><div className="analysis-edit-grid">
       <SearchableSelect label="实际资料" value={actual} options={datasetOptions(datasets)} onChange={(value) => {
         setActual(value);
@@ -478,7 +479,5 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
       <Button variant="outline" type="button" disabled={locked || !mapRows.trim()} onClick={() => void saveMap()}>保存映射</Button>
     </details>
   </SettingsPanel>
-  {contextId ? <FinanceAdjustmentPanel taskId={taskId} contextId={contextId} busy={locked} onRefresh={onRefresh} /> : null}
-  {contextId ? <FinanceChartPanel taskId={taskId} runs={runs} busy={locked} onRefresh={onRefresh} /> : null}
-  </SettingsGroup>;
+  </SettingsGroup></>;
 }

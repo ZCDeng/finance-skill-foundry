@@ -40,7 +40,7 @@ export interface LibraryPanelActions {
   /** Open a filed export or a 写回 Excel copy, or show it in Finder. */
   onFile?(task: TaskRow, file: LibraryFile, action: 'open' | 'reveal'): void;
   /** Open the task where this result lives: 分析结果 for a chart, 资料 for a 收缴率 run, 看板 for a snapshot. */
-  onOpenTask?(task: TaskRow, target: 'results' | 'billing' | 'dashboard'): void;
+  onOpenTask?(task: TaskRow, target: 'drafts' | 'billing' | 'dashboard'): void;
 }
 
 const FORMAT_LABEL: Record<AnalysisExportRow['format'], string> = { md: 'Markdown', xlsx: 'Excel', docx: 'Word', pdf: 'PDF', html: 'HTML' };
@@ -223,8 +223,8 @@ function ChartDetail({ chart, task, actions }: { chart: ChartRow; task: TaskRow;
   return <div className="fnd-library__panel-body">
     <Pairs rows={[['保存时间', when(chart.created_at)], ['读的资料', chart.datasets.join('、') || '—']]} />
     <p className="fnd-muted">归档图按保存时的计算结果画出，打开时会核对资料没有变过。</p>
-    {actions.onOpenTask ? <div className="fnd-library__panel-actions"><Button type="button" variant="outline" onClick={() => actions.onOpenTask!(task, 'results')}>
-      在分析结果页查看</Button></div> : null}
+    {actions.onOpenTask ? <div className="fnd-library__panel-actions"><Button type="button" variant="outline" onClick={() => actions.onOpenTask!(task, 'drafts')}>
+      在「汇报 · 文稿」查看</Button></div> : null}
   </div>;
 }
 
@@ -258,7 +258,7 @@ function CollectionDetail({ run, task, actions }: { run: CollectionRunRow; task:
     ]} />
     {run.caliber.status !== 'confirmed' ? <p className="fnd-muted">口径还没有经理确认，这些数只作参考。</p> : null}
     {actions.onOpenTask ? <div className="fnd-library__panel-actions"><Button type="button" variant="outline" onClick={() => actions.onOpenTask!(task, 'billing')}>
-      在资料页查看</Button></div> : null}
+      在「经营分析」查看</Button></div> : null}
   </div>;
 }
 

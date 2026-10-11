@@ -312,7 +312,7 @@ const assert = require('node:assert/strict');
     await assertScopeFields('分析范围', { 账簿: '经营总账', 粒度: '区域' });
     await page.getByRole('tab', { name: /财务分析/ }).click();
     await page.getByRole('table', { name: '业务结果' }).waitFor({ timeout: 30000 });
-    checks.push('真实合成资料 metadata/scope_hints 一键采用为分析范围；保存写入 requirements，结果页设置与高级同步，重载后持久化');
+    checks.push('真实合成资料 metadata/scope_hints 一键采用为分析范围；保存写入 requirements，财务分析「自己动手算」读出同一范围，重载后持久化');
     // 本月三句话 (#166) opens at the top of the task; once folded, the results own the first screen again.
     const brief = page.locator('details.analysis-brief');
     assert.equal(await brief.getAttribute('open'), '', '本月三句话 opens expanded at the top of the task');
