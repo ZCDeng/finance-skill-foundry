@@ -16,7 +16,6 @@ import { readCopy, removeCopy, writeCopy } from './analysis/workingCopy.js';
 import { SearchableSelect } from '../components/FinancialControls.js';
 import { Button } from '../components/ui/button.js';
 import { Textarea } from '../components/ui/textarea.js';
-import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs.js';
 import { DatasetPreview } from './analysis/DatasetPreview.js';
 import { DashboardView, useDashboard, type BoardTour } from './analysis/Dashboard.js';
 import { MonthBrief } from './analysis/MonthBrief.js';
@@ -37,10 +36,11 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '
 import { DisclosureSummary } from '../components/Disclosure.js';
 import { Technical } from '../components/Preferences.js';
 import { Loading, SkeletonCards, SkeletonRows } from '../components/Loading.js';
+import { ReportNav, StepNav } from './analysis/StepNav.js';
+import { isReportView, sectionOf, stepOf, stepStates, type AnalysisSection, type ReportView } from './analysis/steps.js';
 
-type Tab = 'datasets' | 'results' | 'dashboard' | 'drafts' | 'close' | 'methods';
 type Selection = { analysis?: string; draft?: string };
-export type AnalysisSection = 'materials' | 'results' | 'dashboard' | 'drafts' | 'close' | 'methods';
+export type { AnalysisSection } from './analysis/steps.js';
 export type AnalysisChatOptions = { submit?: boolean; requestId?: string; targetTaskId?: string };
 type Props = {
   task: TaskRow | null;
@@ -55,20 +55,27 @@ type Props = {
   onLocatorPreview?(preview: import('../bridge.js').LocatorPreviewSpec): void;
   /** 成果库 asks for one draft version of a task; a new count is a new request. */
   draftRequest?: { count: number; taskId: string; draftId: string };
-  /** Go to where a line of 本月三句话 is handled, as a 总览 to-do goes there: the tab, then the block on it. */
+  /** Go to where a line of 本月三句话 is handled, as a 总览 to-do goes there: the step, then the block on it. */
   onOpenTarget?(target: string): void;
   /** 60 秒看看它能做什么 is walking this task's board. */
   tour?: BoardTour;
+  /** This task's month-close blocks as 总览 last read them: the first three steps' states come from these. */
+  progress?: import('../bridge.js').OverviewTask;
 };
-const TABS: [Tab, string][] = [['datasets', '资料'], ['results', '分析结果'], ['dashboard', '看板'], ['drafts', '文稿'], ['close', '月结'], ['methods', '方法']];
-/** Each page's own 使用指南 article, opened from the 「?」 beside 刷新. */
-const PAGE_ARTICLES: Partial<Record<Tab, string>> = { datasets: 'page-datasets', results: 'page-results', dashboard: 'page-dashboard', drafts: 'page-drafts', close: 'page-close' };
+/** Each place's own 使用指南 article, opened from the 「?」 beside 刷新. */
+const PAGE_ARTICLES: Partial<Record<AnalysisSection, [article: string, label: string]>> = {
+  materials: ['page-datasets', '「资料」这一步有什么'], scope: ['scope', '分析范围与期间'], close: ['page-close', '「勾稽」这一步有什么'],
+  results: ['page-results', '「财务分析」这一步有什么'], operations: ['collection-health', '回款与现金：生死线、应收天数和风险雷达'],
+  dashboard: ['page-dashboard', '看板：经营看板、一页纸与汇报模式'], drafts: ['page-drafts', '「文稿」有什么'], workbook: ['excel-writeback', '写回 Excel：预览后生成新工作簿'],
+};
 const EXAMPLES = ['本月利润为什么没有达到预算？', '哪些客户需要优先跟进回款？', '回款晚两周，现金余额会怎样？'];
 
 /** All figures are rendered as received. In particular, Decimal strings never pass through Number. */
-export function Analysis({ task, tasks, active: visible = true, embedded = false, section, onSectionChange, onPick, onNew, onChat, onLocatorPreview, draftRequest, onOpenTarget, tour }: Props) {
+export function Analysis({ task, tasks, active: visible = true, embedded = false, section, onSectionChange, onPick, onNew, onChat, onLocatorPreview, draftRequest, onOpenTarget, tour, progress }: Props) {
   const [state, setState] = useState<AnalysisState | null>(null);
-  const [tab, setTab] = useState<Tab>('datasets');
+  const [place, setPlace] = useState<AnalysisSection>('materials');
+  // 汇报 opens on whichever of its three was last open.
+  const lastReport = useRef<ReportView>('dashboard');
   const [question, setQuestionState] = useState(() => readCopy<string>(`${task?.id ?? 'new'}:question`) ?? '');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -119,13 +126,22 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     writeCopy(`${currentTask.current ?? 'new'}:question`, value);
     setQuestionState(value);
   }
-  const chooseTab = useCallback((next: Tab) => {
-    setTab(next);
-    onSectionChange?.(next === 'datasets' ? 'materials' : next);
+  /** Open a step or a place in one; a name from elsewhere (总览, the guide, a card) is read as sectionOf reads it. */
+  const choose = useCallback((target: string) => {
+    const next = target === 'report' ? lastReport.current : sectionOf(target);
+    if (isReportView(next)) lastReport.current = next;
+    setPlace(next);
+    onSectionChange?.(next);
   }, [onSectionChange]);
-  useEffect(() => { if (section) setTab(section === 'materials' ? 'datasets' : section); }, [section]);
+  useEffect(() => {
+    if (!section) return;
+    const next = sectionOf(section);
+    if (isReportView(next)) lastReport.current = next;
+    setPlace(next);
+  }, [section]);
+  const step = stepOf(place);
   // The assistant may have proposed a card since the board was read.
-  useEffect(() => { if (tab === 'dashboard') void board.load().catch(() => undefined); }, [tab, board.load]);
+  useEffect(() => { if (place === 'dashboard') void board.load().catch(() => undefined); }, [place, board.load]);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   const refresh = useCallback(async (taskId: string, options?: { scope?: boolean | 'quiet' }) => {
     // A completed operation may belong to a task the manager has left. It must
@@ -152,7 +168,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       removeCopy('new:question');
     }
     setQuestionState(readCopy<string>(`${task?.id ?? 'new'}:question`) ?? '');
-    setTab(section ? section === 'materials' ? 'datasets' : section : 'datasets');
+    setPlace(section ? sectionOf(section) : 'materials');
     if (!task) return;
     const taskId = task.id;
     setLoading(true);
@@ -206,7 +222,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     await refresh(taskId);
     note(added.length ? 'ok' : 'cancelled');
     if (currentTask.current === taskId) {
-      chooseTab('datasets');
+      choose('materials');
       if (added.length) setNotice(`已加入 ${added.length} 份资料。可以继续提问。`);
     }
   });
@@ -352,9 +368,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       })}
       onRefresh={() => refresh(task.id)}>{(close) => analysisDefinition(close)}</FinanceWorkbench>
     : null;
-  const counts: Record<Tab, number> = { datasets: view?.datasets.length ?? 0, results: view?.runs.filter((run) => runPresentationRole(run) === 'business').length ?? 0,
-    dashboard: board.dashboard?.cards.filter((card) => card.state !== 'explore').length ?? 0,
-    drafts: view?.drafts.length ?? 0, close: 0, methods: view?.methods.length ?? 0 };
+  const reportCounts = { dashboard: board.dashboard?.cards.filter((card) => card.state !== 'explore').length ?? 0, drafts: view?.drafts.length ?? 0 };
+  const states = stepStates({ view, progress: progress?.task.id === task?.id ? progress : undefined, board: board.dashboard, scopeSaved: Boolean(analysisScope.current) });
   const readOnly = Boolean(task?.lifecycle_status && task.lifecycle_status !== 'active');
   const canPin = Boolean(bridge()?.financeCall) && !readOnly;
   const pinBoard = useMemo(() => (canPin ? { pin: board.pin } : null), [canPin, board.pin]);
@@ -379,17 +394,17 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       }
       if (action.kind === 'collection') {
         setBillingShow({ id: action.runId, count: Date.now() });
-        chooseTab('datasets');
+        choose('operations');
         return;
       }
       writeCopy(`${taskId}:run`, action.runId);
       if (action.analysisId) setSelectedAnalysis(action.analysisId);
       setRunOpens((value) => value + 1);
-      chooseTab('results');
+      choose('results');
       // The assistant may have calculated it after this page last read the task.
       void refresh(taskId).catch(() => undefined);
     });
-  }, [board.pin, canPin, chooseTab, refresh]);
+  }, [board.pin, canPin, choose, refresh]);
   async function saveDraft(taskId: string, spec: Record<string, unknown>): Promise<AnalysisDraft> {
     const api = bridge();
     const recoveryRef = spec.recovery_ref as { operation_id: string; revision: number } | undefined;
@@ -444,47 +459,35 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       {view && view.datasets.length > 0 && bridge()?.financeCall ? <MonthBrief taskId={task.id} board={board.dashboard}
         refreshKey={`${view.datasets.length}:${view.runs.length}:${view.drafts.length}:${board.dashboard?.id ?? ''}:${materialsRefresh}`}
         runs={view.runs} analyses={view.analyses} datasets={view.datasets} superseded={view.superseded_datasets ?? []} readOnly={readOnly}
-        onOpen={(target) => onOpenTarget ? onOpenTarget(target)
-          : chooseTab(target === 'controls' || target === 'close' ? 'close' : target === 'results' || target === 'drafts' || target === 'dashboard' ? target : 'datasets')}
+        onOpen={(target) => onOpenTarget ? onOpenTarget(target) : choose(target)}
         onOpenResult={(run) => {
           writeCopy(`${task.id}:run`, run.id);
           setSelectedAnalysis(run.analysis_id);
           setRunOpens((value) => value + 1);
-          chooseTab('results');
+          choose('results');
         }} /> : null}
-      <Tabs value={tab} onValueChange={(value) => chooseTab(value as Tab)} activationMode="manual">
-      <div className="analysis-tabbar"><TabsList variant="line" className="analysis-tabs" aria-label="任务工作区">
-        {TABS.filter(([id]) => !embedded || id !== 'methods').map(([id, title], index, tabs) => (
-          <TabsTrigger key={id} id={`analysis-tab-${id}`} value={id} onClick={() => chooseTab(id)}
-            onKeyDown={(event) => {
-              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-              event.preventDefault();
-              const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
-                : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
-              chooseTab(tabs[next][0]); document.getElementById(`analysis-tab-${tabs[next][0]}`)?.focus();
-            }}>{title}{id === 'close' ? null : <span>{counts[id]}</span>}</TabsTrigger>
-        ))}
-      </TabsList><div className="analysis-tabbar-tools">
-        {PAGE_ARTICLES[tab] ? <HelpLink article={PAGE_ARTICLES[tab]!} label={`「${TABS.find(([id]) => id === tab)?.[1]}」页有什么`} /> : null}
+      <StepNav step={step} states={states} onStep={choose} tools={<>
+        {PAGE_ARTICLES[place] ? <HelpLink article={PAGE_ARTICLES[place]![0]} label={PAGE_ARTICLES[place]![1]} /> : null}
         <Button variant="outline" type="button" disabled={busy || loading} onClick={() => {
-        // The 5-second read leaves the structure to-dos alone; an explicit 刷新 reads them again too.
-        setMaterialsRefresh((count) => count + 1);
-        void perform((taskId) => refresh(taskId, { scope: true }));
-      }}>
-        <RefreshCw size={13} aria-hidden />刷新</Button></div></div></Tabs>
+          // The 5-second read leaves the structure to-dos alone; an explicit 刷新 reads them again too.
+          setMaterialsRefresh((count) => count + 1);
+          void perform((taskId) => refresh(taskId, { scope: true }));
+        }}>
+          <RefreshCw size={13} aria-hidden />刷新</Button></>} />
       <DashboardPinContext.Provider value={pinBoard}>
-      <section role="tabpanel" id={`analysis-panel-${tab}`} aria-labelledby={embedded && tab === 'methods' ? undefined : `analysis-tab-${tab}`}
-        aria-label={embedded && tab === 'methods' ? '方法库' : undefined} className="analysis-content">
-        {/* The first read draws the shape of the tab; a refresh over what is already shown keeps the quiet line. */}
+      <section role="tabpanel" id={`analysis-panel-${step}`} aria-labelledby={step === 'methods' ? undefined : `analysis-tab-${step}`}
+        aria-label={step === 'methods' ? '方法库' : undefined} className="analysis-content">
+        {step === 'report' && isReportView(place) ? <ReportNav view={place} counts={reportCounts} onView={choose} /> : null}
+        {/* The first read draws the shape of the step; a refresh over what is already shown keeps the quiet line. */}
         {loading && (view ? <p role="status" className="analysis-note">正在读取任务资料与成果…</p>
-          : <Loading label="正在读取任务资料与成果…">{tab === 'results' ? <SkeletonCards /> : <SkeletonRows />}</Loading>)}
-        {view && tab === 'datasets' && <>
+          : <Loading label="正在读取任务资料与成果…">{place === 'results' ? <SkeletonCards /> : <SkeletonRows />}</Loading>)}
+        {view && place === 'materials' && <>
           <div className="analysis-section-heading"><span className="fnd-with-help"><h3>任务资料</h3><HelpLink article="data-safety" label="资料快照与原文件" /></span>{embedded && view.datasets.length > 0
             ? <Button variant="outline" type="button" disabled={busy} onClick={() => void perform(addFiles)}><FilePlus2 size={15} aria-hidden />添加资料</Button> : null}</div>
           {!view.datasets.length && <AnalysisEmpty title="把手头的资料加进来" body="添加文件，或先和助手说清范围。"
             onAddFiles={embedded ? () => void perform(addFiles) : undefined}
             onChat={() => void chat(question.trim() || undefined)} />}
-          {/* What these files can answer and what still waits on the manager, then the files, then the settings. */}
+          {/* What these files can answer and what still waits on the manager, then the files. */}
           <ReadinessPanel taskId={task.id} refreshKey={view.datasets} />
           <MaterialsFileList taskId={task.id} datasets={view.datasets} busy={busy} preview={dataset} refreshKey={materialsRefresh}
             onPreview={(source) => void perform(async (taskId) => {
@@ -492,24 +495,28 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               const content = unwrap(await api.analysisReadDataset(taskId, source.id));
               if (currentTask.current === taskId) setDataset({ source, content });
             })} onClosePreview={() => setDataset(null)} onRefresh={() => refresh(task.id)} />
-          {bridge()?.financeCall && view.datasets.length > 0 && <ScopePanel scope={analysisScope} datasetCount={view.datasets.length}
-            disabled={busy} onSaved={() => void refresh(task.id)} />}
           <WorkbookOverview taskId={task.id} datasets={view.datasets} />
-          {bridge()?.billingCall && <BillingPanel taskId={task.id} period={task.period} refreshKey={materialsRefresh} show={billingShow} onShown={() => setBillingShow(undefined)}
-            practice={task.sample === 'practice' || task.sample === 'next_month'}
-            readOnly={Boolean(task.lifecycle_status && task.lifecycle_status !== 'active')} />}
           <section className="analysis-more-actions" aria-labelledby="analysis-more-actions">
-            <div><h3 id="analysis-more-actions">更多操作</h3><p className="analysis-note">换新导出的来源、把结果写回 Excel，或用这个月的数起草下月套表。</p></div>
+            <div><h3 id="analysis-more-actions">更多操作</h3><p className="analysis-note">换新导出的来源，或用这个月的数起草下月套表。</p></div>
             <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />
-            <details className="analysis-details"><DisclosureSummary>写回 Excel</DisclosureSummary>
-              <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} contextId={[...view.runs].reverse().find((run) => run.finance_context_id)?.finance_context_id} />
-            </details>
             <details className="analysis-details analysis-rollforward"><DisclosureSummary>滚动到下月</DisclosureSummary>
               <RollforwardPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} onApplied={() => refresh(task.id)} />
             </details>
           </section>
         </>}
-        {view && tab === 'results' && <>
+        {view && place === 'scope' && (bridge()?.financeCall && view.datasets.length > 0
+          ? <ScopePanel scope={analysisScope} datasetCount={view.datasets.length} disabled={busy} onSaved={() => void refresh(task.id)} />
+          : <AnalysisEmpty title="先把资料加进来" body="资料里写的期间、组织和单位会列在这里，点一下就能采用。"
+            onAddFiles={embedded ? () => void perform(addFiles) : undefined} onChat={() => void chat(question.trim() || undefined)} />)}
+        {view && place === 'operations' && <>
+          <div className="analysis-section-heading"><div><h3>回款与现金</h3><p className="analysis-note">收缴率、清欠和收费明细这些业务上的事放在这一步。</p></div>
+            {view.datasets.length && !readOnly ? <AskLink ask="collection-health" label="让助手做回款健康分析" disabled={busy} /> : null}</div>
+          {bridge()?.billingCall ? <BillingPanel taskId={task.id} period={task.period} refreshKey={materialsRefresh} show={billingShow} onShown={() => setBillingShow(undefined)}
+            practice={task.sample === 'practice' || task.sample === 'next_month'} readOnly={readOnly} /> : null}
+        </>}
+        {view && place === 'workbook' && <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy}
+          contextId={[...view.runs].reverse().find((run) => run.finance_context_id)?.finance_context_id} />}
+        {view && place === 'results' && <>
           {!analysis && financeWorkbench}
           {!analysis ? <AnalysisEmpty title="从资料到可检查的结果" body="选好资料、确认范围并计算后，结果和依据会出现在这里。"
             onChat={() => void chat(question.trim() || undefined)}
@@ -555,22 +562,22 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           </>}
           {analysis && financeWorkbench}
         </>}
-        {view && tab === 'dashboard' && <DashboardView task={{ id: task.id, title: task.title, period: formatPeriod(task.period) }} state={board} runs={view.runs} analyses={view.analyses} datasets={view.datasets}
+        {view && place === 'dashboard' && <DashboardView task={{ id: task.id, title: task.title, period: formatPeriod(task.period) }} state={board} runs={view.runs} analyses={view.analyses} datasets={view.datasets}
           superseded={view.superseded_datasets ?? []} readOnly={readOnly} tour={tour} onOpenResult={(run) => {
             // The run the card reads, not the version's primary one: RunPanel opens on the run kept here.
             writeCopy(`${task.id}:run`, run.id);
             setSelectedAnalysis(run.analysis_id);
-            chooseTab('results');
+            choose('results');
           }} />}
-        {view && tab === 'close' && <MonthCloseControlCenter taskId={task.id} refreshKey={`${view.datasets.length}:${view.runs.length}:${view.drafts.length}`} busy={busy}
+        {view && place === 'close' && <MonthCloseControlCenter taskId={task.id} refreshKey={`${view.datasets.length}:${view.runs.length}:${view.drafts.length}`} busy={busy}
           onOpen={(target: CloseTarget) => {
-            chooseTab(target === 'results' ? 'results' : target === 'drafts' ? 'drafts' : 'datasets');
-            // The scope card and the files sit on the 资料 tab; bring the one asked for into view.
+            choose(target);
+            // Bring the block asked for into view: the scope card on 范围, the files on 资料.
             if (target === 'scope' || target === 'structure' || target === 'datasets') {
               requestAnimationFrame(() => materialsAnchor(target)?.scrollIntoView?.({ block: 'start' }));
             }
           }} />}
-        {view && tab === 'drafts' && <>
+        {view && place === 'drafts' && <>
           <DraftEditor key={draftKey} taskId={task.id} draft={draft} drafts={view.drafts} busy={busy} runs={view.runs} datasets={view.datasets}
             analysisScope={analysisScope}
             onAppliedDraft={(next) => void perform(async (taskId) => { await refresh(taskId); if (next.id) setSelectedDraft(next.id); })}
@@ -598,10 +605,10 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               if (currentTask.current === taskId) setNotice(result.cancelled ? '已取消导出。' : `已导出${format === 'xlsx' ? '工作簿' : sourceFormatLabel(format)}${result.path ? `：${textValue(result.path)}` : '。'}`);
             })} />
         </>}
-        {view && tab === 'methods' && <Methods state={view} busy={busy} onApply={(methodId, bindings, parameters) => void perform(async (taskId) => {
+        {view && place === 'methods' && <Methods state={view} busy={busy} onApply={(methodId, bindings, parameters) => void perform(async (taskId) => {
             const api = bridge(); if (!api?.analysisMethodApply) throw new Error('此版本暂不支持复用方法。');
             const next = unwrap(await api.analysisMethodApply(taskId, methodId, bindings, parameters)); await refresh(taskId);
-            if (currentTask.current === taskId) { setSelectedAnalysis(next.id); chooseTab('results'); setNotice('已生成分析版本，可以调整范围后计算。'); }
+            if (currentTask.current === taskId) { setSelectedAnalysis(next.id); choose('results'); setNotice('已生成分析版本，可以调整范围后计算。'); }
           })} />}
       </section>
       </DashboardPinContext.Provider>

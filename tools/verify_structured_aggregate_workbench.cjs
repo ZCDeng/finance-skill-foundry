@@ -160,7 +160,7 @@ async function ensureDetailsOpenBySummary(summaryText) {
 
 async function openResultsTab() {
   const tabbar = page.locator('.analysis-tabbar:visible').last();
-  const tab = tabbar.getByRole('tab', {name: /结果/});
+  const tab = tabbar.getByRole('tab', {name: /财务分析/});
   await tab.waitFor({state: 'visible', timeout: 30000});
   await tab.click();
   await until(

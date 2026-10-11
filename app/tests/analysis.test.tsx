@@ -46,13 +46,18 @@ function mountBridge(overrides: Partial<Bridge> = {}) {
   (globalThis as unknown as { foundry: Partial<Bridge> }).foundry = api;
   return api;
 }
+/** Opens a step, or one of 汇报's three (看板, 文稿, 写回 Excel) by way of 汇报. */
+function openTab(name: RegExp) {
+  if (/文稿|看板|写回/.test(name.source) && !screen.queryByRole('tab', { name })) openTab(/汇报/);
+  fireEvent.click(screen.getByRole('tab', { name }));
+}
 function openDraftEditor() {
-  fireEvent.click(screen.getByRole('tab', { name: /文稿/ }));
+  openTab(/文稿/);
   const edit = screen.queryByRole('tab', { name: '编辑', selected: false });
   if (edit) fireEvent.click(edit);
 }
 function openAnalysisEditor() {
-  fireEvent.click(screen.getByRole('tab', { name: /分析结果/ }));
+  openTab(/财务分析/);
   if (settingsEntryOrDialog()) openFinanceSettings();
   const adjust = screen.queryByText('调整参数、假设与资料');
   if (adjust?.closest('details')) (adjust.closest('details') as HTMLDetailsElement).open = true;
@@ -96,8 +101,8 @@ function exportDraft() {
   press(screen.getByRole('button', { name: '导出' }));
   fireEvent.click(screen.getByRole('menuitem', { name: /导出文稿/ }));
 }
+/** 方法库 has no step of its own: the sidebar opens it, as the section prop does here. */
 function openMethods() {
-  fireEvent.click(screen.getByRole('tab', { name: /方法/ }));
   for (const summary of screen.queryAllByText('高级：参数与计算定义')) {
     if (summary.closest('details')) (summary.closest('details') as HTMLDetailsElement).open = true;
   }
@@ -338,7 +343,7 @@ describe('analysis workbench', () => {
     expect((screen.getByLabelText('参数 · 第 1 项') as HTMLInputElement).value).toBe('0.93');
     openDraftEditor();
     expect((screen.getByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe('尚未保存的经营判断。');
-    fireEvent.click(screen.getByRole('tab', { name: /资料/ }));
+    openTab(/资料/);
     openAnalysisEditor();
     expect((screen.getByLabelText('参数 · 第 1 项') as HTMLInputElement).value).toBe('0.93');
   });
@@ -388,7 +393,7 @@ describe('analysis workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '分析版本' }));
     expect(await screen.findByRole('option', { name: /助手新计算的预算差异/ })).toBeTruthy();
     fireEvent.keyDown(screen.getByLabelText('分析版本搜索'), { key: 'Escape' });
-    fireEvent.click(screen.getByRole('tab', { name: /资料/ }));
+    openTab(/资料/);
     expect(screen.getByText('助手新加预算')).toBeTruthy();
     rerender(<Analysis {...props} active />);
     expect(analysisState).toHaveBeenCalledTimes(2);
@@ -438,8 +443,8 @@ describe('analysis workbench', () => {
     const method = { ...object, id: '5'.repeat(32), name: '利润比较法', sql: 'select * from actual', input_contracts: { actual: { schema: source.schema! } } };
     const analysisMethodApply = vi.fn(async () => success(analysis));
     mountBridge({ analysisState: async () => success({ ...initial, methods: [method] }), analysisMethodApply });
-    render(<Analysis {...props} />); await screen.findByText('本月实际');
-    openMethods();
+    const { rerender } = render(<Analysis {...props} />); await screen.findByText('本月实际');
+    rerender(<Analysis {...props} section="methods" />); openMethods();
     const button = screen.getByRole('button', { name: '用这些资料创建分析' });
     expect((button as HTMLButtonElement).disabled).toBe(true);
     chooseSearchable('选择 实际资料', /本月实际/);
@@ -452,8 +457,8 @@ describe('analysis workbench', () => {
       input_contracts: { actual: { schema: source.schema! }, budget: { schema: budgetSource.schema! } } };
     const analysisMethodApply = vi.fn(async () => success(analysis));
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, budgetSource], methods: [method] }), analysisMethodApply });
-    render(<Analysis {...props} />); await screen.findByText('本月实际');
-    openMethods();
+    const { rerender } = render(<Analysis {...props} />); await screen.findByText('本月实际');
+    rerender(<Analysis {...props} section="methods" />); openMethods();
     expect(screen.queryByLabelText('选择 actual 资料')).toBeNull();
     chooseSearchable('选择 实际资料', /本月实际/);
     chooseSearchable('选择 预算资料', /本月预算/);
@@ -465,8 +470,8 @@ describe('analysis workbench', () => {
     const method = { ...object, id: '6'.repeat(32), name: '回款情景', sql: 'select profit * $rate from actual', input_contracts: { actual: { schema: source.schema! } } };
     const analysisMethodApply = vi.fn(async () => success(analysis));
     mountBridge({ analysisState: async () => success({ ...initial, methods: [method] }), analysisMethodApply });
-    render(<Analysis {...props} />); await screen.findByText('本月实际');
-    openMethods();
+    const { rerender } = render(<Analysis {...props} />); await screen.findByText('本月实际');
+    rerender(<Analysis {...props} section="methods" />); openMethods();
     chooseSearchable('选择 实际资料', /本月实际/);
     fireEvent.click(screen.getByRole('button', { name: '添加方法参数' }));
     fireEvent.change(screen.getByLabelText('参数 1 的值'), { target: { value: '0.8500000000000001' } });
@@ -480,8 +485,8 @@ describe('analysis workbench', () => {
       input_contracts: { actual: { schema: source.schema! } }, parameter_contract: [{ parameter: '1', type: 'VARCHAR', source: 'literal' }] };
     const analysisMethodApply = vi.fn(async () => success(analysis));
     mountBridge({ analysisState: async () => success({ ...initial, methods: [method] }), analysisMethodApply });
-    render(<Analysis {...props} />); await screen.findByText('本月实际');
-    openMethods();
+    const { rerender } = render(<Analysis {...props} />); await screen.findByText('本月实际');
+    rerender(<Analysis {...props} section="methods" />); openMethods();
     const input = screen.getByLabelText('参数 1 的值 · 文本') as HTMLInputElement;
     expect(input.value).toBe('');
     expect(screen.queryByRole('button', { name: '添加方法参数' })).toBeNull();
@@ -566,12 +571,12 @@ describe('analysis workbench', () => {
     expect((screen.getByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe('需要继续推敲的判断。');
   });
 
-  it('supports keyboard navigation across the workspace tabs', async () => {
+  it('supports keyboard navigation across the steps', async () => {
     mountBridge(); render(<Analysis {...props} />); await screen.findByText('本月实际');
     const first = screen.getByRole('tab', { name: /资料/ });
     first.focus(); fireEvent.keyDown(first, { key: 'ArrowRight' });
-    expect(screen.getByRole('tab', { name: /分析结果/ }).getAttribute('aria-selected')).toBe('true');
-    expect(document.activeElement).toBe(screen.getByRole('tab', { name: /分析结果/ }));
+    expect(screen.getByRole('tab', { name: /范围/ }).getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: /范围/ }));
   });
 
   it('embeds an existing task without another task header or composer and exposes materials import', async () => {
@@ -583,7 +588,7 @@ describe('analysis workbench', () => {
     expect(screen.queryByLabelText('接下来想了解什么？')).toBeNull();
     expect(screen.queryByRole('heading', { name: task.title, level: 2 })).toBeNull();
     expect(screen.queryByRole('tab', { name: /方法/ })).toBeNull();
-    fireEvent.click(screen.getByRole('tab', { name: /资料/ }));
+    openTab(/资料/);
     expect(onSectionChange).toHaveBeenCalledWith('materials');
     fireEvent.click(screen.getByRole('button', { name: '添加资料' }));
     await waitFor(() => expect(analysisAddFiles).toHaveBeenCalledWith(task.id));
@@ -694,7 +699,8 @@ describe('analysis workbench', () => {
       ] };
     const analysisMethodApply = vi.fn(async () => success(analysis));
     mountBridge({ analysisState: async () => success({ ...initial, methods: [method] }), analysisMethodApply });
-    render(<Analysis {...props} />); await screen.findByText('本月实际'); openMethods();
+    const { rerender } = render(<Analysis {...props} />); await screen.findByText('本月实际');
+    rerender(<Analysis {...props} section="methods" />); openMethods();
     expect((screen.getByLabelText('回款比例') as HTMLInputElement).value).toBe('');
     expect(screen.queryByLabelText(/参数 2 的值/)).toBeNull();
     chooseSearchable('选择 实际资料', /本月实际/);
@@ -713,11 +719,11 @@ describe('analysis workbench', () => {
     expect(within(toolbar).getByRole('tablist', { name: '文稿模式' })).toBeTruthy();
     expect(within(toolbar).getByRole('button', { name: '围绕此稿继续分析' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^(编辑文稿|阅读文稿)$/ })).toBeNull();
-    fireEvent.click(screen.getByRole('tab', { name: /^编辑$/ }));
+    openTab(/^编辑$/);
     fireEvent.change(screen.getByLabelText('文稿正文'), { target: { value: '经理自己的判断。' } });
-    fireEvent.click(screen.getByRole('tab', { name: /^阅读$/ }));
+    openTab(/^阅读$/);
     expect(within(screen.getByRole('article', { name: '文稿阅读' })).getByText('经理自己的判断。')).toBeTruthy();
-    fireEvent.click(screen.getByRole('tab', { name: /^编辑$/ }));
+    openTab(/^编辑$/);
     expect((screen.getByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe('经理自己的判断。');
   });
 
@@ -840,7 +846,7 @@ describe('analysis workbench', () => {
     expect(fold).toBeTruthy();
     fold.open = true;
     expect(within(fold).getByRole('heading', { name: '计算依据附录' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('tab', { name: /^编辑$/ }));
+    openTab(/^编辑$/);
     expect((screen.getByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe(body);
   });
 
@@ -892,7 +898,7 @@ ${canonicalAppendix} 已改写`;
   it('names populated draft controls explicitly without including their contents', async () => {
     mountBridge(); render(<Analysis {...props} embedded section="drafts" />);
     await screen.findByRole('article', { name: '文稿阅读' });
-    fireEvent.click(screen.getByRole('tab', { name: /^编辑$/ }));
+    openTab(/^编辑$/);
     for (const name of ['文稿标题', '文稿正文', '局限与待确认事项（每行一项）', '我的审阅状态']) {
       expect(screen.getByLabelText(name, { exact: true }).getAttribute('aria-label')).toBe(name);
     }
@@ -1005,7 +1011,7 @@ ${canonicalAppendix} 已改写`;
     expect(screen.getByRole('tab', { name: /文稿/ }).getAttribute('aria-selected')).toBe('true');
     act(() => tell!({ action: 'open', taskId: task.id, kind: 'analysis', runId: run.id, analysisId: analysis.id }));
     expect(await screen.findByText('900,719,925,474,099.99')).toBeTruthy();
-    expect(screen.getByRole('tab', { name: /分析结果/ }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: /财务分析/ }).getAttribute('aria-selected')).toBe('true');
     const card = { kind: 'figure' as const, title: '华东利润', run_id: run.id, select: { match: {}, column: 'profit' } };
     act(() => tell!({ action: 'pin', taskId: task.id, card }));
     await waitFor(() => expect(saved).toEqual([{ parent_id: null, cards: [{ ...card, state: 'pinned' }] }]));
@@ -1040,11 +1046,11 @@ ${canonicalAppendix} 已改写`;
     openFinanceSettings();
     fireEvent.click(screen.getByRole('button', { name: '计算损益表' }));
     await waitFor(() => expect(analysisState).toHaveBeenCalledTimes(2));
-    fireEvent.click(screen.getByRole('tab', { name: /文稿/ }));
-    await screen.findByRole('tabpanel', { name: /文稿/ });
+    openTab(/文稿/);
+    await screen.findByRole('tabpanel', { name: /汇报/ });
     await act(async () => refreshGate.resolve(success({ ...initial, datasets: [source, budgetSource], runs: [{ ...run, engine: 'finance', finance_context_id: '4'.repeat(32) }] })));
     await waitFor(() => expect(screen.getByRole('tab', { name: /文稿/ }).getAttribute('aria-selected')).toBe('true'));
-    expect(screen.getByRole('tab', { name: /分析结果/ }).getAttribute('aria-selected')).toBe('false');
+    expect(screen.getByRole('tab', { name: /财务分析/ }).getAttribute('aria-selected')).toBe('false');
   });
 
   it('keeps the user on drafts when a source refresh finishes after they leave datasets', async () => {
@@ -1058,7 +1064,7 @@ ${canonicalAppendix} 已改写`;
     const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'finance-source-list' ? success({ batches: [] }) : success({}));
     mountBridge({ analysisState, financeSourceRefresh, financeCall });
     render(<Analysis {...props} embedded section="results" />);
-    fireEvent.click(await screen.findByRole('tab', { name: /资料/ }));
+    await screen.findByRole('tab', { name: /资料/ }); openTab(/资料/);
     await openSourceRefreshDetails();
     fireEvent.change(sourceRefreshField('账簿'), { target: { value: '经营总账' } });
     fireEvent.change(sourceRefreshField('组织'), { target: { value: '华东' } });
@@ -1066,8 +1072,8 @@ ${canonicalAppendix} 已改写`;
     fireEvent.change(sourceRefreshField('截止时间'), { target: { value: '2026-09-30T23:59:59+08:00' } });
     fireEvent.click(screen.getByRole('button', { name: /选择文件并刷新/ }));
     await waitFor(() => expect(analysisState).toHaveBeenCalledTimes(2));
-    fireEvent.click(screen.getByRole('tab', { name: /文稿/ }));
-    await screen.findByRole('tabpanel', { name: /文稿/ });
+    openTab(/文稿/);
+    await screen.findByRole('tabpanel', { name: /汇报/ });
     await act(async () => refreshGate.resolve(success({ ...initial, datasets: [{ ...source, id: '6'.repeat(32), name: '刷新后资料' }] })));
     await waitFor(() => expect(screen.getByRole('tab', { name: /文稿/ }).getAttribute('aria-selected')).toBe('true'));
     expect(screen.getByRole('tab', { name: /资料/ }).getAttribute('aria-selected')).toBe('false');
@@ -1137,7 +1143,7 @@ ${canonicalAppendix} 已改写`;
     const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'finance-source-list' ? success({ batches: [] }) : success({}));
     mountBridge({ analysisState, financeSourceRefresh, financeCall });
     const { rerender } = render(<Analysis {...props} embedded section="results" tasks={[task, other]} />);
-    fireEvent.click(await screen.findByRole('tab', { name: /资料/ }));
+    await screen.findByRole('tab', { name: /资料/ }); openTab(/资料/);
     await openSourceRefreshDetails();
     fireEvent.change(sourceRefreshField('账簿'), { target: { value: '经营总账' } });
     fireEvent.change(sourceRefreshField('组织'), { target: { value: '华东' } });
@@ -1459,16 +1465,21 @@ ${canonicalAppendix} 已改写`;
     expect(screen.getByText('把手头的资料加进来')).toBeTruthy();
   });
 
-  it('lists the files before the scope settings and the workbook tools on the materials tab', async () => {
+  it('keeps 资料 to the files and their sources, with the scope on 范围 and the workbook under 汇报', async () => {
     mountBridge({ analysisState: async () => success(initial),
       financeCall: async (_taskId: string, command: string) => command === 'finance-source-list' ? success({ batches: [] }) : success({}) });
     render(<Analysis {...props} embedded section="materials" />);
     const file = (await screen.findAllByText(source.name)).find((element) => element.closest('.analysis-source-list'))!;
     // The guide entry sits beside the 任务资料 heading, not on a line of its own.
     expect(within(screen.getByRole('heading', { name: '任务资料' }).parentElement!).getByRole('button', { name: '使用指南：资料快照与原文件' })).toBeTruthy();
-    const scope = await screen.findByRole('region', { name: '分析范围' });
-    expect(file.compareDocumentPosition(scope) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(scope.compareDocumentPosition(screen.getByText('更新 ERP 来源')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(file.compareDocumentPosition(screen.getByText('更新 ERP 来源')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole('region', { name: '分析范围' })).toBeNull();
+    expect(screen.queryByText('写回 Excel', { selector: 'h3, summary, h4' })).toBeNull();
+    openTab(/范围/);
+    expect(await screen.findByRole('region', { name: '分析范围' })).toBeTruthy();
+    openTab(/写回 Excel/);
+    expect(screen.getByRole('tab', { name: /汇报/ }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: /写回 Excel/ }).getAttribute('aria-selected')).toBe('true');
   });
 
   it('puts the result above the finance settings once a result exists, and the settings first before any result', async () => {
@@ -1508,8 +1519,8 @@ ${canonicalAppendix} 已改写`;
     expect((rerun as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: '计算损益表' }) as HTMLButtonElement).disabled).toBe(true);
     // The workbench unmounts with its tab; the run it started does not stop.
-    fireEvent.click(screen.getByRole('tab', { name: /^资料/ }));
-    fireEvent.click(screen.getByRole('tab', { name: /^分析结果/ }));
+    openTab(/资料/);
+    openTab(/财务分析/);
     expect(await screen.findByText('正在计算损益表…')).toBeTruthy();
     const again = await screen.findByRole('button', { name: '按已保存范围重算损益表' });
     expect((again as HTMLButtonElement).disabled).toBe(true);
@@ -1566,8 +1577,8 @@ ${canonicalAppendix} 已改写`;
     fireEvent.click(screen.getByRole('button', { name: '按已保存范围重算损益表' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'run-metric', expect.objectContaining({ context_id: julyContext.id })));
     // A remount with the request already counted must not open the settings again.
-    fireEvent.click(screen.getByRole('tab', { name: /^文稿/ }));
-    fireEvent.click(screen.getByRole('tab', { name: /^分析结果/ }));
+    openTab(/文稿/);
+    openTab(/财务分析/);
     await waitForSettingsButton();
     expectFinanceSettingsClosed();
   });
@@ -1655,10 +1666,10 @@ ${canonicalAppendix} 已改写`;
     render(<Analysis {...props} embedded section="results" />);
     fireEvent.click(await screen.findByRole('button', { name: '按已保存范围重算损益表' }));
     expect((await screen.findByText('管理科目映射缺少收入科目')).getAttribute('role')).toBe('alert');
-    fireEvent.click(screen.getByRole('tab', { name: /^资料/ }));
+    openTab(/资料/);
     await screen.findByRole('tabpanel', { name: /资料/ });
     expect(screen.queryByText('管理科目映射缺少收入科目')).toBeNull();
-    fireEvent.click(screen.getByRole('tab', { name: /^分析结果/ }));
+    openTab(/财务分析/);
     await waitForSettingsEntryOrDialog();
     expect((await screen.findByText('管理科目映射缺少收入科目')).getAttribute('role')).toBe('alert');
   });
@@ -1727,8 +1738,8 @@ ${canonicalAppendix} 已改写`;
     expect(await screen.findByText('正在计算损益表…')).toBeTruthy();
     expect(screen.queryByText('管理科目映射缺少收入科目')).toBeNull();
     // A remount while it runs must not bring the replaced failure back.
-    fireEvent.click(screen.getByRole('tab', { name: /^资料/ }));
-    fireEvent.click(screen.getByRole('tab', { name: /^分析结果/ }));
+    openTab(/资料/);
+    openTab(/财务分析/);
     expect(await screen.findByText('正在计算损益表…')).toBeTruthy();
     expect(screen.queryByText('管理科目映射缺少收入科目')).toBeNull();
     await act(async () => gate.resolve(success({ ...run, engine: 'finance', finance_context_id: context.id })));
@@ -1910,7 +1921,7 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [financeDraft] }), financeCall });
     render(<Analysis {...props} embedded section="drafts" />);
     expect(await screen.findByText(/检查通过/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('tab', { name: /^编辑$/ }));
+    openTab(/^编辑$/);
 
     fireEvent.change(screen.getByLabelText('重要性绝对金额'), { target: { value: '12000.50' } });
     expect(screen.getByText(/按运行结果原币原单位判断：CNY\/元/)).toBeTruthy();
@@ -1946,10 +1957,10 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [financeDraft] }), financeCall });
     render(<Analysis {...props} embedded section="drafts" />);
     expect(await screen.findByText(/检查通过/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('tab', { name: /^编辑$/ }));
+    openTab(/^编辑$/);
     fireEvent.change(screen.getByLabelText('重要性绝对金额'), { target: { value: '12345' } });
-    fireEvent.click(screen.getByRole('tab', { name: /分析结果/ }));
-    fireEvent.click(screen.getByRole('tab', { name: /文稿/ }));
+    openTab(/财务分析/);
+    openTab(/文稿/);
 
     expect((await screen.findByLabelText('重要性绝对金额') as HTMLInputElement).value).toBe('12,345');
     expect(screen.getByText(/CNY\/元；JPY\/千元/)).toBeTruthy();
@@ -1963,7 +1974,7 @@ ${canonicalAppendix} 已改写`;
       : success({ ...draft, ...spec, id: '4'.repeat(32), review_status: spec?.review_status ?? 'unreviewed' }));
     mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [{ ...draft, run_ids: [financeRun.id] }] }), financeCall });
     render(<Analysis {...props} embedded section="drafts" />); await screen.findByText('文稿');
-    fireEvent.click(screen.getByRole('tab', { name: /^编辑$/ }));
+    openTab(/^编辑$/);
     fireEvent.change(screen.getByLabelText('文稿正文'), { target: { value: '经理调整后的判断。' } });
     fireEvent.click(screen.getByRole('button', { name: '保存文稿新版' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'save-explanation-draft', expect.objectContaining({
@@ -2057,7 +2068,7 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [{ ...draft, run_ids: [financeRun.id] }] }), financeCall });
     render(<Analysis {...props} embedded section="drafts" />);
     await screen.findByText('可恢复的未保存文稿 · 1 条');
-    fireEvent.click(screen.getByRole('tab', { name: /^编辑$/ }));
+    openTab(/^编辑$/);
     fireEvent.change(screen.getByLabelText('文稿正文'), { target: { value: '当前经理正在编辑。' } });
     fireEvent.click(screen.getByText('可恢复的未保存文稿 · 1 条'));
     expect((screen.getByRole('button', { name: '载入可编辑副本' }) as HTMLButtonElement).disabled).toBe(true);
@@ -2116,7 +2127,7 @@ ${canonicalAppendix} 已改写`;
     expect(await screen.findByText(/已定位到利润来源行 · 2 行/)).toBeTruthy();
     expect(await screen.findByRole('region', { name: '事实来源行' })).toBeTruthy();
     expect(screen.getByRole('cell', { name: 'A客户' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('tab', { name: /^编辑$/ }));
+    openTab(/^编辑$/);
     fireEvent.change(screen.getByLabelText('文稿正文'), { target: { value: '利润为 1 元，需要复核。' } });
     expect(screen.getByText(/待重检/)).toBeTruthy();
     expect(screen.queryByText(/检查通过/)).toBeNull();
@@ -2260,7 +2271,7 @@ ${canonicalAppendix} 已改写`;
     await waitFor(() => expect(reading.querySelector('p[data-located="true"]')?.textContent).toBe(second));
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
     scrollIntoView.mockRestore();
-    fireEvent.click(screen.getByRole('tab', { name: /^编辑$/ }));
+    openTab(/^编辑$/);
     fireEvent.change(screen.getByLabelText('文稿正文'), { target: { value: '修改后的短结论。' } });
     expect(screen.queryByRole('region', { name: '正文阅读建议' })).toBeNull();
   });
@@ -2327,7 +2338,7 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [financeDraft] }), financeCall });
     render(<Analysis {...props} embedded section="drafts" />);
     await screen.findByText(/检查通过/);
-    fireEvent.click(screen.getByRole('tab', { name: /^编辑$/ }));
+    openTab(/^编辑$/);
     fireEvent.change(screen.getByLabelText('文稿正文'), { target: { value: '利润引用 {{fact:fact-body}}，并沿用经理口径。' } });
     fireEvent.click(screen.getByRole('button', { name: '保存文稿新版' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'save-explanation-draft', expect.objectContaining({
@@ -2352,7 +2363,7 @@ ${canonicalAppendix} 已改写`;
     expect(await screen.findByText(/自动附表中的数字与计算依据尚未对应/)).toBeTruthy();
     expect(screen.getByText(/对应片段：自动附表金额/)).toBeTruthy();
     expect(screen.getByText(/引用绑定 · 需修正/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('tab', { name: /^编辑$/ }));
+    openTab(/^编辑$/);
     fireEvent.change(screen.getByRole('textbox', { name: '文稿正文' }), { target: { value: '利润有所改善，业务原因待进一步确认。' } });
     expect((screen.getByRole('button', { name: '保存文稿新版' }) as HTMLButtonElement).disabled).toBe(false);
   });
@@ -2426,7 +2437,7 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [{ ...draft, run_ids: [financeRun.id] }] }), financeCall });
     render(<Analysis {...props} embedded section="drafts" />);
     await screen.findByText(/检查中/);
-    fireEvent.click(screen.getByRole('tab', { name: /^编辑$/ }));
+    openTab(/^编辑$/);
     fireEvent.change(screen.getByLabelText('文稿正文'), { target: { value: '检查未完成时修改正文。' } });
     expect(screen.getByText(/待重检/)).toBeTruthy();
     await act(async () => resolveCheck(success({ status: 'pass', issues: [] })));
@@ -2712,7 +2723,7 @@ ${canonicalAppendix} 已改写`;
       return success({});
     });
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, workbook, refreshedWorkbook] }), financeCall });
-    render(<Analysis {...props} embedded section="materials" />);
+    render(<Analysis {...props} embedded section="workbook" />);
     await screen.findByText('写回 Excel');
     fireEvent.click(screen.getByRole('button', { name: /检查结构/ }));
     await screen.findByText(/工作表：Sheet1/);
@@ -2751,7 +2762,7 @@ ${canonicalAppendix} 已改写`;
       return success({});
     });
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, workbook] }), financeCall });
-    render(<Analysis {...props} embedded section="materials" />);
+    render(<Analysis {...props} embedded section="workbook" />);
     await screen.findByText('写回 Excel');
     const inspect = screen.getByRole('button', { name: /检查结构/ });
     fireEvent.click(inspect);
@@ -2778,7 +2789,7 @@ ${canonicalAppendix} 已改写`;
       return success({});
     });
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, workbook, refreshedWorkbook] }), financeCall });
-    render(<Analysis {...props} embedded section="materials" />);
+    render(<Analysis {...props} embedded section="workbook" />);
     await screen.findByText('写回 Excel');
     fireEvent.change(screen.getByLabelText('绑定编号'), { target: { value: 'bind-1' } });
     fireEvent.click(screen.getByRole('button', { name: '预览写回' }));
@@ -3173,7 +3184,7 @@ ${canonicalAppendix} 已改写`;
       return success({});
     });
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, workbook], runs: [financeRun] }), financeCall });
-    render(<Analysis {...props} embedded section="materials" />);
+    render(<Analysis {...props} embedded section="workbook" />);
     await screen.findByText('写回 Excel');
     fireEvent.click(screen.getByRole('button', { name: /检查结构/ }));
     await screen.findByText(/工作表：Sheet1/);
@@ -3202,7 +3213,7 @@ ${canonicalAppendix} 已改写`;
       return success({});
     });
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, workbook], runs: [oldRun, financeRun] }), financeCall });
-    render(<Analysis {...props} embedded section="materials" />);
+    render(<Analysis {...props} embedded section="workbook" />);
     await screen.findByText('写回 Excel');
     fireEvent.click(screen.getByRole('button', { name: /检查结构/ }));
     await screen.findByText(/工作表：Sheet1/);
@@ -3288,7 +3299,7 @@ describe('wait timing', () => {
     openAnalysisEditor();
     fireEvent.click(screen.getByRole('button', { name: '重跑当前已保存版本' }));
     await waitFor(() => expect(timingLog).toHaveBeenCalledTimes(2));
-    fireEvent.click(screen.getByRole('tab', { name: /资料/ }));
+    openTab(/资料/);
     await openSourceRefreshDetails();
     fireEvent.change(sourceRefreshField('账簿'), { target: { value: '经营总账' } });
     fireEvent.change(sourceRefreshField('组织'), { target: { value: '华东' } });

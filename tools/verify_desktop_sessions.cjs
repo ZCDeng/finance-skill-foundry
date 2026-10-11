@@ -74,7 +74,7 @@ const coldComposer=await visibleComposer('冷启动：现金回款晚两周','05
 const headerTitle=()=>page.locator('.workspace-header h1').innerText();
 if((await headerTitle()).trim()!==detail.task.title)throw Error('task title missing in workspace header');
 step('unsaved_draft_across_chat');await focus('成果专注').click();
-await page.getByRole('tab',{name:/文稿/}).click();
+await page.getByRole('tab',{name:/汇报/}).click();await page.getByRole('tab',{name:/文稿/}).click();
 await page.locator('.analysis-draft textarea').first().fill('未保存的财务经理判断');
 await focus('对话专注').click();
 const file=qa+'/new.csv';fs.writeFileSync(file,'amount\n123\n');cli('dataset-add',['--path',file,'--name','助手补入资料'],task);

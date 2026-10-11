@@ -55,7 +55,7 @@ it('says what the assistant can and cannot do in every one of its six areas', ()
 it('opens at the article a 「?」 asked for and shows where it applies', () => {
   render(<GuideHub article="controls" onOpen={vi.fn()} onClose={vi.fn()} />);
   expect(screen.getByRole('heading', { name: '勾稽控制与差异处置' })).toBeTruthy();
-  expect(screen.getByText('适用于：月结页 · 勾稽控制')).toBeTruthy();
+  expect(screen.getByText('适用于：勾稽 · 勾稽控制')).toBeTruthy();
 });
 
 it('says plainly when a search finds nothing', () => {
@@ -69,7 +69,7 @@ it('says plainly when a search finds nothing', () => {
 it('moves the workspace to the place an article describes, without running anything', () => {
   const onOpen = vi.fn();
   render(<GuideHub article="month-close" onOpen={onOpen} onClose={vi.fn()} />);
-  fireEvent.click(screen.getByRole('button', { name: /打开月结页/ }));
+  fireEvent.click(screen.getByRole('button', { name: /打开勾稽/ }));
   expect(onOpen).toHaveBeenCalledWith('close');
 });
 
@@ -91,7 +91,7 @@ it('a 「?」 asks the window for its article', () => {
 it('every article names where it applies and every link goes somewhere the workspace has', () => {
   for (const article of GUIDE_ARTICLES) {
     expect(article.appliesTo).toBeTruthy();
-    for (const block of article.body) if (block.kind === 'open') expect(['datasets', 'scope', 'structure', 'billing', 'results', 'dashboard', 'drafts', 'close']).toContain(block.target);
+    for (const block of article.body) if (block.kind === 'open') expect(['datasets', 'scope', 'structure', 'billing', 'results', 'dashboard', 'drafts', 'workbook', 'close']).toContain(block.target);
   }
 });
 
@@ -102,7 +102,7 @@ it('moves focus to the article when it opens', () => {
 
 it('says why it cannot take you anywhere with no editable task open', () => {
   render(<GuideHub article="month-close" canOpen={false} onOpen={vi.fn()} onClose={vi.fn()} />);
-  expect((screen.getByRole('button', { name: /打开月结页/ }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: /打开勾稽/ }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByText('先打开一个可编辑的任务，才能跳到这里。')).toBeTruthy();
 });
 

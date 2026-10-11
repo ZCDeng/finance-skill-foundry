@@ -390,11 +390,17 @@ function cssEscape(value) {
   return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
+/** 文稿 sits under the 汇报 step: open the step, then hand back its 文稿 tab. */
+async function draftsTab() {
+  const report = page.locator('.analysis-tabbar:visible').last().getByRole('tab', {name: /汇报/});
+  if (await report.getAttribute('aria-selected').catch(() => null) !== 'true') await report.click().catch(() => undefined);
+  return page.getByRole('tablist', {name: '汇报'}).getByRole('tab', {name: /文稿/});
+}
+
 async function openDraftsTab() {
   const observed = await until(
     async () => {
-      const tabbar = page.locator('.analysis-tabbar:visible').last();
-      const tab = tabbar.getByRole('tab', {name: /文稿/});
+      const tab = await draftsTab();
       await tab.waitFor({state: 'visible', timeout: 5000});
       const before = await tab.evaluate((el) => ({
         selected: el.getAttribute('aria-selected'),
@@ -405,14 +411,14 @@ async function openDraftsTab() {
       await tab.scrollIntoViewIfNeeded().catch(() => undefined);
       await tab.click().catch(() => undefined);
       await delay(500);
-      let afterTab = page.locator('.analysis-tabbar:visible').last().getByRole('tab', {name: /文稿/});
+      let afterTab = await draftsTab();
       let selected = await afterTab.getAttribute('aria-selected').catch(() => null);
       const attempts = [{method: 'pointer-click', selected, activePanelId: await page.locator('[role=tabpanel].analysis-content:visible').last().getAttribute('id').catch(() => null)}];
       if (selected !== 'true') {
         await afterTab.focus().catch(() => undefined);
         await page.keyboard.press('Enter').catch(() => undefined);
         await delay(500);
-        afterTab = page.locator('.analysis-tabbar:visible').last().getByRole('tab', {name: /文稿/});
+        afterTab = await draftsTab();
         selected = await afterTab.getAttribute('aria-selected').catch(() => null);
         attempts.push({method: 'keyboard-enter', selected, activePanelId: await page.locator('[role=tabpanel].analysis-content:visible').last().getAttribute('id').catch(() => null)});
       }
@@ -420,17 +426,17 @@ async function openDraftsTab() {
         await afterTab.focus().catch(() => undefined);
         await page.keyboard.press(' ').catch(() => undefined);
         await delay(500);
-        afterTab = page.locator('.analysis-tabbar:visible').last().getByRole('tab', {name: /文稿/});
+        afterTab = await draftsTab();
         selected = await afterTab.getAttribute('aria-selected').catch(() => null);
         attempts.push({method: 'keyboard-space', selected, activePanelId: await page.locator('[role=tabpanel].analysis-content:visible').last().getAttribute('id').catch(() => null)});
       }
-      const panel = page.locator('#analysis-panel-drafts:visible').last();
+      const panel = page.locator('#analysis-panel-report:visible').last();
       return {
         before,
         attempts,
         selected,
         activePanelId: await page.locator('[role=tabpanel].analysis-content:visible').last().getAttribute('id').catch(() => null),
-        visibleDraftPanels: await page.locator('#analysis-panel-drafts:visible').count().catch(() => 0),
+        visibleDraftPanels: await page.locator('#analysis-panel-report:visible').count().catch(() => 0),
         hasArticle: await panel.getByRole('article', {name: '文稿阅读'}).count().catch(() => 0),
         hasQuality: await panel.getByRole('region', {name: '文稿质量检查'}).count().catch(() => 0),
         text: await panel.evaluate((el) => el.textContent || '').catch(() => ''),
@@ -576,7 +582,7 @@ async function seedFixture() {
 
 
 async function verifyWorkbenchControlsAndScenario(seed) {
-  await page.getByRole('tab', {name: /分析结果/}).click();
+  await page.getByRole('tab', {name: /财务分析/}).click();
   const setup = page.locator('details.analysis-finance-setup').first();
   await ensureDetailsOpen(setup);
   await chooseSearchableOption(setup, '预算资料（可选）', '预算', 'QA 预算');
@@ -717,7 +723,7 @@ async function verifyUi(seed) {
   await setNativeWindowState({width: 1500, height: 920, theme: 'light', zoom: 1});
   await verifyWorkbenchControlsAndScenario(seed);
   await openDraftsTab();
-  const draftPanel = page.locator('#analysis-panel-drafts:visible').last();
+  const draftPanel = page.locator('#analysis-panel-report:visible').last();
   await draftPanel.getByRole('article', {name: '文稿阅读'}).waitFor({state: 'visible', timeout: 30000});
   await draftPanel.getByRole('heading', {name: 'QA 利润说明'}).waitFor({state: 'visible', timeout: 30000});
 
