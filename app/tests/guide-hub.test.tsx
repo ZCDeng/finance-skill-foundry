@@ -27,7 +27,7 @@ it('finds something for every word on the list', () => {
 
 it('matches every word typed, not any', () => {
   expect(searchArticles('期间 累计').map((row) => row.id)).toEqual(['scope', 'collection-health']);
-  expect(searchArticles('收缴率 风险雷达').map((row) => row.id)).toEqual(['follow-6', 'page-operations', 'assistant-skills', 'collection-health']);
+  expect(searchArticles('收缴率 风险雷达').map((row) => row.id)).toEqual(['overview', 'follow-6', 'page-operations', 'assistant-skills', 'collection-health']);
   expect(searchArticles('期间 不存在的词')).toEqual([]);
 });
 

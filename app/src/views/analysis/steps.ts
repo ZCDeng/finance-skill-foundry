@@ -145,6 +145,18 @@ function runOfDigest(digest: OverviewWork['runs'][number]): AnalysisRun {
   } as unknown as AnalysisRun;
 }
 
+/**
+ * What 财务分析 and 经营分析 count on 总览: the business results among the task's runs, as runPresentationRole reads
+ * them, and which of those are 回款健康, each as overview.py read it (with the version it ran for and its question).
+ */
+export function overviewResults(row: OverviewTask): { results: OverviewWork['runs']; operations: OverviewWork['runs'] } {
+  const business = (row.work?.runs ?? []).filter((digest) => runPresentationRole(runOfDigest(digest)) === 'business');
+  return {
+    results: business.filter((digest) => !isCollectionHealthRun(runOfDigest(digest))),
+    operations: business.filter((digest) => isCollectionHealthRun(runOfDigest(digest))),
+  };
+}
+
 /** 总览's row: the same rules as the task's own steps, on what overview.py read of it. None while it cannot be read. */
 export function overviewStepStates(row: OverviewTask): Record<Step, StepState> | null {
   if (!row.work || !row.blocks) return null;

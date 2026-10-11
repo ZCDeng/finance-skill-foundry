@@ -1,7 +1,7 @@
-import { useId, type ReactNode } from 'react';
-import { ArrowRight, BookOpen, ChartNoAxesCombined, CircleCheck, ClipboardList, FlaskConical, MessageSquarePlus, RefreshCw, Repeat, Sparkles } from 'lucide-react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { ArrowRight, BookOpen, ChartNoAxesCombined, ClipboardList, FlaskConical, FolderOpen, MessageSquarePlus, RefreshCw, Repeat, Sparkles } from 'lucide-react';
 
-import { SNAPSHOT_FORMAT_WORDS, type GalleryRow, type Overview as OverviewData, type OverviewTask, type OverviewTodo, type TaskRow, when } from '../bridge.js';
+import { bridge, SNAPSHOT_FORMAT_WORDS, type AnalysisState, type GalleryRow, type Overview as OverviewData, type OverviewTask, type TaskRow, when } from '../bridge.js';
 import { Button } from '../components/ui/button.js';
 import { NativeSelect } from '../components/ui/native-select.js';
 import { DisclosureSummary } from '../components/Disclosure.js';
@@ -10,43 +10,17 @@ import { formatPeriod } from '../lib/period.js';
 import { isWhatIf } from './analysis/dashboardModel.js';
 import { usePreferences } from '../components/Preferences.js';
 import { STEP_ICONS } from './analysis/StepNav.js';
-import { STEPS, STEP_WORDS, overviewStepStates, sectionOf, stepOf, type Step, type StepState } from './analysis/steps.js';
+import { useDashboard } from './analysis/Dashboard.js';
+import { MonthBrief } from './analysis/MonthBrief.js';
+import { STEPS, STEP_WORDS, overviewStepStates, type Step, type StepState } from './analysis/steps.js';
+import { Cockpit, currentRow, TaskName } from './cockpit/Cockpit.js';
+import { KeyFigures } from './cockpit/KeyFigures.js';
+import { TryCards } from './cockpit/TryCards.js';
 import './overview.css';
 
-/** Where a to-do is handled, as the workspace names its places. */
-export type OverviewTarget = 'scope' | 'datasets' | 'structure' | 'billing' | 'controls' | 'results' | 'drafts' | 'rollforward' | 'dashboard';
-
-/**
- * The groups 等你处理 shows, in the order a manager clears them: what only the manager can sign
- * off first, then what holds the numbers, then what is still missing.
- */
-const GROUPS: { kind: OverviewTodo['kind']; title: string; note: string }[] = [
-  { kind: 'signoff', title: '等你复核', note: '系统能检查的都已通过，最后一步由你复核文稿。' },
-  { kind: 'exceptions', title: '差异待处置', note: '处置只能由你来做，并且要写明理由。' },
-  { kind: 'controls', title: '勾稽控制待处理', note: '还没有确认的控制，或读不出、已过期的控制。' },
-  { kind: 'structure', title: '表结构待确认', note: '每份 Excel 确认一次表头、明细范围和合计行。' },
-  { kind: 'scope', title: '分析范围未确认', note: '期间、组织、单位和币种。' },
-  { kind: 'collection', title: '收费明细与口径待确认', note: '列和收缴率口径由你确认，未确认前的结果只作试算。' },
-  { kind: 'source', title: '缺少资料', note: '先把这个月的资料加进来。' },
-  { kind: 'review', title: '计算与文稿待更新', note: '资料或范围改过以后，要重新计算并按新结果更新文稿。' },
-];
-
-/** A to-do's step, as 1 资料 … 6 汇报: where its target lands among the six. */
-function stepWords(target: string | undefined): string | null {
-  if (!target) return null;
-  const step = stepOf(sectionOf(target));
-  const index = STEPS.findIndex((item) => item.step === step);
-  return index < 0 ? null : `${index + 1} ${STEPS[index].label}`;
-}
-
-/** A task's name with its period, the way every list in the app writes it. */
-function TaskName({ task }: { task: TaskRow }) {
-  return <>
-    <span className="fnd-overview__task-title">{task.title}</span>
-    {task.period ? <span className="fnd-muted"> · <span className="fnd-period">{formatPeriod(task.period)}</span></span> : null}
-    {task.sample && !task.title.startsWith('示例') ? <span className="fnd-overview__tag">示例</span> : null}
-  </>;
-}
+/** Where a to-do, a line of 本月三句话 or 试一下 is handled, as the workspace names its places. */
+export type OverviewTarget = 'scope' | 'datasets' | 'structure' | 'billing' | 'controls' | 'close' | 'results' | 'operations' | 'drafts'
+  | 'rollforward' | 'dashboard';
 
 /** What one 成果库 row is, in a line. */
 export function galleryLine(row: GalleryRow): string {
@@ -71,7 +45,7 @@ export interface OverviewProps {
   recent: GalleryRow[];
   onRefresh(): void;
   onOpen(task: TaskRow, target: OverviewTarget): void;
-  /** Opens a task on the step its 本月进度 row points at: the first that waits on someone, else the first not begun. */
+  /** Opens a task on one of its six steps. */
   onOpenStep(task: TaskRow, step: Step): void;
   onNewQuestion(): void;
   /** 做一次经营分析: a new task, opened on 经营分析. Absent where tasks cannot be made. */
@@ -93,42 +67,165 @@ export interface FirstLookOffer {
   onDismiss(): void;
 }
 
+/** The task chosen on 总览 this session, kept while the manager goes to the workspace and back. */
+const CHOSEN = 'fnd:overview-task';
+function readChosen(): string | null {
+  try { return sessionStorage.getItem(CHOSEN); } catch { return null; }
+}
+function keepChosen(taskId: string) {
+  try { sessionStorage.setItem(CHOSEN, taskId); } catch { /* the choice then lasts while the page is open */ }
+}
+
+/** A task's six states as its own screen shows them, the steps the period does without marked so. */
+function statesOf(row: OverviewTask, skipped: readonly Step[] = []): Record<Step, StepState> | null {
+  const read = overviewStepStates(row);
+  return read ? { ...read, ...Object.fromEntries(skipped.map((step) => [step, 'skipped' as const])) } : null;
+}
+
 /**
- * 总览: every active task at once, and the next thing each one needs.
+ * 总览: this month's cockpit. One task at a time, the one worked on last unless another is chosen: its six steps large
+ * with a line each, the step to go on with, its to-dos, 本月三句话 and the figures its board holds; then the features
+ * not tried yet, the other tasks in a row each, and the newest outputs.
  *
- * Reads nothing a task's own 月结 page does not: each line is `finance-close-status`'s, and a to-do
- * is one of its blocking items (or a 收费明细 column or 口径 waiting on the manager). Nothing here
- * adds figures across tasks: two tasks' periods, organisations and 口径 differ, and a total of
- * them would be a number no workbook holds.
+ * Reads nothing a task's own pages do not: the states are steps.ts's, a to-do is one of the month close's blocking
+ * items (or a 收费明细 column or 口径 waiting on the manager), a figure is the board's card. Nothing adds figures across
+ * tasks: two tasks' periods, organisations and 口径 differ, and a total of them would be a number no workbook holds.
  */
 export function Overview({ data, loading, error, fresh, recent, onRefresh, onOpen, onOpenStep, onNewQuestion, onOperations, onSample, onChecklist, onGuide, onLibrary, firstLook }: OverviewProps) {
   const rows = data?.tasks ?? [];
   // No active task is not the same as none at all: everything may be archived. Only the second is a first run.
   const empty = data !== null && rows.length === 0 && fresh;
   const idle = data !== null && rows.length === 0 && !fresh;
+  const { preferences } = usePreferences();
+  const [chosen, setChosen] = useState<string | null>(readChosen);
+  const top = useRef<HTMLDivElement>(null);
+  const current = currentRow(rows, chosen);
+  const others = rows.filter((row) => row !== current);
+  const pick = (taskId: string) => {
+    setChosen(taskId);
+    keepChosen(taskId);
+    top.current?.scrollIntoView?.({ block: 'start' });
+  };
   return (
-    <div className="fnd-overview">
+    <div className="fnd-overview" ref={top}>
       <div className="fnd-overview__head">
         <div>
           <h1 className="fnd-overview__title">总览</h1>
-          <p className="fnd-muted">所有进行中的任务走到哪一步，哪些事在等你处理。</p>
+          <p className="fnd-muted">这个月的账做到哪了，数怎么样，下一步点哪里。</p>
         </div>
         <Button variant="outline" type="button" disabled={loading} onClick={onRefresh}>
           <RefreshCw size={14} strokeWidth={1.5} aria-hidden />刷新
         </Button>
       </div>
       {error ? <p role="alert" className="analysis-message analysis-message--error">{error}</p> : null}
-      {firstLook ? <FirstLook offer={firstLook} /> : null}
-      <Recomputed rows={rows} onOpen={onOpen} />
-      <Start empty={empty} idle={idle} tasks={rows.map((row) => row.task)} onOpen={onOpen} onNewQuestion={onNewQuestion} onOperations={onOperations} onSample={onSample} onChecklist={onChecklist} onGuide={onGuide} />
-      {data === null && loading ? <Loading label="正在读取各任务的月结状态…"><SkeletonRows rows={4} /></Loading> : null}
-      {rows.length ? <div className="fnd-overview__grid">
-        <Todos rows={rows} onOpen={onOpen} />
-        <Progress rows={rows} onOpenStep={onOpenStep} />
-      </div> : null}
-      {recent.length ? <Recent rows={recent} onLibrary={onLibrary} /> : null}
+      {empty ? <FirstRun firstLook={firstLook} onNewQuestion={onNewQuestion} onOperations={onOperations} onSample={onSample} onChecklist={onChecklist} onGuide={onGuide} /> : <>
+        {firstLook ? <FirstLook offer={firstLook} /> : null}
+        <Recomputed rows={rows} onOpen={onOpen} />
+        {data === null && loading ? <Loading label="正在读取各任务的月结状态…"><SkeletonRows rows={4} /></Loading> : null}
+        {current ? <CurrentTask key={current.task.id} row={current} rows={rows} data={data} states={statesOf(current, preferences.skipped_steps[current.task.id])}
+          onPick={pick} onOpen={onOpen} onOpenStep={onOpenStep} /> : null}
+        {others.length || recent.length ? <div className="fnd-overview__grid">
+          {others.length ? <Others rows={others} onPick={pick} /> : null}
+          {recent.length ? <Recent rows={recent} onLibrary={onLibrary} /> : null}
+        </div> : null}
+        <Start idle={idle} tasks={rows.map((row) => row.task)} onOpen={onOpen} onNewQuestion={onNewQuestion} onOperations={onOperations} onSample={onSample} onChecklist={onChecklist} />
+      </>}
     </div>
   );
+}
+
+/** One task's analysis state, read again whenever 总览 is; the last answer stays up while the next is read. */
+function useTaskView(taskId: string, again: unknown): AnalysisState | null {
+  const [view, setView] = useState<AnalysisState | null>(null);
+  useEffect(() => {
+    const api = bridge();
+    if (!api?.analysisState) return;
+    let live = true;
+    void api.analysisState(taskId).then((answer) => { if (live && answer.ok) setView(answer.value); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [taskId, again]);
+  return view;
+}
+
+/** The main card and what reads the task's own results under it: 本月三句话, 关键数字 and 还没试过. */
+function CurrentTask({ row, rows, data, states, onPick, onOpen, onOpenStep }: {
+  row: OverviewTask; rows: OverviewTask[]; data: OverviewData | null; states: Record<Step, StepState> | null;
+  onPick(taskId: string): void; onOpen(task: TaskRow, target: OverviewTarget): void; onOpenStep(task: TaskRow, step: Step): void;
+}) {
+  const id = useId();
+  const { task } = row;
+  const view = useTaskView(task.id, data);
+  const board = useDashboard(task.id);
+  // 总览 read again (刷新, a change in the workspace): the board is read again with it, not only on the first look.
+  const seen = useRef(data);
+  useEffect(() => {
+    if (seen.current === data) return;
+    seen.current = data;
+    void board.load().catch(() => undefined);
+  }, [data, board.load]);
+  const open = (target: string) => onOpen(task, target as OverviewTarget);
+  const reads = Boolean(bridge()?.financeCall && bridge()?.analysisState);
+  return <>
+    <Cockpit row={row} rows={rows} states={states} onPick={onPick} onOpen={(_, target) => open(target)} onOpenStep={onOpenStep} />
+    {view && view.datasets.length > 0 && bridge()?.financeCall ? <MonthBrief taskId={task.id} board={board.dashboard}
+      refreshKey={`${view.datasets.length}:${view.runs.length}:${view.drafts.length}:${board.dashboard?.id ?? ''}`}
+      runs={view.runs} analyses={view.analyses} datasets={view.datasets} superseded={view.superseded_datasets ?? []}
+      onOpen={open} onOpenResult={() => open('results')} /> : null}
+    {reads && board.loaded && view ? <Section id={`${id}-figures`} title="关键数字" className="fnd-overview__card"
+      note="这个任务看板上经理认可或钉住的数，点数字看来源；不跨任务相加。">
+      <KeyFigures board={board.dashboard} view={view} onBoard={() => open('dashboard')} />
+    </Section> : null}
+    <TryCards rows={rows} taskTitle={task.title} onTry={open} />
+  </>;
+}
+
+/**
+ * The first screen with no task at all: three ways to begin, largest first, then what to have ready. The first look
+ * shows why in a minute; the example walks the whole way; the manager's own files start a real task.
+ */
+function FirstRun({ firstLook, onNewQuestion, onOperations, onSample, onChecklist, onGuide }: {
+  firstLook?: FirstLookOffer; onNewQuestion(): void; onOperations?(): void; onSample?(): void; onChecklist(): void; onGuide(): void;
+}) {
+  const id = useId();
+  return <section className="fnd-overview__first" aria-labelledby={`${id}-first`}>
+    <h2 id={`${id}-first`} className="fnd-overview__h">从这里开始</h2>
+    <p className="fnd-muted fnd-overview__note">还没有任务。先花一分钟看看它能做什么，或者用示例练一遍，也可以直接带上自己的资料。</p>
+    <ul className="fnd-overview__ways">
+      {firstLook ? <li className="fnd-overview__way" data-segment="report">
+        <Sparkles className="fnd-overview__way-icon" strokeWidth={1.75} aria-hidden />
+        <h3 className="fnd-overview__way-title">60 秒看看它能做什么</h3>
+        <p className="fnd-muted">打开示例的参考结果看板，看三处：点一个数看来源，拖一下收缴率，导出一页纸。</p>
+        <div className="fnd-overview__actions">
+          <Button type="button" disabled={firstLook.busy} aria-busy={firstLook.busy || undefined} onClick={firstLook.onStart}>
+            {firstLook.busy ? '正在准备参考结果…' : '开始看'}</Button>
+          <Button type="button" variant="ghost" disabled={firstLook.busy} onClick={firstLook.onDismiss}>不用了</Button>
+        </div>
+        {firstLook.busy ? <p className="fnd-muted fnd-overview__note">第一次要生成参考结果，大约一分钟。</p> : null}
+        {firstLook.error ? <p role="alert" className="analysis-message analysis-message--error">{firstLook.error}</p> : null}
+      </li> : null}
+      {onSample ? <li className="fnd-overview__way" data-segment="close">
+        <FlaskConical className="fnd-overview__way-icon" strokeWidth={1.75} aria-hidden />
+        <h3 className="fnd-overview__way-title">用示例练一遍</h3>
+        <p className="fnd-muted">华宸物业 8 月的资料已经备好，跟着指南走完月结、财务分析、经营分析和汇报。</p>
+        <div className="fnd-overview__actions"><Button type="button" variant={firstLook ? 'outline' : 'default'} onClick={onSample}>用示例练习</Button></div>
+      </li> : null}
+      <li className="fnd-overview__way" data-segment="finance">
+        <FolderOpen className="fnd-overview__way-icon" strokeWidth={1.75} aria-hidden />
+        <h3 className="fnd-overview__way-title">带上自己的资料开始</h3>
+        <p className="fnd-muted">用一句话写清要弄明白的事，再把这个月的 Excel 加进来。</p>
+        <div className="fnd-overview__actions">
+          <Button type="button" variant={firstLook || onSample ? 'outline' : 'default'} onClick={onNewQuestion}>
+            <MessageSquarePlus size={15} strokeWidth={1.5} aria-hidden />问一个新问题</Button>
+          {onOperations ? <Button type="button" variant="ghost" onClick={onOperations}>
+            <ChartNoAxesCombined size={15} strokeWidth={1.5} aria-hidden />做一次经营分析</Button> : null}
+        </div>
+      </li>
+    </ul>
+    <div className="fnd-overview__actions">
+      <Button type="button" variant="ghost" onClick={onChecklist}><ClipboardList size={15} strokeWidth={1.5} aria-hidden />资料准备清单</Button>
+      <Button type="button" variant="ghost" onClick={onGuide}><BookOpen size={15} strokeWidth={1.5} aria-hidden />第一次使用</Button>
+    </div>
+  </section>;
 }
 
 /**
@@ -192,20 +289,19 @@ function Section({ title, note, id, children, className }: { title: string; note
   </section>;
 }
 
-/** The four ways in. With no task at all this is the whole first screen. */
-function Start({ empty, idle, tasks, onOpen, onNewQuestion, onOperations, onSample, onChecklist, onGuide }: {
-  empty: boolean; idle: boolean; tasks: TaskRow[]; onOpen(task: TaskRow, target: OverviewTarget): void; onNewQuestion(): void;
-  onOperations?(): void; onSample?(): void; onChecklist(): void; onGuide(): void;
+/** The ways to start something new, under the tasks already going. */
+function Start({ idle, tasks, onOpen, onNewQuestion, onOperations, onSample, onChecklist }: {
+  idle: boolean; tasks: TaskRow[]; onOpen(task: TaskRow, target: OverviewTarget): void; onNewQuestion(): void;
+  onOperations?(): void; onSample?(): void; onChecklist(): void;
 }) {
   const id = useId();
   // Newest period first: last month's task is nearly always the one to roll forward from.
   const sources = [...tasks]
     .sort((a, b) => (b.period ?? '').localeCompare(a.period ?? '') || b.created_at.localeCompare(a.created_at));
-  return <Section id={`${id}-start`} title={empty ? '从这里开始' : '开始'} className={empty ? 'fnd-overview__start--first' : 'fnd-overview__start'}
-    note={empty ? '还没有任务。可以先用示例练一遍，也可以直接带上自己的资料提问。'
-      : idle ? '没有进行中的任务。已归档和回收站里的任务在工作区左边的任务列表里。' : undefined}>
+  return <Section id={`${id}-start`} title="开始新的" className="fnd-overview__start"
+    note={idle ? '没有进行中的任务。已归档和回收站里的任务在工作区左边的任务列表里。' : undefined}>
     <div className="fnd-overview__actions">
-      <Button type="button" variant={empty ? 'default' : 'outline'} onClick={onNewQuestion}>
+      <Button type="button" variant="outline" onClick={onNewQuestion}>
         <MessageSquarePlus size={15} strokeWidth={1.5} aria-hidden />问一个新问题
       </Button>
       {/* 月结 is not the only use: a task can start at 经营分析. */}
@@ -231,63 +327,24 @@ function Start({ empty, idle, tasks, onOpen, onNewQuestion, onOperations, onSamp
       <Button type="button" variant="outline" onClick={onChecklist}>
         <ClipboardList size={15} strokeWidth={1.5} aria-hidden />资料准备清单
       </Button>
-      {empty ? <Button type="button" variant="ghost" onClick={onGuide}>
-        <BookOpen size={15} strokeWidth={1.5} aria-hidden />第一次使用
-      </Button> : null}
     </div>
   </Section>;
 }
 
-function Todos({ rows, onOpen }: { rows: OverviewTask[]; onOpen(task: TaskRow, target: OverviewTarget): void }) {
-  const id = useId();
-  const all = rows.flatMap((row) => row.todo.map((item) => ({ task: row.task, item })));
-  const groups = GROUPS.map((group) => ({ ...group, items: all.filter(({ item }) => item.kind === group.kind) }))
-    .filter((group) => group.items.length);
-  return <Section id={`${id}-todo`} title={all.length ? `等你处理（${all.length}）` : '等你处理'}
-    note={all.length ? '每一条都等你在某个任务的某一步处理，标签写着是第几步。点「去处理」直接到要处理的位置。' : undefined}>
-    {groups.length === 0 ? <p className="fnd-overview__clear"><CircleCheck size={16} strokeWidth={1.5} aria-hidden />没有挡住月结的事项。</p> : null}
-    {groups.map((group) => <details key={group.kind} className="analysis-details fnd-overview__group" open>
-      <DisclosureSummary>{group.title} · {group.items.length}</DisclosureSummary>
-      <p className="fnd-muted fnd-overview__note">{group.note}</p>
-      <ul className="fnd-overview__todos">
-        {group.items.map(({ task, item }, index) => <li key={`${task.id}:${index}`}>
-          <div className="fnd-overview__todo-text">
-            <span className="fnd-overview__todo-task"><TaskName task={task} />{stepWords(item.target) ? <span className="fnd-overview__tag">{stepWords(item.target)}</span> : null}</span>
-            <span>{item.text}</span>
-          </div>
-          {item.target ? <Button type="button" size="sm" variant="outline" onClick={() => onOpen(task, item.target as OverviewTarget)}>
-            去处理<ArrowRight size={13} strokeWidth={1.5} aria-hidden />
-            <span className="sr-only">：{task.title}，{item.text}</span>
-          </Button> : null}
-        </li>)}
-      </ul>
-    </details>)}
-  </Section>;
-}
-
-/** The step a task's row opens on: the first that waits on someone, else the first not begun, else 汇报. */
-function stepToOpen(states: Record<Step, StepState>): Step {
-  const order = STEPS.map((item) => item.step);
-  return order.find((step) => states[step] === 'todo' || states[step] === 'attention')
-    ?? order.find((step) => states[step] === 'not_started') ?? 'report';
-}
-
 /**
- * 本月进度: each task's six steps as the task screen shows them, 月结's three then 财务分析, 经营分析 and 汇报, each a mark
- * in its state's colour and named in words for readers; a step the task marked 本期不做 says so. Then the close line.
+ * 其他进行中的任务: a row each, its six steps small as on the task screen, each named in words for readers; a step the
+ * task marked 本期不做 says so. Then the close line. A row makes that task the main card.
  */
-function Progress({ rows, onOpenStep }: { rows: OverviewTask[]; onOpenStep(task: TaskRow, step: Step): void }) {
+function Others({ rows, onPick }: { rows: OverviewTask[]; onPick(taskId: string): void }) {
   const id = useId();
   const { preferences } = usePreferences();
-  return <Section id={`${id}-progress`} className="fnd-overview__progress-section" title={`本月进度（进行中 ${rows.length} 个任务）`}
-    note="六个点依次是月结的 1 资料、2 范围、3 勾稽，4 财务分析，5 经营分析，6 汇报。">
+  return <Section id={`${id}-others`} className="fnd-overview__progress-section" title={`其他进行中的任务（${rows.length}）`}
+    note="点一行换到上面看它；六个图标依次是 1 资料、2 范围、3 勾稽，4 财务分析，5 经营分析，6 汇报。">
     <ul className="fnd-overview__progress">
       {rows.map((row) => {
-        const read = overviewStepStates(row);
-        const skipped = preferences.skipped_steps[row.task.id] ?? [];
-        const states = read ? { ...read, ...Object.fromEntries(skipped.map((step) => [step, 'skipped' as const])) } : null;
+        const states = statesOf(row, preferences.skipped_steps[row.task.id]);
         return <li key={row.task.id}>
-          <button type="button" className="fnd-overview__progress-row" onClick={() => onOpenStep(row.task, states ? stepToOpen(states) : 'close')}>
+          <button type="button" className="fnd-overview__progress-row" onClick={() => onPick(row.task.id)}>
             <span className="fnd-overview__progress-name"><TaskName task={row.task} /></span>
             {states ? <span className="fnd-overview__dots" role="img"
               aria-label={STEPS.map(({ step, label }, index) => `${index + 1} ${label}${STEP_WORDS[states[step]]}`).join('，')}>
