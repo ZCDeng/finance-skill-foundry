@@ -46,6 +46,10 @@ Read the result this way:
 - Industry benchmarks in the pack (an industry-benchmark sheet such as 行业对标与假设) are side evidence only; do not compute or conclude from them.
 - Rows marked 估算 stay estimates in the draft.
 
+### When the workbook's structure is not confirmed
+
+Binding a workbook whose table structure waits on the manager is refused with `pending_structure`. Do not fall back to a script on your own: the engine's run is the one that lands on 经营分析 and feeds the break-even table, the sensitivity grid, the board's scenario and goal cards, 本月三句话 and next month's recompute. Ask with the point-and-pick question card whether to confirm the structure first (recommended: once, and next month's workbook of the same shape is taken up by itself) or draw a script draft now. To confirm, read `structure_proposal_list`, tell the manager what each sheet was read as, and submit with `structure_proposal_confirm` on her word; a confirmation waiting on her acknowledgement can already be bound, so run the engine next. For a draft, run `analysis-script` with `topic: collection_health`; it shows on 经营分析 as a script draft and counts nowhere else.
+
 ## Formula checks in the close
 
 To make the pack check itself, save a control with `finance_controls_save`, `kind=formula`, a formula name, named input cells and the reported figure as the right side: formula signed_sum for the AR roll-forward (年初 + 新增 − 收回 − 核销 = 期末, each input with sign 1 or -1), dso to recompute the reported turnover days (tolerance in days), implied_collection to compare the AR movement with the reported rate (the rate as a decimal; scale 0.01 for a cell written in percent). They are saved as proposed; only the manager's confirmation counts them in the close.

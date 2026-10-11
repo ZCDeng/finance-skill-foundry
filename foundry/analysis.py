@@ -39,6 +39,9 @@ KINDS = {"revisions", "runs", "drafts", "methods", "requirements", "evidence_che
          "estimate_acceptances"}
 REPORT_EXPORT_FORMATS = {"md", "xlsx", "docx", "pdf", "html"}
 RESULT_ROLES = {"business", "activity", "probe", "preanalysis", "calculation", "draft_support", "audit_check"}
+# What a script stands in for, when an engine path could not run yet: 回款健康 drawn by a script while the workbook's
+# structure waits on the manager. The page shows it on 经营分析 as a script draft, never as the engine's result.
+SCRIPT_TOPICS = {"collection_health"}
 REVIEW = {"unreviewed", "reviewed", "accepted"}
 PUBLICATION = {"draft", "archived"}
 SCRIPT_RESULT_PREVIEW_ROWS = 1000
@@ -405,6 +408,14 @@ def _result_role(value: Any, *, default: str = "business") -> str:
         return default
     if not isinstance(value, str) or value not in RESULT_ROLES:
         raise FoundryError("result_role is unsupported")
+    return value
+
+
+def _script_topic(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str) or value not in SCRIPT_TOPICS:
+        raise FoundryError("script topic must be collection_health")
     return value
 
 
@@ -2939,10 +2950,12 @@ class AnalysisStore:
         default_result_role = "business" if result_file else "activity"
         result_role = _result_role(spec.get("result_role"), default=default_result_role)
         scope = _scope_metadata(spec.get("scope"))
+        topic = _script_topic(spec.get("topic"))
         revision = _new(
             self.task,
             question=spec.get("question", "脚本分析"),
             engine=language,
+            **({"topic": topic} if topic else {}),
             code=code,
             sql=None,
             bindings=bindings,

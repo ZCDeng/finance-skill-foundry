@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowUp, FilePlus2, MessageSquare, RefreshCw } from 'lucide-react';
+import { ArrowUp, FilePlus2, MessageSquare, RefreshCw, TriangleAlert } from 'lucide-react';
 import { bridge, timeWait, when, type Answer, type AnalysisDraft, type AnalysisRevision, type AnalysisRun, type AnalysisState, type DatasetSnapshot, type FinanceDrilldown,
   type TaskRow } from '../bridge.js';
 import './analysis.css';
@@ -38,7 +38,7 @@ import { DisclosureSummary } from '../components/Disclosure.js';
 import { Technical, usePreferences } from '../components/Preferences.js';
 import { Loading, SkeletonCards, SkeletonRows } from '../components/Loading.js';
 import { ReportNav, StepIntro, StepNav, StepNext } from './analysis/StepNav.js';
-import { isOperationsAnalysis, isReportView, isSkippable, nextStep, sectionOf, stepOf, stepStates, type AnalysisSection, type ReportView, type SkippableStep } from './analysis/steps.js';
+import { isOperationsAnalysis, isReportView, isScriptDraft, isSkippable, nextStep, sectionOf, stepOf, stepStates, type AnalysisSection, type ReportView, type SkippableStep } from './analysis/steps.js';
 import { isCollectionHealthRun } from './analysis/CollectionHealthView.js';
 
 type Selection = { analysis?: string; draft?: string };
@@ -315,6 +315,10 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   const analysis = financeAnalyses.find((row) => row.id === selectedAnalysis)
     ?? financeAnalyses.find((row) => row.id === lastSuccessful?.analysis_id) ?? financeAnalyses.at(-1);
   const operationsAnalysis = operationsAnalyses.find((row) => row.id === selectedAnalysis) ?? operationsAnalyses.at(-1);
+  // 回款健康 runs on the engine only once each workbook's structure is settled: what 总览 lists as waiting on it. An
+  // earlier engine run does not lift it: the files added since wait all the same.
+  const structureWaits = progress?.task.id === task?.id ? progress?.todo.filter((item) => item.kind === 'structure') ?? [] : [];
+  const engineHealth = (view?.runs ?? []).some((run) => operational.has(run.analysis_id) && isCollectionHealthRun(run));
   const draft = view?.drafts.find((row) => row.id === selectedDraft) ?? view?.drafts.at(-1);
   selectionNow.current = { analysis: analysis?.id, draft: draft?.id };
   // Read by the card listener, which is set up once.
@@ -577,6 +581,17 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         {view && place === 'operations' && <>
           <div className="analysis-section-heading"><div><h3>回款与现金</h3><p className="analysis-note">收缴率、清欠和收费明细这些业务上的事放在这一步。</p></div>
             {view.datasets.length && !readOnly ? <AskLink ask="collection-health" label={operationsAnalysis ? '让助手重算回款健康' : '让助手做回款健康分析'} disabled={busy} /> : null}</div>
+          {structureWaits.length && !readOnly ? <p className="analysis-step-flag" role="note">
+            <TriangleAlert size={14} strokeWidth={1.5} aria-hidden /><b>表结构待确认</b>
+            {engineHealth ? '重算' : ''}回款健康要用财务引擎算，先确认 {structureWaits.length} 份资料的表结构。确认一次，下个月同样形状的表自动采用。
+            <Button variant="link" size="sm" type="button" onClick={() => onOpenTarget ? onOpenTarget('structure') : choose('materials')}>去确认表结构</Button>
+            <AskLink ask="structure-for-engine" label="让助手整理表结构提议" disabled={busy} />
+          </p> : null}
+          {operationsAnalysis && isScriptDraft(operationsAnalysis) ? <p className="analysis-step-flag" role="note">
+            <TriangleAlert size={14} strokeWidth={1.5} aria-hidden /><b>脚本草稿</b>
+            这一版是助手用脚本直接读套表算的，没经过财务引擎：生死线表、敏感性表、看板的情景卡、本月三句话和下月自动重算都只读引擎的结果。
+            {!readOnly ? <AskLink ask="collection-health-engine" label="确认表结构后用引擎重算" disabled={busy} /> : null}
+          </p> : null}
           {operationsAnalysis ? resultOf(operationsAnalysis, operationsAnalyses) : null}
           {operationsAnalysis && dataset ? sourcePreview : null}
           {!view.datasets.length ? <AnalysisEmpty title="先把资料加进来" body="回款健康读月结套表里的收入、毛利率、费用率和应收；加进来后，这里一键把问题交给助手。收缴率也可以直接在下面导入收费明细来算。"

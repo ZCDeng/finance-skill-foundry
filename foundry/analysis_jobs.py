@@ -214,6 +214,9 @@ class JobStore:
                 AnalysisStore(self.task).named_requirements(requirements_id, set(frozen["snapshot_ids"]))
             if not isinstance(spec.get("code"), str) or not spec["code"].strip() or len(spec["code"].encode()) > 256 * 1024:
                 raise FoundryError("script code must contain 1 to 256 KiB of text")
+            from foundry.analysis import _script_topic
+
+            _script_topic(spec.get("topic"))
         runtime_identity = _runtime_identity(runtime_pid) if kind == "child" else None
         record = {
             "id": uuid.uuid4().hex, "kind": kind, "task_id": self.task.id,

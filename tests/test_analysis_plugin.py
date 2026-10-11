@@ -658,6 +658,9 @@ def test_analysis_preset_installs_with_harness_and_wheel_resource():
     assert "kind=goal 或 sensitivity" in persona and "倒推和敏感性都是情景，不是实际数" in persona
     # 点选题: the runtime's question card, the recommendation first; picking an option is not confirming a 口径.
     assert "ask_user_question" in persona and "（推荐）" in persona and "点选不等于确认" in persona
+    # 回款健康 stopped by pending_structure: ask first, never fall back to a script on its own; a script draft says so.
+    assert "先确认表结构（推荐）" in persona and "spec.topic 写 collection_health" in persona
+    assert "表结构仍由经理在资料页确认" in persona
     # 本月三句话: read as the rule wrote it, reworded with every figure kept.
     assert "month_brief" in persona and "带 ref 的数和能点开的字一字不改" in persona
     mirror = ROOT / "foundry" / "resources" / "dsh-plugin"

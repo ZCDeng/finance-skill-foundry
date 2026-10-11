@@ -254,6 +254,9 @@ def recipe_of(source, run: dict, *, elsewhere: bool) -> dict:
         elif revision["operation"] not in {"metric", "variance"}:
             raise NotRerun("这类结果还不能换资料重算")
         return recipe
+    if revision.get("topic"):
+        # A script drawn in place of 回款健康 while the workbook's structure waited: next month runs it on the engine.
+        raise NotRerun("这张卡来自回款健康的脚本草稿，确认表结构后让助手用财务引擎重算")
     if engine in QUERY_ENGINES or engine in SCRIPT_ENGINES:
         return {"engine": engine, "revision": revision, "revision_id": revision["id"], "bindings": dict(revision["bindings"])}
     raise NotRerun("这类结果还不能换资料重算")
