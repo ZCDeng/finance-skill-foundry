@@ -61,7 +61,7 @@ export function WorkbookOverview({ taskId, datasets }: { taskId: string; dataset
   }
   return <section className="analysis-workbook-overview" aria-label="工作簿总览">
     <h3>工作簿总览 · {workbooks.length} 本 · {sheets.length} 张工作表</h3>
-    <p className="analysis-note">原件已归档；可直接查阅单元格。结构确认和分析口径另行保存。</p>
+    <p className="analysis-note">原件已归档，可以直接查阅单元格。</p>
     {loading && (sheets.length ? <p role="status">正在读取工作表目录…</p>
       : <Loading label="正在读取工作表目录…"><SkeletonRows rows={5} /></Loading>)}
     {errors.map((error) => <p role="alert" key={error}>{error}</p>)}

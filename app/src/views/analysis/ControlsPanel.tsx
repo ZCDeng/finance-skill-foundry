@@ -112,7 +112,7 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
       <div className="analysis-section-heading">
         <div>
           <span className="fnd-with-help"><h3 id="analysis-controls-heading" tabIndex={-1}><Scale size={15} strokeWidth={1.5} aria-hidden /> 勾稽控制</h3><HelpLink article="controls" label="勾稽控制与差异处置" /></span>
-          <p className="analysis-note">合计是否等于分项、两处取数是否一致。系统只指出差异，不替你选口径。</p>
+          <p className="analysis-note">检查合计是否等于分项、两处取数是否一致。</p>
           {/* Controls that need a little arithmetic are drafted by the assistant and still wait for the manager. */}
           <p className="analysis-note">应收滚动、应收天数这类要按公式重算的控制由助手起草，你确认后才计入月结。<AskLink ask="formula-controls" label="让助手起草" disabled={locked} /></p>
         </div>
