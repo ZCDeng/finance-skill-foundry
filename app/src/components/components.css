@@ -6,11 +6,11 @@
 /* The artwork keeps its glow inside a wide transparent margin; the box is drawn larger and the margin
    given back, so the ring itself reads at about 36px without pushing the name. */
 .fnd-head__logo { width: 48px; height: 48px; margin: 0 -4px; flex: 0 0 auto; background: url('../assets/logo-animated.webp') center / contain no-repeat; }
-/* A 96px animated WebP and not the source SVG: the SVG's 580 SMIL animations and blur filters kept the
+/* A 96px animated WebP rendered by tools/logo/aura.py: live SVG animation with blur filters kept the
    renderer near half a core for as long as the window stayed open; the WebP runs at about 5%.
    With reduced motion the header holds the still mark. */
 @media (prefers-reduced-motion: reduce) {
-  .fnd-head__logo { background-image: url('../assets/logo.svg'); }
+  .fnd-head__logo { background-image: url('../assets/logo.png'); }
 }
 .fnd-head__mark { font-family: var(--fnd-font-brand); font-size: 22px; line-height: 1; font-weight: 700; white-space: nowrap; color: var(--fnd-selected); }
 .fnd-head__nav { position: relative; align-self: stretch; display: flex; gap: 4px; anchor-scope: --fnd-head-tab; }
