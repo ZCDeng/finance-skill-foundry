@@ -74,6 +74,8 @@ COLLECTIONS = {
     "control_findings",
     "report_reviews",
     "dashboards",
+    "dashboard_carries",
+    "dashboard_repairs",
     "month_briefs",
 }
 
@@ -2687,13 +2689,29 @@ class FinanceStore:
         if spec and not isinstance(spec, dict):
             raise FoundryError("dashboard read spec must be an object")
         current = self._dashboard()
+        attempt = self._carry_attempt() if self.allowed is None else None
+        recovery = {"carry_attempt": attempt} if attempt and attempt.get("failed") else {}
         if current is None:
-            return {"dashboard": None}
+            return {"dashboard": None, **recovery}
         if self.allowed is not None:
             return {"dashboard": self._dashboard_in_view(current)}
         # The manager's read says how many cards have newer files to be recomputed on (dashboard_recompute).
         plans = self._dashboard_plans(current.get("cards", []), self._dashboard_runs())
-        return {"dashboard": current, "recompute": {"ready": sum(len(ids) for _, ids in plans.values())}}
+        return {"dashboard": current, "recompute": {"ready": sum(len(ids) for _, ids in plans.values())}, **recovery}
+
+    def _carry_attempt(self):
+        attempts = self._list("dashboard_carries")
+        return attempts[-1] if attempts else None
+
+    def dashboard_repair_read(self, spec):
+        from foundry.dashboard_repair import read
+
+        return read(self, spec)
+
+    def dashboard_repair_propose(self, spec):
+        from foundry.dashboard_repair import propose
+
+        return propose(self, spec)
 
     def _dashboard_in_view(self, board):
         """The board as a session sees it: the cards on runs it may read; the board itself names no files."""
@@ -2807,9 +2825,12 @@ class FinanceStore:
         if self.allowed is not None:
             raise FoundryError("only the manager carries a dashboard over")
         current = self._dashboard()
-        if current and current.get("cards"):
+        attempt = self._carry_attempt()
+        resuming = bool(attempt and attempt.get("failed") and spec.get("from_task_id") == attempt.get("from_task_id"))
+        if current and current.get("cards") and not resuming:
             raise FoundryError("this task's dashboard already has cards; carry a board onto an empty one")
         find = rc.same_names(self)
+        fallback = _task_period(self.analysis) or self.task.meta().get("period")
 
         def runs_of(source, board):
             run_of = source._dashboard_runs()
@@ -2823,6 +2844,32 @@ class FinanceStore:
                     plans[run["id"]] = (run, *rc.rebind(run["bindings"], source.analysis.read_dataset, self.analysis.read_dataset, find))
             return plans
 
+        def prepare(source, run, bindings, missing):
+            if missing:
+                raise rc.NotRerun("这个任务里还没有：" + "、".join(missing))
+            recipe = rc.recipe_of(source, run, elsewhere=True)
+            new = rc.new_month(self, list(bindings.values()), fallback)
+            if rc.recipe_month(recipe) and not new:
+                raise rc.NotRerun("看不出这个任务的资料是哪个月的，先在「分析范围」填上期间")
+            move = rc.validate_period_move(recipe, new)
+            revision = recipe.get("revision") or {}
+            if revision.get("period_binding"):
+                from foundry.analysis_period import bind_period, resolve_period
+
+                moved = bind_period(revision, {"period": new, "source": "scope"}) if new else revision
+                resolve_period(self.analysis, {alias: self.analysis.read_dataset(value) for alias, value in bindings.items()},
+                               moved.get("scope") or {}, allowed=self.allowed)
+            return recipe, new, move
+
+        def target_month(plans):
+            try:
+                return rc.new_month(self, [value for _, bindings, _ in plans.values()
+                                           for value in bindings.values()], fallback)
+            except rc.NotRerun:
+                # The per-run preflight reports the concrete conflict; the saved attempt still names the task's
+                # requested month so a failed carry remains visible after reopening.
+                return rc.month_of(fallback)
+
         if not spec.get("from_task_id"):
             offers = []
             for task in tasks.list("all"):
@@ -2834,11 +2881,23 @@ class FinanceStore:
                 if not cards:
                     continue
                 plans = runs_of(source, {"cards": cards})
-                ready = [card for card in cards if card["run_id"] in plans and not plans[card["run_id"]][2]]
+                blocked = []
+                ready_ids = set()
+                for run_id, (run, bindings, names) in plans.items():
+                    grouped = [card for card in cards if card["run_id"] == run_id]
+                    try:
+                        prepare(source, run, bindings, names)
+                        ready_ids.update(card["id"] for card in grouped)
+                    except (rc.NotRerun, FoundryError) as exc:
+                        blocked.append({"run_id": run_id, "card_ids": [card["id"] for card in grouped],
+                                        "titles": [card["title"] for card in grouped],
+                                        "code": "missing_files" if names else "calculation_not_portable", "reason": str(exc)})
                 missing = sorted({name for run, _bindings, names in plans.values() for name in names})
                 meta = task.meta()
                 offers.append({"task_id": task.id, "title": meta.get("title"), "period": meta.get("period"),
-                               "created_at": meta.get("created_at"), "cards": len(cards), "ready": len(ready), "missing": missing})
+                               "created_at": meta.get("created_at"), "cards": len(cards), "ready": len(ready_ids),
+                               "missing": missing, "blocked": blocked,
+                               "target_period": target_month(plans)})
             offers.sort(key=lambda row: (str(row.get("period") or ""), str(row.get("created_at") or "")), reverse=True)
             return {"offers": offers[:5]}
         source_task = tasks.get(str(spec["from_task_id"]))
@@ -2849,20 +2908,31 @@ class FinanceStore:
         cards = [card for card in (board or {}).get("cards", []) if card.get("state") != "explore"]
         if not cards:
             raise FoundryError("that task has no dashboard to carry over")
+        if resuming:
+            if board["id"] != attempt.get("source_board_id"):
+                raise FoundryError("the source dashboard changed; start from its current version on an empty dashboard")
+            remaining = {row["card_id"] for row in attempt["failed"]}
+            cards = [card for card in cards if card["id"] in remaining]
+            existing = {card["id"] for card in (current or {}).get("cards", [])}
+            cards = [card for card in cards if card["id"] not in existing]
         plans = runs_of(source, {"cards": cards})
-        fallback = self.task.meta().get("period") or _task_period(self.analysis)
         carried_from = {"task_id": source_task.id, "title": source_task.meta().get("title")}
         outcomes = {}
         for run_id, (run, bindings, missing) in plans.items():
             try:
-                if missing:
-                    raise rc.NotRerun("这个任务里还没有：" + "、".join(missing))
-                recipe = rc.recipe_of(source, run, elsewhere=True)
-                new = rc.new_month(self, list(bindings.values()), fallback)
-                if rc.recipe_month(recipe) and not new:
-                    raise rc.NotRerun("看不出这个任务的资料是哪个月的，先在「分析范围」填上期间")
-                move = rc.month_move(recipe, new)
-                again, said = rc.run_again(self, recipe, bindings, move, elsewhere=True)
+                from foundry.dashboard_repair import verified_repair
+
+                repaired = verified_repair(self, attempt, run_id, bindings) if resuming else None
+                if repaired:
+                    recipe = rc.recipe_of(source, run, elsewhere=True)
+                    new = rc.new_month(self, list(bindings.values()), fallback)
+                    if (repaired.get("resolved_period") or {}).get("period") != new:
+                        raise rc.NotRerun("目标期间已变化，先重新核对期间并修复计算")
+                    move = rc.month_move(recipe, new)
+                    again, said = repaired, ["期间参数已升级，原月结果验证一致"]
+                else:
+                    recipe, new, move = prepare(source, run, bindings, missing)
+                    again, said = rc.run_again(self, recipe, bindings, move, elsewhere=True)
                 if again.get("execution_status") not in {"succeeded", "success"}:
                     raise rc.NotRerun(f"重算没有算完：{again.get('error') or '计算失败'}")
                 outcomes[run_id] = (again, said, rc.manual_inputs((recipe.get("scenario") or {}).get("inputs")), move)
@@ -2881,14 +2951,26 @@ class FinanceStore:
                 stored.append(rc.moved_card(card, None, again, move, before=before, said=said, manual=manual,
                                             carried=carried_from))
             except rc.NotRerun as exc:
-                failed.append({"card_id": card["id"], "title": card["title"], "reason": str(exc)})
-        if not stored:
-            return {"dashboard": current, "carried": [], "failed": failed}
+                failed.append({"card_id": card["id"], "run_id": card["run_id"], "title": card["title"],
+                               "code": "missing_files" if plans.get(card["run_id"], (None, None, []))[2]
+                                       else "calculation_not_portable", "reason": str(exc)})
         with self._dashboard_lock():
             if (self._dashboard() or {}).get("id") != (current or {}).get("id"):
                 raise FoundryError("the dashboard changed since it was read; read it again")
-            written = self._write("dashboards", parent_id=current["id"] if current else None, bindings={}, cards=stored)
-        return {"dashboard": written, "carried": [card["id"] for card in stored], "failed": failed}
+            if (self._carry_attempt() or {}).get("id") != (attempt or {}).get("id"):
+                raise FoundryError("the carry attempt changed since it was read; read it again")
+            written = current
+            if stored:
+                combined = (current or {}).get("cards", []) + stored
+                written = self._write("dashboards", parent_id=current["id"] if current else None,
+                                      bindings={}, cards=combined)
+            saved_attempt = self._write("dashboard_carries", bindings={}, parent_id=(attempt or {}).get("id"),
+                from_task_id=source_task.id, from_title=source_task.meta().get("title"), source_board_id=board["id"],
+                target_period=target_month(plans),
+                plans={run_id: {"bindings": bindings} for run_id, (_, bindings, _) in plans.items()},
+                failed=failed, carried=[card["id"] for card in stored])
+        return {"dashboard": written, "carried": [card["id"] for card in stored], "failed": failed,
+                "carry_attempt": saved_attempt}
 
     def dashboard_save(self, spec):
         from foundry.dashboards import arrange

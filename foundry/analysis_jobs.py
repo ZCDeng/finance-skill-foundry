@@ -217,6 +217,16 @@ class JobStore:
             from foundry.analysis import _script_topic
 
             _script_topic(spec.get("topic"))
+            if spec.get("period_binding") is not None:
+                from foundry.analysis import AnalysisStore
+                from foundry.analysis_period import normalize_period_binding, resolve_period
+
+                normalize_period_binding(spec["period_binding"], engine=spec.get("language", "python"))
+                if "resolved_period" not in frozen:
+                    analysis = AnalysisStore(self.task)
+                    frozen = {**frozen, "resolved_period": resolve_period(
+                        analysis, {alias: analysis.read_dataset(value) for alias, value in bindings.items()},
+                        spec.get("scope") or {}, allowed=set(frozen["snapshot_ids"]))}
         runtime_identity = _runtime_identity(runtime_pid) if kind == "child" else None
         record = {
             "id": uuid.uuid4().hex, "kind": kind, "task_id": self.task.id,
@@ -343,6 +353,7 @@ def _worker(var_root: Path, task_id: str, job_id: str) -> None:
                 record["spec"], session_id=child, context_revision=1,
                 cancel_check=lambda: jobs.get(job_id)["cancel_requested"],
                 allowed=set(record["snapshot_ids"]),
+                frozen_period=record["context"].get("resolved_period"),
             )
             status = "completed" if run["execution_status"] == "succeeded" else ("cancelled" if run.get("runner_status") == "cancelled" else "failed")
             # Result rows that break the contract: the run still completed, and the assistant reads what to fix here.

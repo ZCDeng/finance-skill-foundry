@@ -38,6 +38,8 @@ OPERATIONS = {
     "chart-deliverable-open": "chart_deliverable_open",
     "chart-deliverable-list": "chart_deliverable_list",
     "dashboard-read": "dashboard_read",
+    "dashboard-repair-read": "dashboard_repair_read",
+    "dashboard-repair-propose": "dashboard_repair_propose",
     "dashboard-save": "dashboard_save",
     "dashboard-propose": "dashboard_propose",
     "dashboard-recompute": "dashboard_recompute",

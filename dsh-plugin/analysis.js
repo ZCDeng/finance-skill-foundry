@@ -3,7 +3,7 @@ import { invokeFoundry, toolDefinition } from "./index.js";
 import { createAnalysisRuntime } from "./analysis-runtime.js";
 import { createCompletionRuntime } from "./completion-runtime.js";
 import { hideDeveloperSections } from "./seat-prompt.js";
-import { FINANCE_TOOLS, NUMERIC_PRESENTATION, REPORT_DOCUMENT } from "./finance-tools.js";
+import { FINANCE_TOOLS, NUMERIC_PRESENTATION, REPORT_DOCUMENT, PERIOD_BINDING } from "./finance-tools.js";
 
 const PROFILE = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"))
   .dsh.foundry.profiles.analysis;
@@ -118,6 +118,7 @@ const analysisSpec = {
     requirements_id: requirementsId,
     result_role: resultRole,
     scope: runScope,
+    period_binding: PERIOD_BINDING,
     timeout_seconds: { type: "number", minimum: 0.01, maximum: 60 },
     max_rows: { type: "integer", minimum: 1, maximum: 10000 },
     method_id: string("由方法应用生成时的来源方法 id"),
@@ -287,6 +288,7 @@ const SPECS = {
         requirements_id: requirementsId,
         result_role: resultRole,
         scope: runScope,
+        period_binding: PERIOD_BINDING,
         topic: scriptTopic,
         assumptions: { type: "array", items: {} },
         timeout_seconds: { type: "integer", minimum: 1, maximum: 120 },
@@ -300,7 +302,7 @@ const SPECS = {
       code: string("完整代码；通过环境变量 FOUNDRY_INPUTS 读输入，在当前工作目录写输出"), language: { type: "string", enum: ["python", "shell"] },
       bindings: { type: "object", additionalProperties: { type: "string" } }, question: string("业务问题"),
       result_file: string("可选：本次输出的 CSV/JSON 表格相对路径，用于可引用结果行；金额用字符串；行按上面的结果行约定写"),
-      requirements_id: requirementsId, result_role: resultRole, scope: runScope, topic: scriptTopic,
+      requirements_id: requirementsId, result_role: resultRole, scope: runScope, period_binding: PERIOD_BINDING, topic: scriptTopic,
       assumptions: { type: "array", items: {} }, timeout_seconds: { type: "integer", minimum: 1, maximum: 120 },
     } } }),
     kind: "execute", argv: (input) => ["analysis-script-start", "--spec", json(input.spec)],

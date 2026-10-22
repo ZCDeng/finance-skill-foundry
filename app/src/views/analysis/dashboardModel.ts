@@ -80,8 +80,20 @@ export type Recomputed = {
   carried_from: { task_id: string; title: string } | null;
 };
 
+/** One calculation that cannot yet be carried, shared by one or more cards. */
+export type CarryBlock = { run_id: string; card_ids: string[]; titles: string[]; code: string; reason: string };
+
 /** One board another task holds that could come to this one (dashboard-carry without a task). */
-export type CarryOffer = { task_id: string; title: string; period: string | null; cards: number; ready: number; missing: string[] };
+export type CarryOffer = {
+  task_id: string; title: string; period: string | null; target_period?: string | null;
+  cards: number; ready: number; missing: string[]; blocked?: CarryBlock[];
+};
+
+/** Persisted by the backend even if no card could be carried; a read restores the remaining work. */
+export type CarryAttempt = {
+  from_task_id: string; from_title?: string; target_period: string | null;
+  failed: { run_id: string; card_id: string; title: string; code: string; reason: string }[];
+};
 
 /** A card before it is saved: the backend gives it an id and records who pinned it. */
 export type CardDraft = Pick<DashboardCard, 'kind' | 'title' | 'state' | 'run_id' | 'select'> & { template?: TemplateId | null };

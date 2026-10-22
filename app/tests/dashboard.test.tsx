@@ -321,6 +321,197 @@ describe('the board on newer files and from last month', () => {
     expect(within(gap).getByText('按 2026 年 9 月的资料重算')).toBeTruthy();
     expect(financeCall.mock.calls.filter(([, command]) => command === 'dashboard-carry')).toHaveLength(2);
   });
+
+  const failedNine = Array.from({ length: 9 }, (_, index) => ({ run_id: health.id, card_id: `aug-${index}`, title: `8 月卡 ${index + 1}`,
+    code: 'period_literal', reason: '计算把期间固定为 2026-08，需要绑定本期期间。' }));
+  const attemptNine = { from_task_id: 'aug', from_title: '华宸 8 月月结', target_period: '2026-09', failed: failedNine };
+
+  it('keeps missing files apart from calculations needing repair in the carry preflight', async () => {
+    mount((command) => {
+      if (command === 'dashboard-read') return { dashboard: null };
+      if (command === 'dashboard-carry') return { offers: [{ task_id: 'aug', title: '华宸 8 月月结', period: '2026-08', cards: 9, ready: 0,
+        missing: ['ledger'], blocked: [{ run_id: health.id, card_ids: failedNine.map((item) => item.card_id), titles: failedNine.map((item) => item.title),
+          code: 'missing_files', reason: '这个任务里还没有：ledger' }] }] };
+      throw new Error(`unexpected ${command}`);
+    });
+    render(<Board />);
+    const offers = await screen.findByRole('region', { name: '从别的任务带过来' });
+    expect(within(offers).getByText('9 张卡 · 可直接重算 0 张 · 缺资料 9 张')).toBeTruthy();
+    expect(within(offers).queryByText(/计算需修复/)).toBeNull();
+    expect(within(offers).queryByRole('button', { name: '让助手修复计算' })).toBeNull();
+    expect(within(offers).getByRole('button', { name: '重新检查' })).toBeTruthy();
+  });
+
+  it('keeps missing-file failures recoverable without offering algorithm repair', async () => {
+    mount((command) => {
+      if (command === 'dashboard-read') return { dashboard: null, carry_attempt: { ...attemptNine,
+        failed: failedNine.map((item) => ({ ...item, code: 'missing_files', reason: '这个任务里还没有：ledger' })) } };
+      throw new Error(`unexpected ${command}`);
+    });
+    render(<Board />);
+    const recovery = await screen.findByRole('region', { name: '继续带入看板' });
+    expect(within(recovery).queryByRole('button', { name: '让助手修复计算' })).toBeNull();
+    expect(within(recovery).getByText('先补齐同名资料并确认表结构，再继续带入。')).toBeTruthy();
+    expect(within(recovery).getByRole('button', { name: '继续带入剩余卡（9 张）' })).toBeTruthy();
+  });
+
+  it('shows a carry preflight failure and lets the manager check again', async () => {
+    let checks = 0;
+    mount((command) => {
+      if (command === 'dashboard-read') return { dashboard: null };
+      if (command === 'dashboard-carry') {
+        checks += 1;
+        if (checks === 1) throw new Error('无法读取原看板');
+        return { offers: [{ task_id: 'aug', title: '华宸 8 月月结', period: '2026-08', cards: 9, ready: 9, missing: [] }] };
+      }
+      throw new Error(`unexpected ${command}`);
+    });
+    render(<Board />);
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', '无法读取原看板');
+    fireEvent.click(screen.getByRole('button', { name: '重新检查' }));
+    expect(await screen.findByRole('button', { name: '带过来并重算（9 张）' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(checks).toBe(2);
+  });
+
+  it('shows all nine successfully carried cards as waiting for the manager', async () => {
+    let board: Dashboard | null = null;
+    mount((command, spec) => {
+      if (command === 'dashboard-read') return { dashboard: board };
+      if (command === 'dashboard-carry' && !spec.from_task_id) return { offers: [{ task_id: 'aug', title: '华宸 8 月月结', period: '2026-08', cards: 9, ready: 9, missing: [], blocked: [] }] };
+      if (command === 'dashboard-carry') {
+        board = { id: 'sep', parent_id: null, created_at: '2026-10-10T00:00:00Z', cards: failedNine.map((item) => card({
+          id: `sep-${item.card_id}`, title: item.title, run_id: newer.id,
+          recomputed: { ...recomputed(false), carried_from: { task_id: 'aug', title: '华宸 8 月月结' } },
+        })) };
+        return { dashboard: board, carried: board.cards.map((item) => item.id), failed: [], carry_attempt: { ...attemptNine, failed: [] } };
+      }
+      throw new Error(`unexpected ${command}`);
+    });
+    render(<Board />);
+    fireEvent.click(await screen.findByRole('button', { name: '带过来并重算（9 张）' }));
+    expect(await screen.findByText('共 9 张 · 已认可 0 张 · 待认可 9 张')).toBeTruthy();
+    expect(screen.getAllByRole('article')).toHaveLength(9);
+    expect(screen.getAllByText('按 2026 年 9 月的资料重算')).toHaveLength(9);
+    expect(screen.queryByRole('region', { name: '继续带入看板' })).toBeNull();
+  });
+
+  it('preflights nine cards sharing one calculation as blocked even when their files are present', async () => {
+    const financeCall = mount((command) => {
+      if (command === 'dashboard-read') return { dashboard: null };
+      if (command === 'dashboard-carry') return { offers: [{ task_id: 'aug', title: '华宸 8 月月结', period: '2026-08',
+        target_period: '2026-09', cards: 9, ready: 0, missing: [], blocked: [{ run_id: health.id, card_ids: failedNine.map((item) => item.card_id),
+          titles: failedNine.map((item) => item.title), code: 'period_literal', reason: failedNine[0].reason }] }] };
+      throw new Error(`unexpected ${command}`);
+    });
+    render(<Board />);
+    const offers = await screen.findByRole('region', { name: '从别的任务带过来' });
+    expect(within(offers).getByText('9 张卡 · 可直接重算 0 张 · 计算需修复 9 张')).toBeTruthy();
+    expect(within(offers).getByText('1 项计算影响 9 张卡。')).toBeTruthy();
+    expect(within(offers).getByText(failedNine[0].reason)).toBeTruthy();
+    expect((within(offers).getByRole('button', { name: '带过来' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(financeCall.mock.calls.filter(([, command, spec]) => command === 'dashboard-carry' && spec?.from_task_id)).toHaveLength(0);
+  });
+
+  it('persists a blocked offer before asking the assistant to repair its authorized calculation', async () => {
+    let attempted = false;
+    const financeCall = mount((command, spec) => {
+      if (command === 'dashboard-read') return { dashboard: null };
+      if (command === 'dashboard-carry' && !spec.from_task_id) return { offers: [{ task_id: 'aug', title: '华宸 8 月月结', period: '2026-08',
+        target_period: '2026-09', cards: 9, ready: 0, missing: [], blocked: [{ run_id: health.id, card_ids: failedNine.map((item) => item.card_id),
+          titles: failedNine.map((item) => item.title), code: 'period_literal', reason: failedNine[0].reason }] }] };
+      if (command === 'dashboard-carry') { attempted = true; return { dashboard: null, carried: [], failed: failedNine, carry_attempt: attemptNine }; }
+      throw new Error(`unexpected ${command}`);
+    });
+    const requestedAfterAttempt: boolean[] = [];
+    const question = () => { requestedAfterAttempt.push(attempted); };
+    window.addEventListener(ASK_EVENT, question);
+    try {
+      render(<Board />);
+      fireEvent.click(await screen.findByRole('button', { name: '让助手修复计算' }));
+      await waitFor(() => expect(requestedAfterAttempt).toEqual([true]));
+      expect(financeCall.mock.calls.filter(([, command, spec]) => command === 'dashboard-carry' && spec?.from_task_id)).toHaveLength(1);
+      expect(screen.getByRole('region', { name: '继续带入看板' })).toBeTruthy();
+    } finally { window.removeEventListener(ASK_EVENT, question); }
+  });
+
+  it('does not ask for cross-task algorithm repair if the carry attempt could not be saved', async () => {
+    mount((command, spec) => {
+      if (command === 'dashboard-read') return { dashboard: null };
+      if (command === 'dashboard-carry' && !spec.from_task_id) return { offers: [{ task_id: 'aug', title: '华宸 8 月月结', period: '2026-08',
+        cards: 9, ready: 0, missing: [], blocked: [{ run_id: health.id, card_ids: failedNine.map((item) => item.card_id),
+          titles: failedNine.map((item) => item.title), code: 'period_literal', reason: failedNine[0].reason }] }] };
+      if (command === 'dashboard-carry') throw new Error('无法保存带入记录');
+      throw new Error(`unexpected ${command}`);
+    });
+    const question = vi.fn();
+    window.addEventListener(ASK_EVENT, question);
+    try {
+      render(<Board />);
+      fireEvent.click(await screen.findByRole('button', { name: '让助手修复计算' }));
+      expect(await screen.findByRole('alert')).toHaveProperty('textContent', '无法保存带入记录');
+      expect(question).not.toHaveBeenCalled();
+    } finally { window.removeEventListener(ASK_EVENT, question); }
+  });
+
+  it('keeps an all-blocked carry recoverable after dismissal and a fresh read, and asks once for its shared run', async () => {
+    let attempted = false;
+    mount((command, spec) => {
+      if (command === 'dashboard-read') return { dashboard: null, carry_attempt: attempted ? attemptNine : null };
+      if (command === 'dashboard-carry' && !spec.from_task_id) return { offers: [{ task_id: 'aug', title: '华宸 8 月月结', period: '2026-08', cards: 9, ready: 9, missing: [] }] };
+      if (command === 'dashboard-carry') { attempted = true; return { dashboard: null, carried: [], failed: failedNine, carry_attempt: attemptNine }; }
+      throw new Error(`unexpected ${command}`);
+    });
+    const mounted = render(<Board />);
+    fireEvent.click(await screen.findByRole('button', { name: '带过来并重算（9 张）' }));
+    expect(await screen.findByRole('region', { name: '继续带入看板' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '知道了' }));
+    expect(screen.getByRole('region', { name: '继续带入看板' })).toBeTruthy();
+    mounted.unmount();
+    render(<Board />);
+    const recovery = await screen.findByRole('region', { name: '继续带入看板' });
+    expect(within(recovery).getByText('1 项计算影响 9 张卡。')).toBeTruthy();
+    const question = vi.fn();
+    window.addEventListener(ASK_EVENT, question);
+    try {
+      fireEvent.click(within(recovery).getByRole('button', { name: '让助手修复计算' }));
+      const text = (question.mock.calls[0][0] as CustomEvent<string>).detail;
+      expect(text).toContain('来源任务 aug');
+      expect(text).toContain('2026-09');
+      expect(text.split(health.id)).toHaveLength(2);
+      expect(text).toContain('保留历史记录');
+      expect(text).toContain('待经理重新认可');
+      expect(text).toContain('dashboard_repair_read');
+      expect(text).toContain('dashboard_repair_propose');
+      expect(text).toContain('period_binding');
+      expect(text).toContain('由经理点「继续带入剩余卡」完成');
+    } finally { window.removeEventListener(ASK_EVENT, question); }
+  });
+
+  it('continues a partially carried board without removing successful cards or accepting the new results', async () => {
+    const first = card({ id: 'done-1', title: '已带入的卡', run_id: newer.id, recomputed: recomputed(false) });
+    let board: Dashboard = { id: 'v1', parent_id: null, created_at: '2026-10-10T00:00:00Z', cards: [first] };
+    let failed = failedNine.slice(0, 2);
+    const financeCall = mount((command, spec) => {
+      if (command === 'dashboard-read') return { dashboard: board, carry_attempt: { ...attemptNine, failed } };
+      if (command === 'dashboard-carry') {
+        expect(spec).toEqual({ from_task_id: 'aug' });
+        board = { ...board, id: 'v2', parent_id: 'v1', cards: [first,
+          card({ id: 'new-1', title: failed[0].title, run_id: newer.id }), card({ id: 'new-2', title: failed[1].title, run_id: newer.id })] };
+        failed = [];
+        return { dashboard: board, carried: ['new-1', 'new-2'], failed: [], carry_attempt: { ...attemptNine, failed: [] } };
+      }
+      throw new Error(`unexpected ${command}`);
+    });
+    render(<Board />);
+    const recovery = await screen.findByRole('region', { name: '继续带入看板' });
+    fireEvent.click(within(recovery).getByRole('button', { name: '继续带入剩余卡（2 张）' }));
+    expect(await screen.findByText('共 3 张 · 已认可 0 张 · 待认可 3 张')).toBeTruthy();
+    expect(screen.queryByRole('region', { name: '继续带入看板' })).toBeNull();
+    expect(board.cards[0]).toEqual(first);
+    expect(board.cards.every((item) => item.state === 'pinned' && item.accepted === null)).toBe(true);
+    expect(financeCall.mock.calls.filter(([, command]) => command === 'dashboard-save')).toHaveLength(0);
+  });
 });
 
 describe('the 回款情景 card and asking the assistant for cards', () => {

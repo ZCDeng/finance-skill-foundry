@@ -278,6 +278,96 @@ def _readd(manager, tmp_path, alias: str, rows: list[dict], name: str | None = N
     return AnalysisStore(manager.task).add_dataset(path, name=name or alias)
 
 
+def test_nine_parameter_bound_cards_carry_to_september_and_wait_for_reacceptance(tmp_path):
+    tasks = TaskStore(tmp_path / "var")
+    august = FinanceStore(tasks.create(title="八月", period="2026-08"), actor="manager")
+    old = _readd(august, tmp_path, "ledger", [{"期间": "2026-08", "entity": f"项目 {index}", "金额": "1000"} for index in range(9)])
+    saved = august.analysis.save_analysis({
+        "question": "本期收入", "bindings": {"ledger": old["id"]}, "scope": {"period": "2026-08"},
+        "sql": "select $period as period, entity, sum(金额) as amount from ledger where 期间=$period group by entity",
+        "parameters": {"period": "2026-08"}, "period_binding": {"mode": "current", "parameters": ["period"]},
+    })
+    run = august.analysis.run_analysis(saved["id"])
+    board = august.dashboard_save({"cards": [
+        {"kind": "figure", "title": f"卡 {index}", "run_id": run["id"], "state": "accepted",
+         "select": {"match": {"period": "2026-08", "entity": f"项目 {index}"}, "column": "amount"}} for index in range(9)
+    ]})
+    target = FinanceStore(tasks.create(title="九月", period="2026-09"), actor="manager")
+    _readd(target, tmp_path, "ledger", [{"期间": "2026-09", "entity": f"项目 {index}", "金额": "1200"} for index in range(9)])
+    out = target.dashboard_carry({"from_task_id": august.task.id}, tasks=tasks)
+    assert out["failed"] == []
+    cards = out["dashboard"]["cards"]
+    assert len(cards) == 9 and len({card["run_id"] for card in cards}) == 1
+    assert [card["title"] for card in cards] == [card["title"] for card in board["cards"]]
+    assert all(card["accepted"] is None and card["state"] == "pinned" for card in cards)
+    assert all(card["select"]["match"] == {"period": "2026-09", "entity": f"项目 {index}"} for index, card in enumerate(cards))
+    new_run = target.analysis.get_run(cards[0]["run_id"])
+    assert new_run["parameters"] == {"period": "2026-09"}
+    assert new_run["resolved_period"]["period"] == "2026-09"
+    assert august.dashboard_read({})["dashboard"] == board
+    assert august.analysis.get_run(run["id"])["parameters"] == {"period": "2026-08"}
+
+
+def test_missing_scope_cannot_hide_a_literal_old_period_when_carrying(tmp_path):
+    tasks = TaskStore(tmp_path / "var")
+    august = FinanceStore(tasks.create(title="八月", period="2026-08"), actor="manager")
+    old = _readd(august, tmp_path, "ledger", [{"期间": "2026-08", "金额": "1000"}])
+    saved = august.analysis.save_analysis({
+        "question": "收入", "bindings": {"ledger": old["id"]},
+        "sql": "select '2026-08' as period, sum(金额) as amount from ledger",
+    })
+    run = august.analysis.run_analysis(saved["id"])
+    august.dashboard_save({"cards": [{"kind": "figure", "title": "收入", "run_id": run["id"],
+                                      "select": {"match": {}, "column": "amount"}}]})
+    target = FinanceStore(tasks.create(title="九月", period="2026-09"), actor="manager")
+    _readd(target, tmp_path, "ledger", [{"期间": "2026-09", "金额": "1200"}])
+    out = target.dashboard_carry({"from_task_id": august.task.id}, tasks=tasks)
+    assert out["carried"] == []
+    assert "2026-08" in out["failed"][0]["reason"]
+
+
+def test_cross_year_carry_moves_current_parameter_and_keeps_fixed_comparison(tmp_path):
+    tasks = TaskStore(tmp_path / "var")
+    source = FinanceStore(tasks.create(title="十二月", period="2026-12"), actor="manager")
+    old = _readd(source, tmp_path, "ledger", [{"期间": "2026-12", "金额": "1000"}])
+    saved = source.analysis.save_analysis({
+        "question": "本期与固定基期", "bindings": {"ledger": old["id"]},
+        "sql": "select $period as period, $comparison as comparison, sum(金额) as amount from ledger where 期间=$period",
+        "parameters": {"period": "2026-12", "comparison": "2025-12"},
+        "period_binding": {"mode": "current", "parameters": ["period"]},
+    })
+    run = source.analysis.run_analysis(saved["id"])
+    source.dashboard_save({"cards": [{"kind": "figure", "title": "收入", "run_id": run["id"], "state": "accepted",
+                                      "select": {"match": {"period": "2026-12", "comparison": "2025-12"}, "column": "amount"}}]})
+    target = FinanceStore(tasks.create(title="一月", period="2027-01"), actor="manager")
+    _readd(target, tmp_path, "ledger", [{"期间": "2027-01", "金额": "1200"}])
+    out = target.dashboard_carry({"from_task_id": source.task.id}, tasks=tasks)
+    assert out["failed"] == [] and len(out["carried"]) == 1
+    card = out["dashboard"]["cards"][0]
+    assert card["select"]["match"] == {"period": "2027-01", "comparison": "2025-12"}
+    assert card["recomputed"]["months"] == ["2026-12", "2027-01"]
+    assert target.analysis.get_run(card["run_id"])["parameters"] == {"period": "2027-01", "comparison": "2025-12"}
+    assert card["state"] == "pinned" and card["accepted"] is None
+
+
+def test_current_parameter_binding_does_not_exempt_residual_old_month_literal(tmp_path):
+    from foundry.dashboard_recompute import NotRerun, recipe_of, validate_period_move
+
+    manager, _, _ = _board(tmp_path)
+    old = _readd(manager, tmp_path, "ledger", [{"期间": "2026-08", "金额": "1000"}])
+    saved = manager.analysis.save_analysis({
+        "question": "残留旧期间", "bindings": {"ledger": old["id"]},
+        "sql": "select $period as period, '2026-08' as stale_label, sum(金额) as amount from ledger where 期间=$period",
+        "parameters": {"period": "2026-08"}, "period_binding": {"mode": "current", "parameters": ["period"]},
+    })
+    run = manager.analysis.run_analysis(saved["id"])
+    recipe = recipe_of(manager, run, elsewhere=True)
+    before = manager.analysis.state()["runs"]
+    with pytest.raises(NotRerun, match="计算里写着 2026-08"):
+        validate_period_move(recipe, "2026-09")
+    assert manager.analysis.state()["runs"] == before
+
+
 def test_a_card_on_files_with_a_newer_version_is_run_again_and_waits_for_the_manager(tmp_path):
     manager, run, _ = _board(tmp_path)
     board = manager.dashboard_save({"parent_id": None, "cards": [_gap(run, state="accepted"), _rank(run)]})

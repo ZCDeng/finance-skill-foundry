@@ -399,6 +399,8 @@ const inputs = {
  'finance_readiness': {},
  'chart_deliverable_save': {spec: {run_id: 'run-1'}},
  'dashboard_read': {},
+ 'dashboard_repair_read': {spec: {run_id: 'run-1'}},
+ 'dashboard_repair_propose': {spec: {run_id: 'run-1', spec: {sql: 'SELECT $period AS period FROM actual', parameters: {period: '2026-08'}, period_binding: {mode: 'current', parameters: ['period']}}}},
  'dashboard_propose': {spec: {card: {kind: 'scenario', title: '回款情景', run_id: 'run-1', select: {match: {entity: '集团', scenario: '本期'}}}}},
  'answer_cards': {spec: {cards: [{kind: 'figure', title: '当期收缴率', collection_run_id: 'run-1', figure: 'collection_rate_current'}], follow_ups: ['按业态拆开']}},
  'month_brief': {},

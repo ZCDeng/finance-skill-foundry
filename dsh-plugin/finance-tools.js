@@ -1,6 +1,14 @@
 const text = (description) => ({ type: "string", description });
 const boundedText = (maximum, description, minimum = 0) => ({ type: "string", minLength: minimum, maxLength: maximum, description });
 const closedObject = (properties, required = []) => ({ type: "object", properties, required, additionalProperties: false });
+export const PERIOD_BINDING = closedObject({
+  mode: { type: "string", enum: ["current"] },
+  parameters: { type: "array", minItems: 1, uniqueItems: true, items: { oneOf: [
+    { type: "string", minLength: 1 }, { type: "integer", minimum: 1 },
+  ] }, description: "SQL 中明确跟随本期的参数键，或从1开始的位置；比较期参数不要列入" },
+  filter_fields: { type: "array", minItems: 1, uniqueItems: true, items: { type: "string", minLength: 1 }, description: "结构化聚合中现有 eq 期间筛选字段" },
+}, ["mode"]);
+PERIOD_BINDING.description = "显式声明本期随已确认任务/资料期间解析。SQL用parameters，聚合用filter_fields；脚本仅写mode=current，通过FOUNDRY_CONTEXT指向的只读JSON读取period。未知或冲突期间拒绝执行，不用今天日期猜测。";
 // Text limits are per field; the service also checks the combined layout density.
 const visualCommon = {
   version: { type: "integer", enum: [1] },
@@ -288,6 +296,17 @@ export const FINANCE_TOOLS = {
     description: "读本任务看板上的卡（只含本会话能读的运行）。卡不存数字，只记 run_id 和 select：读那次成功运行里 select.match 指的哪几行。state：explore 是助手提议、经理还没钉住；pinned 已在看板上、等经理认可；accepted 经理已认可。kind=scenario 的回款情景卡永远不认可。提议新卡前先读，看板上已有的同样的卡不要再提。只读。",
     parameters: { type: "object", required: [], properties: {}, additionalProperties: false }, kind: "read", argv: () => ["dashboard-read", "--spec", "{}"],
   },
+  dashboard_repair_read: specTool("dashboard-repair-read", "读取经理已发起的跨月带入失败计算。只开放该次失败记录里的原算法与目标文件绑定，不返回原任务明细。按run_id合并9张卡的修复，保留原卡与原运行；还没发起带入时不能读取。", {
+    run_id: runId,
+  }),
+  dashboard_repair_propose: specTool("dashboard-repair-propose", "提议修复已授权的跨月失败算法：只把写死本期改为period_binding，不能改指标口径或公式。服务先在隔离副本用原月快照验证列和结果逐行完全等价，再用目标月新资料运行；不一致拒绝。原任务和历史不变，结果仍需经理点「继续带入剩余卡」并重新认可；助手不能替经理认可。", {
+    run_id: runId,
+    spec: { type: "object", properties: {
+      sql: text("使用期间参数的原公式SQL"), parameters: { oneOf: [{type: "object"}, {type: "array"}] },
+      parameter_metadata: { type: "array", items: {type: "object"} }, aggregate_plan: { type: "object" },
+      code: text("通过FOUNDRY_CONTEXT读取期间的原脚本"), period_binding: PERIOD_BINDING,
+    }, required: ["period_binding"], additionalProperties: false },
+  }, ["run_id", "spec"]),
   dashboard_propose: specTool("dashboard-propose", "在看板上提议一张卡，放进看板页「助手提议」，经理点「钉住」才上看板；认可只能经理在界面做。不要说卡已经上了看板或已认可。卡不存数字：读 run_id 那次成功运行里 select.match（列名 → 该列的文字）选中的行，数字和来源都来自那次运行。kind=figure 一个数：match 恰好选中一行，column 是数所在的列（回款健康运行用 value）。kind=rank 排名条：match 选出要排的行，column 是数值列，label 是每条的名字列（回款健康运行用 entity），order 为 asc 或 desc，limit 1–50，可选 reference {value,label} 画参考线（距生死线用 {value:'0',label:'生死线'}）。kind=bridge 利润桥：读 explain_variance 的预算或上期利润桥运行，match 选出含 profit 行的那一组。kind=scenario 回款情景卡：读回款健康运行（finance_scenario_run kind=collection_health），match 写 {entity: 主体名, scenario: '本期'}，经理在卡上拖收缴率看距生死线、现金经营利润和一年回款怎么变；卡上永远标「情景，不是实际数」，不能认可、不进月结和文稿。kind=goal 倒推卡和 kind=sensitivity 敏感性表同样读回款健康运行的一个主体，match 写 {entity: 主体名, scenario: '本期'}，同样标情景、不能认可：goal 加 goal=collection 看收缴率到目标一年要多收多少（可选 target，带 % 的文字如 '92%'，不写就是回到生死线），goal=budget 看全年收入预算还差多少、剩余月份每月要做到多少（运行里要有全年收入预算还差那两行）；sensitivity 读运行里该主体的敏感性表（算回款健康时给该主体写 sensitivity: true）。回款健康运行的行按 entity、metric_key、scenario（本期/上年同期/变动）区分，城市公司明细表的行带 entity_origin=table。「只看海口」「按城市公司拆开」这类说法只改 match 选哪些行，不改口径；要换口径、期间或资料，先按原流程算出新的运行（口径改动仍由经理确认），再用新的 run_id 提议。同一运行、同一种卡、同样的行，看板上已有时会被拒。", {
     card: { type: "object", required: ["kind", "title", "run_id", "select"], additionalProperties: false, properties: {
       kind: { type: "string", enum: ["figure", "rank", "bridge", "scenario", "goal", "sensitivity"] },
