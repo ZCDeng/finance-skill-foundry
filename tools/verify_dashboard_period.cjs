@@ -117,8 +117,10 @@ function boundDefinition(datasetId) {
   };
 }
 
-function seedPair(name, definition, count = 9) {
+async function seedPair(name, definition, count = 9) {
   const august = task(`QA 八月 · ${name}`, '2026-08');
+  // Task timestamps have second precision; startup must select the target month.
+  await delay(1100);
   const september = task(`QA 九月 · ${name}`, '2026-09');
   const source = addDataset(august);
   addDataset(september);
@@ -340,8 +342,8 @@ async function verifyRecovery(pair) {
 
 async function main() {
   await verifyCandidate();
-  const bound = seedPair('参数绑定九卡', boundDefinition);
-  const missingScope = seedPair('缺少范围旧月', (id) => ({
+  const bound = await seedPair('参数绑定九卡', boundDefinition);
+  const missingScope = await seedPair('缺少范围旧月', (id) => ({
     question: '缺scope旧月固定值验收', bindings: {actual: id},
     sql: "SELECT metric, '2026-08' AS period, CAST(amount AS DECIMAL(38,2)) AS value, currency, unit FROM actual ORDER BY metric",
   }));
