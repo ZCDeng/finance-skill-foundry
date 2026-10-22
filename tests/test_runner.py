@@ -55,6 +55,33 @@ def test_shell_builtin_writes_only_own_scratch(workspace: Path) -> None:
     assert (Path(result["workspace"]) / "amount.txt").read_text() == "42.00"
 
 
+def test_frozen_period_context_is_readable_and_immutable(workspace: Path) -> None:
+    result = runner.run_script(workspace, '''
+import json, os
+from pathlib import Path
+path = Path(os.environ["FOUNDRY_CONTEXT"])
+print(json.loads(path.read_text())["period"])
+try:
+    path.write_text('{"period":"2026-08"}')
+except PermissionError:
+    print("context immutable")
+else:
+    raise AssertionError("period context changed")
+''', context={"period": "2026-09", "source": "task"})
+    assert result["status"] == "succeeded", result
+    assert result["stdout"] == "2026-09\ncontext immutable\n"
+    assert any(item["path"].endswith("/context.json") for item in result["inputs"])
+
+
+def test_period_context_is_frozen_separately_for_each_invocation(workspace: Path) -> None:
+    code = 'import json, os\nprint(json.load(open(os.environ["FOUNDRY_CONTEXT"]))["period"])'
+    august = runner.run_script(workspace, code, context={"period": "2026-08"})
+    september = runner.run_script(workspace, code, context={"period": "2026-09"})
+    assert august["status"] == september["status"] == "succeeded", (august, september)
+    assert august["stdout"] == "2026-08\n" and september["stdout"] == "2026-09\n"
+    assert august["inputs"][0]["sha256"] != september["inputs"][0]["sha256"]
+
+
 @pytest.mark.parametrize("access", ["read", "write", "metadata"])
 def test_arbitrary_local_files_and_canonical_are_denied(workspace: Path, access: str) -> None:
     secret_fixture = workspace.parent / "outside.txt"

@@ -24,6 +24,7 @@ from openpyxl.comments import Comment
 from foundry.analysis_data import MAX_SOURCE_BYTES, SUPPORTED, json_value, parse_source
 from foundry.analysis_sql import CONFIG, execute_sql, method_template, validate_relationship_contract
 from foundry.analysis_parameters import normalize_parameter_metadata, method_parameters
+from foundry.analysis_period import bind_period, normalize_period_binding, resolve_period
 from foundry.errors import FoundryError
 from foundry.fsutil import write_json_atomic
 from foundry.locking import exclusive
@@ -893,6 +894,8 @@ class AnalysisStore:
         parameter_metadata = [] if structured else normalize_parameter_metadata(
             sql, parameters, spec.get("parameter_metadata")
         )
+        period_binding = normalize_period_binding(spec.get("period_binding"), engine=engine, sql=sql,
+                                                  parameters=parameters, aggregate_plan=aggregate_plan)
         timeout = spec.get("timeout_seconds", 15)
         max_rows = spec.get("max_rows", 1000)
         if (
@@ -932,6 +935,7 @@ class AnalysisStore:
             bindings=bindings,
             parameters=parameters,
             parameter_metadata=parameter_metadata,
+            **({"period_binding": period_binding} if period_binding else {}),
             parent_id=parent_id,
             requirements_id=requirements_id,
             result_role=result_role,
@@ -1307,6 +1311,7 @@ class AnalysisStore:
                     "requirements_id": analysis.get("requirements_id"),
                     "result_role": analysis.get("result_role"),
                     "scope": analysis.get("scope", {}),
+                    "period_binding": analysis.get("period_binding"),
                 },
                 session_id=session_id,
                 context_revision=context_revision,
@@ -1317,6 +1322,12 @@ class AnalysisStore:
             alias: self.read_dataset(dataset_id)
             for alias, dataset_id in analysis["bindings"].items()
         }
+        resolved_period = None
+        if analysis.get("period_binding"):
+            resolved_period = resolve_period(self, datasets, analysis.get("scope", {}), allowed=allowed)
+            analysis = bind_period(analysis, resolved_period)
+            if analysis.get("engine") != "structured_aggregate":
+                normalize_parameter_metadata(analysis["sql"], analysis["parameters"], analysis.get("parameter_metadata"))
         structured = analysis.get("engine") == "structured_aggregate"
         environment = {
             "python": platform.python_version(),
@@ -1338,6 +1349,7 @@ class AnalysisStore:
                 "environment": environment,
                 "relationships": analysis["relationships"],
                 "max_rows": analysis["max_rows"],
+                **({"resolved_period": resolved_period} if resolved_period else {}),
             }
         )
         if structured:
@@ -1391,6 +1403,9 @@ class AnalysisStore:
                 sql=analysis["sql"],
                 parameters=analysis["parameters"],
                 parameter_metadata=analysis.get("parameter_metadata", []),
+                **({"period_binding": analysis["period_binding"], "resolved_period": resolved_period,
+                    "execution_input_hash": _hash({"datasets": input_hashes, "period": resolved_period})}
+                   if resolved_period else {}),
                 bindings=analysis["bindings"],
                 input_hashes=input_hashes,
                 source_hashes={
@@ -2899,6 +2914,7 @@ class AnalysisStore:
         cancel_check=None,
         analysis_id: str | None = None,
         allowed: set[str] | None = None,
+        frozen_period: dict | None = None,
     ) -> dict:
         """Broker explicit snapshots to one isolated workspace and archive outputs.
 
@@ -2950,6 +2966,7 @@ class AnalysisStore:
         default_result_role = "business" if result_file else "activity"
         result_role = _result_role(spec.get("result_role"), default=default_result_role)
         scope = _scope_metadata(spec.get("scope"))
+        period_binding = normalize_period_binding(spec.get("period_binding"), engine=language)
         topic = _script_topic(spec.get("topic"))
         revision = _new(
             self.task,
@@ -2966,6 +2983,7 @@ class AnalysisStore:
             requirements_id=requirements_id,
             result_role=result_role,
             scope=scope,
+            **({"period_binding": period_binding} if period_binding else {}),
             timeout_seconds=timeout,
             relationships=[],
             metrics=[],
@@ -2979,6 +2997,7 @@ class AnalysisStore:
             requirements_id = revision.get("requirements_id")
             result_role = revision.get("result_role", "business")
             scope = revision.get("scope", {})
+            period_binding = revision.get("period_binding")
         else:
             self._write(self._object_path("revisions", revision["id"]), revision)
         run_id = uuid.uuid4().hex
@@ -2995,7 +3014,12 @@ class AnalysisStore:
             (
                 inputs / (alias + ".source" + Path(dataset["source_file"]).suffix)
             ).write_bytes(canonical.read_bytes())
+        resolved_period = resolve_period(self, datasets, scope, allowed=allowed, frozen=frozen_period) if period_binding else None
+        if resolved_period:
+            scope = {**scope, "period": resolved_period["period"]}
         options = {"language": language, "timeout": timeout}
+        if resolved_period:
+            options["context"] = resolved_period
         if cancel_check is not None:
             options["cancel_check"] = cancel_check
         execution = run_script(workspace, code, **options)
@@ -3104,6 +3128,10 @@ class AnalysisStore:
             input_hashes={
                 alias: dataset["data_hash"] for alias, dataset in datasets.items()
             },
+            **({"period_binding": period_binding, "resolved_period": resolved_period,
+                "execution_input_hash": _hash({"datasets": {alias: data["data_hash"] for alias, data in datasets.items()},
+                                                "period": resolved_period})}
+               if resolved_period else {}),
             source_hashes={
                 alias: dataset["source_hash"] for alias, dataset in datasets.items()
             },

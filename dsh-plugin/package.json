@@ -99,6 +99,8 @@
             "finance_readiness",
             "chart_deliverable_save",
             "dashboard_read",
+            "dashboard_repair_read",
+            "dashboard_repair_propose",
             "dashboard_propose",
             "answer_cards",
             "month_brief",

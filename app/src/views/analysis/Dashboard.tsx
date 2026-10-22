@@ -15,6 +15,7 @@ import { RankBars } from '../../components/charts/RankBars.js';
 import { Waterfall } from '../../components/charts/Waterfall.js';
 import { formatPeriod } from '../../lib/period.js';
 import { AskLink } from '../guide/GuideHub.js';
+import { askWith } from '../guide/ask.js';
 import { BoardPresentation } from './BoardPresentation.js';
 import { ScenarioCard } from './ScenarioCard.js';
 import { scenarioBase } from './dashboardScenario.js';
@@ -24,7 +25,7 @@ import { FigureSource } from './FigureSource.js';
 import { figureSource, runIsStale, type FigureSourceContext } from './figureSourceInfo.js';
 import { LevelMark } from './CollectionHealthView.js';
 import { profitBridges } from './RunPanel.js';
-import { cardSignature, isWhatIf, type CardDraft, type CarryOffer, type Dashboard, type DashboardCard, type PinBoard } from './dashboardModel.js';
+import { cardSignature, isWhatIf, type CardDraft, type CarryAttempt, type CarryBlock, type CarryOffer, type Dashboard, type DashboardCard, type PinBoard } from './dashboardModel.js';
 import { newerRun, TEMPLATES, type Template } from './dashboardTemplates.js';
 import { drawsOn, figureView, rankItems, sameMatch } from './dashboardViews.js';
 import { acceptedCard, buildSnapshot, type SnapshotTask } from './dashboardSnapshot.js';
@@ -39,7 +40,7 @@ type Edit = (cards: DashboardCard[]) => (DashboardCard | CardDraft)[];
 export type BoardNews = { cards: number; changed: number; failed: { title: string; reason: string }[]; carriedFrom?: string; error?: string };
 
 type Recompute = { dashboard: Dashboard | null; recomputed: string[]; failed: { card_id: string; title: string; reason: string }[] };
-type Carry = { dashboard: Dashboard | null; carried: string[]; failed: { card_id: string; title: string; reason: string }[] };
+type Carry = { dashboard: Dashboard | null; carried: string[]; failed: { card_id: string; title: string; reason: string }[]; carry_attempt?: CarryAttempt | null };
 
 const changedAmong = (board: Dashboard | null, ids: string[]) => (board?.cards ?? []).filter((card) => ids.includes(card.id) && card.recomputed?.changed).length;
 
@@ -55,6 +56,7 @@ export function useDashboard(taskId: string | undefined, { canRecompute = false,
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [news, setNews] = useState<BoardNews | null>(null);
+  const [carryAttempt, setCarryAttempt] = useState<CarryAttempt | null>(null);
   const current = useRef<Dashboard | null>(null);
   const task = useRef(taskId);
   task.current = taskId;
@@ -92,9 +94,10 @@ export function useDashboard(taskId: string | undefined, { canRecompute = false,
   const load = useCallback(async () => {
     const api = bridge();
     if (!taskId || !api?.financeCall) return null;
-    const read = unwrap(await api.financeCall(taskId, 'dashboard-read', {}) as Answer<{ dashboard: Dashboard | null; recompute?: { ready: number } }>);
+    const read = unwrap(await api.financeCall(taskId, 'dashboard-read', {}) as Answer<{ dashboard: Dashboard | null; recompute?: { ready: number }; carry_attempt?: CarryAttempt | null }>);
     if (task.current !== taskId) return null;
     show(read.dashboard);
+    setCarryAttempt(read.carry_attempt ?? null);
     setLoaded(true);
     if (read.dashboard && (read.recompute?.ready ?? 0) > 0 && allowed.current) void recompute(read.dashboard).catch(() => undefined);
     return read.dashboard;
@@ -104,6 +107,7 @@ export function useDashboard(taskId: string | undefined, { canRecompute = false,
     setDashboard(null);
     setLoaded(false);
     setNews(null);
+    setCarryAttempt(null);
     void load().catch(() => setLoaded(true));
   }, [load]);
   const change = useCallback(async (edit: Edit) => {
@@ -133,18 +137,20 @@ export function useDashboard(taskId: string | undefined, { canRecompute = false,
     if (!taskId || !api?.financeCall) return [];
     return unwrap(await api.financeCall(taskId, 'dashboard-carry', {}) as Answer<{ offers: CarryOffer[] }>).offers;
   }, [taskId]);
-  const carry = useCallback(async (offer: CarryOffer) => {
+  const carry = useCallback(async (offer: Pick<CarryOffer, 'task_id' | 'title'>) => {
     const api = bridge();
     if (!taskId || !api?.financeCall) throw new Error('此版本暂不支持看板。');
     const out = unwrap(await api.financeCall(taskId, 'dashboard-carry', { from_task_id: offer.task_id }) as Answer<Carry>);
     if (task.current !== taskId) return;
     if (out.dashboard) show(out.dashboard);
+    setCarryAttempt(out.carry_attempt ?? null);
     setNews({ cards: out.carried.length, changed: changedAmong(out.dashboard, out.carried), failed: out.failed, carriedFrom: offer.title });
     if (out.carried.length) after.current?.();
+    return out;
   }, [show, taskId]);
   const dismiss = useCallback(() => setNews(null), []);
-  return useMemo(() => ({ dashboard, loaded, load, change, pin, news, dismiss, offers, carry }),
-    [dashboard, loaded, load, change, pin, news, dismiss, offers, carry]);
+  return useMemo(() => ({ dashboard, loaded, load, change, pin, news, dismiss, offers, carry, carryAttempt }),
+    [dashboard, loaded, load, change, pin, news, dismiss, offers, carry, carryAttempt]);
 }
 
 export type DashboardState = ReturnType<typeof useDashboard>;
@@ -289,8 +295,9 @@ export function DashboardView({ task, state, runs, analyses, datasets, supersede
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
     {said && <p role="status" className="analysis-message">{said}</p>}
     {news ? <NewsLine news={news} onDismiss={dismiss} /> : null}
+    {state.carryAttempt?.failed.length ? <CarryRecovery state={state} busy={busy} readOnly={readOnly} setBusy={setBusy} setError={setError} /> : null}
     {!board.length && !proposed.length ? <>
-      {!readOnly ? <CarryOffers state={state} busy={busy} setBusy={setBusy} setError={setError} /> : null}
+      {!readOnly && !state.carryAttempt?.failed.length ? <CarryOffers state={state} busy={busy} setBusy={setBusy} setError={setError} /> : null}
       <TemplateChooser runs={runs} cards={cards} readOnly={readOnly} busy={busy} onAdd={addTemplate} />
     </> : <>
       <div className="dashboard__summary">
@@ -423,6 +430,63 @@ function NewsLine({ news, onDismiss }: { news: BoardNews; onDismiss(): void }) {
   </div>;
 }
 
+/** The same run may feed nine cards: explain its blocker once and ask to repair that calculation once. */
+function carryBlocks(attempt: CarryAttempt): CarryBlock[] {
+  const grouped = new Map<string, CarryBlock>();
+  for (const failure of attempt.failed) {
+    const key = failure.run_id || failure.card_id;
+    const held = grouped.get(key);
+    if (held) { held.card_ids.push(failure.card_id); held.titles.push(failure.title); }
+    else grouped.set(key, { run_id: failure.run_id, card_ids: [failure.card_id], titles: [failure.title], code: failure.code, reason: failure.reason });
+  }
+  return [...grouped.values()];
+}
+
+function askCarryRepair(source: string, target: string | null | undefined, blocked: CarryBlock[]) {
+  askWith(`请修复看板跨期带入失败的计算。来源任务 ${source}；目标期间 ${target || '使用当前任务已确认的期间'}。\n`
+    + blocked.map((item) => `原运行 ${item.run_id}（影响 ${item.card_ids.length} 张卡）：${item.reason}`).join('\n')
+    + '\n按原运行去重调用 dashboard_repair_read，读取已授权的原算法；用 period_binding 声明当前期间，分别核对同比、累计区间和截止日，再调用 dashboard_repair_propose（run_id, spec）提议修复。先用原期间资料核对业务键、金额、单位和结果完整性，验证原月等价。保留历史记录和已成功带入的卡，不直接替换经理卡。修复提议通过后，由经理点「继续带入剩余卡」完成，新结果待经理重新认可。');
+}
+
+function CarryBlockList({ blocked }: { blocked: CarryBlock[] }) {
+  const count = new Set(blocked.flatMap((item) => item.card_ids)).size;
+  return <>
+    <p className="analysis-note">{`${blocked.length} 项计算影响 ${count} 张卡。`}</p>
+    <ul className="dashboard__blockers">{blocked.map((item) => <li key={item.run_id}>
+      <p className="analysis-note">{item.reason}</p>
+      <p className="analysis-note">{item.titles.join('、')}</p>
+    </li>)}</ul>
+  </>;
+}
+
+/** The backend keeps this attempt until the remaining cards are recovered, independent of the dismissible news. */
+function CarryRecovery({ state, busy, readOnly, setBusy, setError }: {
+  state: DashboardState; busy: boolean; readOnly: boolean; setBusy(value: boolean): void; setError(text: string): void;
+}) {
+  const attempt = state.carryAttempt!;
+  const blocked = carryBlocks(attempt);
+  const repairable = carryBlocks({ ...attempt, failed: attempt.failed.filter((item) => item.code !== 'missing_files') });
+  const missing = attempt.failed.some((item) => item.code === 'missing_files');
+  const retry = () => {
+    setBusy(true); setError('');
+    void state.carry({ task_id: attempt.from_task_id, title: attempt.from_title || '原任务' })
+      .catch((failure) => setError(errorText(failure))).finally(() => setBusy(false));
+  };
+  return <section className="dashboard__carry" aria-labelledby="dashboard-recovery">
+    <h4 id="dashboard-recovery" className="dashboard__group-title">继续带入看板</h4>
+    <p className="analysis-note">{`从「${attempt.from_title || '原任务'}」带入${attempt.target_period ? ` ${formatPeriod(attempt.target_period)}` : ''}，还有 ${attempt.failed.length} 张卡待恢复；已成功的卡保留。`}</p>
+    <CarryBlockList blocked={blocked} />
+    {!readOnly ? <>
+      <div className="dashboard__tools">
+        {repairable.length ? <Button type="button" variant="outline" disabled={busy} onClick={() => askCarryRepair(attempt.from_task_id, attempt.target_period, repairable)}>让助手修复计算</Button> : null}
+        <Button type="button" variant="outline" disabled={busy} onClick={retry}>{`继续带入剩余卡（${attempt.failed.length} 张）`}</Button>
+      </div>
+      {missing ? <p className="analysis-note">先补齐同名资料并确认表结构，再继续带入。</p> : null}
+      {repairable.length ? <p className="analysis-note">先把修复要求填进对话框，改好再发送；修复后继续带入，新卡仍需你认可。</p> : null}
+    </> : null}
+  </section>;
+}
+
 /**
  * 从别的任务带过来: last month's board onto this empty one. Each card's calculation runs on this task's files of the
  * same names, so a board can come over once the month's pack is in and its tables confirmed.
@@ -431,29 +495,57 @@ function CarryOffers({ state, busy, setBusy, setError }: {
   state: DashboardState; busy: boolean; setBusy(value: boolean): void; setError(text: string): void;
 }) {
   const [offers, setOffers] = useState<CarryOffer[] | null>(null);
+  const [offerError, setOfferError] = useState('');
+  const [checking, setChecking] = useState(false);
+  const [check, setCheck] = useState(0);
   const { offers: list, carry } = state;
   useEffect(() => {
     let live = true;
-    void list().then((rows) => { if (live) setOffers(rows); }, () => { if (live) setOffers([]); });
+    setChecking(true); setOfferError('');
+    void list().then((rows) => { if (live) setOffers(rows); }, (failure) => {
+      if (live) { setOffers([]); setOfferError(errorText(failure)); }
+    }).finally(() => { if (live) setChecking(false); });
     return () => { live = false; };
-  }, [list]);
-  if (!offers?.length) return null;
+  }, [list, check]);
+  if (!offers?.length && !offerError) return null;
   const bring = (offer: CarryOffer) => {
     setBusy(true); setError('');
     void carry(offer).catch((failure) => setError(errorText(failure))).finally(() => setBusy(false));
   };
+  const repair = (offer: CarryOffer) => {
+    setBusy(true); setError('');
+    // The carry records the source runs and target bindings before any cross-task algorithm can be read.
+    void carry(offer).then((out) => {
+      const attempt = out?.carry_attempt;
+      if (attempt?.failed.length) {
+        const repairable = carryBlocks({ ...attempt, failed: attempt.failed.filter((item) => item.code !== 'missing_files') });
+        if (repairable.length) askCarryRepair(attempt.from_task_id, attempt.target_period, repairable);
+      }
+      else if (out?.failed.length) throw new Error('带入恢复记录尚未保存，请重新读取看板后再试。');
+    }).catch((failure) => setError(errorText(failure))).finally(() => setBusy(false));
+  };
   return <section className="dashboard__carry" aria-labelledby="dashboard-carry">
     <h4 id="dashboard-carry" className="dashboard__group-title">从别的任务带过来</h4>
     <p className="analysis-note">按原来的算法，用这个任务里同名的资料重算一遍，卡片都等你认可。</p>
+    {offerError ? <p role="alert" className="analysis-message analysis-message--error">{offerError}</p> : null}
+    <div className="dashboard__tools"><Button type="button" variant="outline" disabled={busy || checking} onClick={() => setCheck((value) => value + 1)}>重新检查</Button></div>
     <ul className="dashboard__templates">
-      {offers.map((offer) => <li key={offer.task_id}>
+      {(offers ?? []).map((offer) => {
+        const blocked = offer.blocked ?? [];
+        const repairable = blocked.filter((item) => item.code !== 'missing_files');
+        const missing = blocked.filter((item) => item.code === 'missing_files');
+        const count = (items: CarryBlock[]) => new Set(items.flatMap((item) => item.card_ids)).size;
+        return <li key={offer.task_id}>
         <div><strong>{offer.period ? `${offer.title} · ${formatPeriod(offer.period)}` : offer.title}</strong>
-          <p className="analysis-note">{offer.ready === offer.cards ? `${offer.cards} 张卡，读的资料这里都有。`
-            : `${offer.cards} 张卡，其中 ${offer.ready} 张读的资料这里都有。`}</p>
-          {offer.missing.length ? <p className="analysis-note">{`还缺：${offer.missing.join('、')}。先加入资料并确认表结构。`}</p> : null}</div>
+          <p className="analysis-note">{`${offer.cards} 张卡 · 可直接重算 ${offer.ready} 张${repairable.length ? ` · 计算需修复 ${count(repairable)} 张` : ''}${missing.length ? ` · 缺资料 ${count(missing)} 张` : ''}`}</p>
+          {offer.missing.length ? <p className="analysis-note">{`还缺：${offer.missing.join('、')}。先加入资料并确认表结构。`}</p> : null}
+          {blocked.length ? <CarryBlockList blocked={blocked} /> : null}
+          {repairable.length ? <>
+            <Button type="button" variant="link" disabled={busy} onClick={() => repair(offer)}>让助手修复计算</Button>
+          </> : null}</div>
         <Button type="button" variant="outline" disabled={busy || !offer.ready} onClick={() => bring(offer)}>
           {offer.ready ? `带过来并重算（${offer.ready} 张）` : '带过来'}<ArrowRight size={14} strokeWidth={1.5} aria-hidden /></Button>
-      </li>)}
+      </li>; })}
     </ul>
   </section>;
 }

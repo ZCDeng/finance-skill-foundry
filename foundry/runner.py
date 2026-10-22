@@ -77,9 +77,12 @@ def _files(root: Path) -> list[tuple[Path, int]]:
     return files
 
 
-def _profile(output: Path, script: Path, input_dirs: list[Path], runtime: list[Path], executable: Path) -> str:
+def _profile(output: Path, script: Path, input_dirs: list[Path], runtime: list[Path], executable: Path,
+             context_file: Path | None = None) -> str:
     read_dirs = [output, *input_dirs, *runtime, Path("/System/Library"), Path("/usr/lib")]
     read_files = [Path("/"), script, executable, Path("/bin/bash"), Path("/dev/null"), Path("/dev/random"), Path("/dev/urandom")]
+    if context_file:
+        read_files.append(context_file)
     ancestors = {parent for path in [*read_dirs, *read_files] for parent in path.parents}
     quote = lambda path: json.dumps(str(path), ensure_ascii=False)
     rules = ["(version 1)", "(deny default)", "(allow sysctl-read)"]
@@ -152,6 +155,7 @@ def run_script(
     language: Literal["python", "shell"] = "python",
     timeout: float = 30,
     cancel_check: Callable[[], bool] | None = None,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute code with read-only inputs and private scratch; return JSON data.
 
@@ -207,6 +211,13 @@ def run_script(
         scratch.mkdir(exist_ok=True, mode=0o700)
         run_root = scratch / result["run_id"]
         run_root.mkdir(mode=0o700)
+        context_file = None
+        if context is not None:
+            context_file = run_root / "context.json"
+            context_file.write_text(json.dumps(context, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+            context_file.chmod(0o400)
+            result["inputs"].append({"path": str(context_file.relative_to(workspace)),
+                                     "size": context_file.stat().st_size, "sha256": _hash_file(context_file)})
         output = run_root / "output"
         output.mkdir(mode=0o700)
         result["workspace"] = str(output)
@@ -236,13 +247,15 @@ def run_script(
         script = run_root / "script.py"
         script.write_text(bootstrap, encoding="utf-8")
         script.chmod(0o400)
-        profile = _profile(output, script, input_dirs, runtime, executable)
+        profile = _profile(output, script, input_dirs, runtime, executable, context_file)
         env = {
             "PATH": f"{executable.parent}:/usr/bin:/bin", "HOME": str(output),
             "TMPDIR": str(output), "LANG": "en_US.UTF-8", "LC_ALL": "en_US.UTF-8",
             "FOUNDRY_INPUTS": str(workspace / "inputs"), "FOUNDRY_UPLOADS": str(workspace / "uploads"),
             "FOUNDRY_OUTPUTS": str(output),
         }
+        if context is not None:
+            env["FOUNDRY_CONTEXT"] = str(context_file)
         if not frozen:
             env["FOUNDRY_PYTHON"] = str(executable)
         result["environment"].update(

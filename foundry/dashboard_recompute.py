@@ -33,6 +33,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
 from foundry.dashboards import WHAT_IF, matching_rows, normalize_select
+from foundry.analysis_period import MONTH_FORMS as _MONTH_FORMS, bind_period, dataset_months, month_of
 from foundry.errors import FoundryError
 from foundry.task import now_iso
 
@@ -54,26 +55,6 @@ class NotRerun(Exception):
 
 
 # -- months ----------------------------------------------------------------------------------------------------------
-
-_MONTH_FORMS = (
-    (re.compile(r"^(\d{4})-(\d{1,2})$"), "{y}-{m:02d}"),
-    (re.compile(r"^(\d{4})(\d{2})$"), "{y}{m:02d}"),
-    (re.compile(r"^(\d{4})/(\d{1,2})$"), "{y}/{m:02d}"),
-    (re.compile(r"^(\d{4})\.(\d{1,2})$"), "{y}.{m:02d}"),
-    (re.compile(r"^(\d{4})年(\d{1,2})月$"), "{y}年{m}月"),
-)
-
-
-def month_of(text: Any) -> str | None:
-    """``YYYY-MM`` of a value that names one month and nothing else, in the forms a pack writes it; else None."""
-    if not isinstance(text, str):
-        return None
-    for pattern, _ in _MONTH_FORMS:
-        found = pattern.fullmatch(text.strip())
-        if found and 1 <= int(found.group(2)) <= 12:
-            return f"{int(found.group(1)):04d}-{int(found.group(2)):02d}"
-    return None
-
 
 def moved_text(text: Any, move: tuple[str, str] | None) -> Any:
     """The same month form, one month moved: 「2026-08」→「2026-09」, 「2026年8月」→「2026年9月」. Anything else as it was."""
@@ -213,18 +194,20 @@ def other_months(store, ids: list[str], month: str) -> list[str]:
 
 def new_month(store, ids: list[str], fallback: Any = None) -> str | None:
     """The month the new files declare, when they agree; else the fallback's (the task's period, from another task)."""
-    from foundry.finance_readiness import _snapshot_period
-
     months = set()
     for dataset_id in ids:
         try:
-            months.add(month_of(_snapshot_period(store.analysis.read_dataset(dataset_id))))
+            months.update(dataset_months(store.analysis.read_dataset(dataset_id)))
         except FoundryError:
             continue
     months.discard(None)
-    if len(months) == 1:
-        return months.pop()
-    return month_of(fallback) if not months else None
+    if len(months) > 1:
+        raise NotRerun("新资料包含多个期间，换成同一个月的再重算")
+    declared = next(iter(months), None)
+    target = month_of(fallback)
+    if declared and target and declared != target:
+        raise NotRerun(f"资料期间 {declared} 与目标期间 {target} 不一致，先确认分析范围")
+    return declared or target
 
 
 # -- calculations ----------------------------------------------------------------------------------------------------
@@ -253,26 +236,60 @@ def recipe_of(source, run: dict, *, elsewhere: bool) -> dict:
             recipe["scenario"] = {"kind": scenario["kind"], "label": scenario["label"], "inputs": scenario["inputs"]}
         elif revision["operation"] not in {"metric", "variance"}:
             raise NotRerun("这类结果还不能换资料重算")
-        return recipe
+        return _with_source_period(source, recipe, run)
     if revision.get("topic"):
         # A script drawn in place of 回款健康 while the workbook's structure waited: next month runs it on the engine.
         raise NotRerun("这张卡来自回款健康的脚本草稿，确认表结构后让助手用财务引擎重算")
     if engine in QUERY_ENGINES or engine in SCRIPT_ENGINES:
-        return {"engine": engine, "revision": revision, "revision_id": revision["id"], "bindings": dict(revision["bindings"])}
+        return _with_source_period(source, {"engine": engine, "revision": revision, "revision_id": revision["id"], "bindings": dict(revision["bindings"])}, run)
     raise NotRerun("这类结果还不能换资料重算")
 
 
 def recipe_month(recipe: dict) -> str | None:
     """The month the calculation was for: its context's month scopes, or the analysis's own scope."""
     if recipe["engine"] == "finance":
-        return _scope_month(list(((recipe["context"].get("scopes")) or {}).values()))
-    return month_of(((recipe["revision"].get("scope")) or {}).get("period"))
+        return _scope_month(list(((recipe["context"].get("scopes")) or {}).values())) or recipe.get("source_month")
+    period = ((recipe["revision"].get("scope")) or {}).get("period")
+    return month_of(period) if period else recipe.get("source_month")
+
+
+def _with_source_period(source, recipe: dict, run: dict) -> dict:
+    """Missing scope cannot hide the month declared by the original snapshots/task."""
+    months = {month_of((run.get("resolved_period") or {}).get("period")),
+              month_of((run.get("scope") or {}).get("period"))} - {None}
+    if hasattr(source.analysis, "read_dataset"):
+        for dataset_id in recipe["bindings"].values():
+            months.update(dataset_months(source.analysis.read_dataset(dataset_id)))
+    scoped = recipe_month(recipe)
+    if scoped:
+        months.add(scoped)
+    if recipe["engine"] == "finance":
+        months.update(month_of((scope or {}).get("period")) for scope in (recipe["context"].get("scopes") or {}).values())
+        months.discard(None)
+    task = getattr(source, "task", None)
+    task_period = None
+    if hasattr(source.analysis, "_list"):
+        from foundry.finance_readiness import _task_period
+        task_period = month_of(_task_period(source.analysis))
+    task_period = task_period or (month_of(task.meta().get("period")) if task else None)
+    from_task = not months and bool(task_period)
+    if from_task:
+        months.add(task_period)
+    return {**recipe, "source_month": next(iter(months)) if len(months) == 1 else None,
+            "source_period_conflict": len(months) > 1, "source_period_from_task": from_task}
 
 
 def month_move(recipe: dict, new: str | None) -> tuple[str, str] | None:
     """The calculation's month to the new files' month, or None when it stays. A period written as a range is not moved:
     the manager sets it again (a calculation over 1–8 月 on September's files would say 1–8 月 of 1–9 月's figures)."""
+    if recipe.get("source_period_conflict"):
+        raise NotRerun("原计算的期间与资料不一致，先重新确认分析范围")
     old = recipe_month(recipe)
+    if new and old == new and recipe.get("source_period_from_task") and recipe["engine"] != "finance":
+        written = json.dumps({key: recipe["revision"].get(key) for key in ("sql", "aggregate_plan", "parameters", "code")},
+                             ensure_ascii=False)
+        if re.search(r"(?<!\d)\d{4}(?:[-/.年]\d{1,2}|\d{2})(?!\d)", written):
+            raise NotRerun("原计算期间缺少资料或运行记录核验，不能仅按当前任务月份带入含日期的计算")
     if not new or old == new:
         return None
     if old:
@@ -282,7 +299,29 @@ def month_move(recipe: dict, new: str | None) -> tuple[str, str] | None:
     for period in periods:
         if _ranged(period) and not _names_month(period, new):
             raise NotRerun(f"期间写的是区间「{period}」，换到 {new} 要你重新设定期间")
+    if new and recipe["engine"] != "finance":
+        raise NotRerun("看不出原计算是哪个月的，先确认原计算期间后再带入")
     return None
+
+
+def validate_period_move(recipe: dict, new: str | None) -> tuple[str, str] | None:
+    """Pure preflight shared by preview and execution; no revisions/runs are written."""
+    move = month_move(recipe, new)
+    _checked_revision(recipe, move)
+    return move
+
+
+def _checked_revision(recipe: dict, move: tuple[str, str] | None) -> dict | None:
+    revision = recipe.get("revision")
+    if move:
+        if recipe["engine"] == "finance":
+            written = {"spec": recipe["spec"], "scenario": recipe.get("scenario")}
+        else:
+            revision = bind_period(revision, {"period": move[1], "source": "scope"})
+            written = {key: revision.get(key) for key in ("sql", "aggregate_plan", "parameters", "code")}
+        if _names_month(written, move[0]):
+            raise NotRerun(f"计算里写着 {move[0]}，换到 {move[1]} 会算错，要你重新计算")
+    return revision
 
 
 def _months_elapsed(inputs: dict, move: tuple[str, str] | None) -> tuple[dict, list[str]]:
@@ -315,12 +354,7 @@ def manual_inputs(inputs: Any) -> list[str]:
 
 def run_again(target, recipe: dict, bindings: dict[str, str], move: tuple[str, str] | None, *, elsewhere: bool) -> tuple[dict, list[str]]:
     """Save the calculation again on ``bindings`` in ``target`` and run it. Returns the run and what moved with the month."""
-    if move:
-        # The month moves where it is a scope or a 已过月数; anywhere else it is written into the calculation.
-        written = ({key: recipe["revision"].get(key) for key in ("sql", "aggregate_plan", "parameters", "code")}
-                   if recipe["engine"] != "finance" else {"spec": recipe["spec"], "scenario": recipe.get("scenario")})
-        if _names_month(written, move[0]):
-            raise NotRerun(f"计算里写着 {move[0]}，换到 {move[1]} 会算错，要你重新计算")
+    revision = _checked_revision(recipe, move)
     said: list[str] = []
     if recipe["engine"] == "finance":
         context = recipe["context"]
@@ -342,17 +376,19 @@ def run_again(target, recipe: dict, bindings: dict[str, str], move: tuple[str, s
         if recipe["operation"] == "metric":
             return target.run_metric(spec), said
         return target.explain_variance(spec), said
-    revision = recipe["revision"]
     scope = _moved_scope(revision.get("scope") or {}, move)
+    if move and not scope.get("period"):
+        scope = {**scope, "period": move[1]}
     if recipe["engine"] in SCRIPT_ENGINES:
         return target.analysis.run_script({
             "code": revision["code"], "language": revision["engine"], "bindings": bindings, "question": revision["question"],
             "timeout_seconds": revision.get("timeout_seconds", 30), "assumptions": revision.get("assumptions", []),
             "result_file": revision.get("result_file"), "result_role": revision.get("result_role"), "scope": scope,
+            "period_binding": revision.get("period_binding"),
         }, session_id=target.session_id, context_revision=target.context_revision, allowed=target.allowed), said
     spec = {key: revision.get(key) for key in (
         "question", "engine", "sql", "aggregate_plan", "parameters", "parameter_metadata", "relationships", "metrics",
-        "grain", "assumptions", "missing_inputs", "conversion_rules", "result_role", "max_rows", "timeout_seconds")
+        "grain", "assumptions", "missing_inputs", "conversion_rules", "result_role", "max_rows", "timeout_seconds", "period_binding")
         if revision.get(key) is not None}
     if spec.get("engine") != "structured_aggregate":
         spec.pop("aggregate_plan", None)
