@@ -23,9 +23,8 @@
   min-width: 0;
   padding: 16px;
   border: 1px solid var(--fnd-line);
-  border-radius: var(--fnd-radius-container);
+  border-radius: var(--fnd-radius-mark);
   background: var(--fnd-surface);
-  box-shadow: var(--fnd-shadow-sm);
 }
 /* A proposal is not on the board yet: drawn as an outline until the manager pins it. */
 .dashboard-card[data-state='explore'] { border-style: dashed; box-shadow: none; }

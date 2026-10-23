@@ -265,7 +265,7 @@
 .analysis-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; }
 @container analysis-result (max-width: 900px) { .analysis-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @container analysis-result (max-width: 480px) { .analysis-kpi-grid { grid-template-columns: minmax(0, 1fr); } }
-.analysis-kpi-card { border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); padding: 16px; display: flex; flex-direction: column; gap: 6px; background: var(--fnd-surface); min-width: 0; font-family: var(--fnd-font-prose); }
+.analysis-kpi-card { border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-mark); padding: 16px; display: flex; flex-direction: column; gap: 6px; background: var(--fnd-surface); min-width: 0; font-family: var(--fnd-font-prose); }
 .analysis-kpi-card > span, .analysis-kpi-card small { color: var(--fnd-muted); font-size: var(--fnd-size-small); overflow-wrap: anywhere; }
 .analysis-kpi-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 20px; }
 .analysis-kpi-card strong { font-size: var(--fnd-size-title); line-height: 28px; font-weight: var(--fnd-weight-strong); font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
@@ -390,10 +390,10 @@
 .analysis-close-headline-text { display: grid; gap: 4px; min-width: 0; }
 .analysis-close-detail { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--fnd-warning); font-size: var(--fnd-size-reading); line-height: 24px; font-weight: var(--fnd-weight-strong); }
 .analysis-close-detail svg { flex: none; }
-/* Summary cards sit on the canvas: white, a hairline and the smallest lift (DESIGN.md 阴影阶梯). */
-.analysis-close-block, .analysis-kpi-card, .analysis-composer, .analysis-billing-caliber, .analysis-billing-run, .analysis-billing-result { box-shadow: var(--fnd-shadow-sm); }
+/* Data cards use a quiet surface and hairline; only the composer keeps a small lift. */
+.analysis-composer { box-shadow: var(--fnd-shadow-sm); }
 .analysis-close-blocks { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
-.analysis-close-block { display: flex; flex-direction: column; gap: 8px; padding: 16px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-surface); }
+.analysis-close-block { display: flex; flex-direction: column; gap: 8px; padding: 16px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-mark); background: var(--fnd-surface); }
 .analysis-close-block-head { display: flex; align-items: center; gap: 8px; }
 .analysis-close-block-head h4 { margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; flex: 1; }
 .analysis-close-block-state { font-size: var(--fnd-size-small); color: var(--fnd-muted); }
@@ -549,7 +549,7 @@
 .analysis-billing-tables { display: flex; flex-direction: column; gap: 8px; }
 .analysis-billing-table__summary { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 .analysis-billing-table__name { font-weight: var(--fnd-weight-strong); overflow-wrap: anywhere; }
-.analysis-billing-caliber, .analysis-billing-run, .analysis-billing-result { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 16px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-surface); }
+.analysis-billing-caliber, .analysis-billing-run, .analysis-billing-result { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 16px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-mark); background: var(--fnd-surface); }
 .analysis-billing-caliber__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .analysis-billing-caliber__head h4, .analysis-billing-run h4 { margin: 0; }
 .analysis-billing-caliber__head select { margin-left: auto; width: auto; max-width: 100%; }

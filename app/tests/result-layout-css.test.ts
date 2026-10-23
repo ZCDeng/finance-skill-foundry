@@ -20,9 +20,9 @@ function declarations(selector: string): Record<string, string> {
 }
 
 describe('the result page layout (DESIGN.md 结果区)', () => {
-  it('rounds the KPI card on the container token with 16px inside, cards stacked as a column', () => {
+  it('uses the compact data-card radius with 16px inside, cards stacked as a column', () => {
     expect(declarations('.analysis-kpi-card')).toMatchObject({
-      'border-radius': 'var(--fnd-radius-container)', padding: '16px', display: 'flex', 'flex-direction': 'column',
+      'border-radius': 'var(--fnd-radius-mark)', padding: '16px', display: 'flex', 'flex-direction': 'column',
     });
   });
 

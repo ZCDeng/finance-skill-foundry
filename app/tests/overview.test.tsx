@@ -45,7 +45,7 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); sessionStorage.clear(); delete 
 describe('总览', () => {
   const mainCard = () => screen.getByText('当前任务').closest('section')!;
 
-  it('opens on the task worked on last: its six steps with a line each, and a button to the step that waits', () => {
+  it('opens on the task worked on last with six direct step entries', () => {
     const work = { runs: [], cards: [], drafts: 0, datasets: 2 };
     const rows = [{ ...data.tasks[0], work, active_at: '2026-10-02T09:00:00Z' }, { ...data.tasks[1], work, active_at: '2026-10-05T09:00:00Z' }];
     render(<Overview {...props} data={{ ...data, tasks: rows }} />);
@@ -57,10 +57,8 @@ describe('总览', () => {
     expect(within(card).getByRole('button', { name: /^3 勾稽（月结），待处理/ })).toBeTruthy();
     fireEvent.click(within(card).getByRole('button', { name: /^5 经营分析/ }));
     expect(props.onOpenStep).toHaveBeenLastCalledWith(july, 'operations');
-    // 继续 goes to the first step that waits, and says why.
-    fireEvent.click(within(card).getByRole('button', { name: '继续：第 3 步 勾稽' }));
+    fireEvent.click(within(card).getByRole('button', { name: /^3 勾稽/ }));
     expect(props.onOpenStep).toHaveBeenLastCalledWith(july, 'close');
-    expect(within(card).getByText('应收滚动：待外部确认，差额 1200', { selector: '.fnd-cockpit__next span' })).toBeTruthy();
   });
 
   it('lists only the current task\'s to-dos, each with its step, three before the rest fold', () => {
@@ -210,10 +208,10 @@ describe('总览 reads the current task\'s own results', () => {
     template: 'collection', note: null, proposed_by: 'manager', accepted: state === 'accepted' ? { run_id: run.id, at: '2026-10-10T09:00:00Z' } : null,
     select: { match: { entity, metric_key: 'collection_gap', scenario: '本期' }, column: 'value' } });
   const riskLine = { key: 'risk', label: '风险', text: '大连风险最高。', parts: [{ text: '大连风险最高。' }] };
-  function mountReads(cards: object[] | null, preferences: Partial<Preferences> = {}, line: object = riskLine) {
+  function mountReads(cards: object[] | null, preferences: Partial<Preferences> = {}, line: object = riskLine, statePatch: Partial<AnalysisState> = {}) {
     let saved: Preferences = { technical: false, brief_open: true, start: 'overview', samples_read: [], skipped_steps: {}, people: [], current_person: '', tried: [], tips_open: true, ...preferences };
     const preferencesSet = vi.fn(async (patch: Partial<Preferences>) => ok(saved = { ...saved, ...patch }));
-    const state = { task_id: august.id, datasets: [{ id: 'd'.repeat(32), name: '套表' }], analyses: [], runs: [run], drafts: [], methods: [] };
+    const state = { task_id: august.id, datasets: [{ id: 'd'.repeat(32), name: '套表' }], analyses: [], runs: [run], drafts: [], methods: [], ...statePatch };
     (globalThis as unknown as { foundry: Partial<Bridge> }).foundry = {
       analysisState: vi.fn(async () => ok(state as unknown as AnalysisState)),
       financeCall: vi.fn(async (_task: string, command: string) => command === 'dashboard-read'
@@ -238,6 +236,36 @@ describe('总览 reads the current task\'s own results', () => {
     expect(within(tiles[0]).getByRole('button', { name: /查看来源/ })).toBeTruthy();
     // 本月三句话 is the task's own, read for this task.
     expect(await screen.findByText('大连风险最高。')).toBeTruthy();
+  });
+
+  it('limits the overview to four figures, taking accepted cards before pinned cards even when the board interleaves them', async () => {
+    mountReads([figure('c1', '大连距生死线', '大连城市公司', 'pinned'), figure('c2', '集团距生死线', '集团', 'accepted'),
+      figure('c3', '上海距生死线', '上海城市公司', 'pinned'), figure('c4', '合肥距生死线', '合肥城市公司', 'accepted'),
+      figure('c5', '广州距生死线', '广州城市公司', 'accepted'), figure('c6', '北京距生死线', '北京城市公司', 'pinned')]);
+    const section = (await screen.findByRole('heading', { name: '关键数字' })).closest('section')!;
+    const sources = within(section).getAllByRole('button', { name: /查看来源/ });
+    expect(sources.map((button) => button.getAttribute('aria-label'))).toEqual([
+      expect.stringMatching(/^集团距生死线/), expect.stringMatching(/^合肥距生死线/),
+      expect.stringMatching(/^广州距生死线/), expect.stringMatching(/^大连距生死线/),
+    ]);
+    expect(within(section).getAllByText('已认可')).toHaveLength(3);
+    expect(within(section).getAllByText('待认可')).toHaveLength(1);
+    expect(within(section).queryByText('上海距生死线')).toBeNull();
+    expect(within(section).queryByText('北京距生死线')).toBeNull();
+  });
+
+  it('keeps an accepted figure marked as waiting for recompute when its source was replaced, and still opens that source', async () => {
+    const replaced = 'd'.repeat(32);
+    mountReads([figure('c1', '集团距生死线', '集团', 'accepted')], {}, riskLine,
+      { runs: [{ ...run, bindings: { kpi: replaced } }], superseded_datasets: [replaced] });
+    const section = (await screen.findByRole('heading', { name: '关键数字' })).closest('section')!;
+    expect(within(section).getByText('已认可')).toBeTruthy();
+    expect(within(section).getByText('资料已更新，待重算')).toBeTruthy();
+    fireEvent.click(within(section).getByRole('button', { name: /集团距生死线.*资料已更新，待重算.*查看来源/ }));
+    const source = await screen.findByRole('dialog', { name: '集团距生死线本期的来源' });
+    expect(within(source).getByText('资料已更新，这个数按旧版本算出，重新计算后才算数。')).toBeTruthy();
+    expect(within(source).getByText('套表')).toBeTruthy();
+    expect(within(source).getByText('已被新版本取代')).toBeTruthy();
   });
 
   it('with nothing on the board, says where the figures come from and opens the board', async () => {

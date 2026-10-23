@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { ArrowRight, BookOpen, ChartNoAxesCombined, ClipboardList, FlaskConical, FolderOpen, MessageSquarePlus, RefreshCw, Repeat, Sparkles } from 'lucide-react';
+import { ArrowRight, BookOpen, ChartNoAxesCombined, ClipboardList, FlaskConical, FolderOpen, History, ListTodo, MessageSquarePlus, Play, Plus, RefreshCw, Repeat, type LucideIcon } from 'lucide-react';
 
 import { bridge, SNAPSHOT_FORMAT_WORDS, type AnalysisRun, type AnalysisState, type GalleryRow, type Overview as OverviewData, type OverviewTask, type TaskRow, when } from '../bridge.js';
 import { Button } from '../components/ui/button.js';
@@ -87,8 +87,8 @@ function statesOf(row: OverviewTask, skipped: readonly Step[] = []): Record<Step
 }
 
 /**
- * 总览: this month's cockpit. One task at a time, the one worked on last unless another is chosen: its six steps large
- * with a line each, the step to go on with, its to-dos, 本月三句话 and the figures its board holds; then the features
+ * 总览: this month's cockpit. One task at a time, the one worked on last unless another is chosen: its six steps,
+ * the step to go on with, figures beside to-dos, then 本月三句话; then the features
  * not tried yet, the other tasks in a row each, and the newest outputs.
  *
  * Reads nothing a task's own pages do not: the states are steps.ts's, a to-do is one of the month close's blocking
@@ -114,7 +114,7 @@ export function Overview({ data, loading, error, fresh, recent, onRefresh, onOpe
     <div className="fnd-overview" ref={top}>
       <div className="fnd-overview__head">
         <div>
-          <h1 className="fnd-overview__title">总览</h1>
+          <h1 className="fnd-overview__title"><ChartNoAxesCombined size={20} strokeWidth={1.5} aria-hidden />总览</h1>
           <p className="fnd-muted">这个月的账做到哪了，数怎么样，下一步点哪里。</p>
         </div>
         <Button variant="outline" type="button" disabled={loading} onClick={onRefresh}>
@@ -158,7 +158,7 @@ function useTaskView(taskId: string, again: unknown): { view: AnalysisState | nu
   return { view, problem };
 }
 
-/** The main card and what reads the task's own results under it: 本月三句话, 关键数字 and 还没试过. */
+/** One task frame: progress, figures and to-dos, with the existing brief and feature offers below. */
 function CurrentTask({ row, rows, data, states, onPick, onOpen, onOpenStep, onOpenResult }: {
   row: OverviewTask; rows: OverviewTask[]; data: OverviewData | null; states: Record<Step, StepState> | null;
   onPick(taskId: string): void; onOpen(task: TaskRow, target: OverviewTarget): void; onOpenStep(task: TaskRow, step: Step): void;
@@ -177,19 +177,20 @@ function CurrentTask({ row, rows, data, states, onPick, onOpen, onOpenStep, onOp
   }, [data, board.load]);
   const open = (target: string) => onOpen(task, target as OverviewTarget);
   const reads = Boolean(bridge()?.financeCall && bridge()?.analysisState);
-  return <>
-    <Cockpit row={row} rows={rows} states={states} onPick={onPick} onOpen={(_, target) => open(target)} onOpenStep={onOpenStep} />
+  return <div className="fnd-overview__current">
+    <Cockpit row={row} rows={rows} states={states} onPick={onPick} onOpen={(_, target) => open(target)} onOpenStep={onOpenStep}>
+      {reads && board.loaded && view ? <Section id={`${id}-figures`} title="关键数字" icon={ChartNoAxesCombined} className="fnd-overview__figures-section"
+        note="经理认可或钉住的数 · 点数字看来源 · 不跨任务相加">
+        <KeyFigures board={board.dashboard} view={view} onBoard={() => open('dashboard')} />
+      </Section> : null}
+    </Cockpit>
     {problem ? <p role="alert" className="analysis-message analysis-message--error">本月三句话和关键数字没有读到：{problem}</p> : null}
     {view && view.datasets.length > 0 && bridge()?.financeCall ? <MonthBrief taskId={task.id} board={board.dashboard}
       refreshKey={`${view.datasets.length}:${view.runs.length}:${view.drafts.length}:${board.dashboard?.id ?? ''}`}
       runs={view.runs} analyses={view.analyses} datasets={view.datasets} superseded={view.superseded_datasets ?? []}
       onOpen={open} onOpenResult={(run) => onOpenResult(task, run, resultStep(run, view.analyses, view.runs))} /> : null}
-    {reads && board.loaded && view ? <Section id={`${id}-figures`} title="关键数字" className="fnd-overview__card"
-      note="这个任务看板上经理认可或钉住的数，点数字看来源；不跨任务相加。">
-      <KeyFigures board={board.dashboard} view={view} onBoard={() => open('dashboard')} />
-    </Section> : null}
     <TryCards rows={rows} taskTitle={task.title} onTry={open} />
-  </>;
+  </div>;
 }
 
 /**
@@ -205,7 +206,7 @@ function FirstRun({ firstLook, onNewQuestion, onOperations, onSample, onChecklis
     <p className="fnd-muted fnd-overview__note">还没有任务。先花一分钟看看它能做什么，或者用示例练一遍，也可以直接带上自己的资料。</p>
     <ul className="fnd-overview__ways">
       {firstLook ? <li className="fnd-overview__way" data-segment="report">
-        <Sparkles className="fnd-overview__way-icon" strokeWidth={1.75} aria-hidden />
+        <Play className="fnd-overview__way-icon" strokeWidth={1.5} aria-hidden />
         <h3 className="fnd-overview__way-title">60 秒看看它能做什么</h3>
         <p className="fnd-muted">打开示例的参考结果看板，看三处：点一个数看来源，拖一下收缴率，导出一页纸。</p>
         <div className="fnd-overview__actions">
@@ -247,11 +248,11 @@ function FirstRun({ firstLook, onNewQuestion, onOperations, onSample, onChecklis
  */
 function FirstLook({ offer }: { offer: FirstLookOffer }) {
   const id = useId();
-  return <Section id={`${id}-first-look`} title="60 秒看看它能做什么" className="fnd-overview__first-look"
+  return <Section id={`${id}-first-look`} title="60 秒看看它能做什么" icon={Play} className="fnd-overview__first-look"
     note="打开示例的参考结果看板，看三处：点一个数看来源，拖一下收缴率，导出一页纸。">
     <div className="fnd-overview__actions">
       <Button type="button" disabled={offer.busy} aria-busy={offer.busy || undefined} onClick={offer.onStart}>
-        <Sparkles size={15} strokeWidth={1.5} aria-hidden />{offer.busy ? '正在准备参考结果…' : '开始看'}
+        <Play size={15} strokeWidth={1.5} aria-hidden />{offer.busy ? '正在准备参考结果…' : '开始看'}
       </Button>
       <Button type="button" variant="ghost" disabled={offer.busy} onClick={offer.onDismiss}>不用了</Button>
       {offer.busy ? <span className="fnd-muted fnd-overview__note">第一次要生成参考结果，大约一分钟。</span> : null}
@@ -294,9 +295,9 @@ function Recomputed({ rows, onOpen, now = new Date() }: { rows: OverviewTask[]; 
   </details>;
 }
 
-function Section({ title, note, id, children, className }: { title: string; note?: ReactNode; id: string; children: ReactNode; className?: string }) {
+function Section({ title, note, id, children, className, icon: Icon }: { title: string; note?: ReactNode; id: string; children: ReactNode; className?: string; icon?: LucideIcon }) {
   return <section className={['fnd-overview__section', className].filter(Boolean).join(' ')} aria-labelledby={id}>
-    <h2 id={id} className="fnd-overview__h">{title}</h2>
+    <h2 id={id} className="fnd-overview__h">{Icon ? <Icon size={16} strokeWidth={1.5} aria-hidden /> : null}{title}</h2>
     {note ? <p className="fnd-muted fnd-overview__note">{note}</p> : null}
     {children}
   </section>;
@@ -311,7 +312,7 @@ function Start({ idle, tasks, onOpen, onNewQuestion, onOperations, onSample, onC
   // Newest period first: last month's task is nearly always the one to roll forward from.
   const sources = [...tasks]
     .sort((a, b) => (b.period ?? '').localeCompare(a.period ?? '') || b.created_at.localeCompare(a.created_at));
-  return <Section id={`${id}-start`} title="开始新的" className="fnd-overview__start"
+  return <Section id={`${id}-start`} title="开始新的" icon={Plus} className="fnd-overview__start"
     note={idle ? '没有进行中的任务。已归档和回收站里的任务在工作区左边的任务列表里。' : undefined}>
     <div className="fnd-overview__actions">
       <Button type="button" variant="outline" onClick={onNewQuestion}>
@@ -351,7 +352,7 @@ function Start({ idle, tasks, onOpen, onNewQuestion, onOperations, onSample, onC
 function Others({ rows, onPick }: { rows: OverviewTask[]; onPick(taskId: string): void }) {
   const id = useId();
   const { preferences } = usePreferences();
-  return <Section id={`${id}-others`} className="fnd-overview__progress-section" title={`其他进行中的任务（${rows.length}）`}
+  return <Section id={`${id}-others`} className="fnd-overview__progress-section" title={`其他进行中的任务（${rows.length}）`} icon={ListTodo}
     note="点一行换到上面看它；六个图标依次是 1 资料、2 范围、3 勾稽，4 财务分析，5 经营分析，6 汇报。">
     <ul className="fnd-overview__progress">
       {rows.map((row) => {
@@ -385,7 +386,7 @@ function Others({ rows, onPick }: { rows: OverviewTask[]; onPick(taskId: string)
 
 function Recent({ rows, onLibrary }: { rows: GalleryRow[]; onLibrary(): void }) {
   const id = useId();
-  return <Section id={`${id}-recent`} className="fnd-overview__recent-section" title="最近成果">
+  return <Section id={`${id}-recent`} className="fnd-overview__recent-section" title="最近成果" icon={History}>
     <ul className="fnd-overview__recent">
       {rows.map((row) => <li key={row.key}>
         <span className="fnd-overview__recent-what">{galleryLine(row)}</span>

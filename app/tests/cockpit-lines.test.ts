@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { OverviewTask, TaskRow } from '../src/bridge.js';
 import { stepLines } from '../src/views/cockpit/lines.js';
-import { currentRow, stepToOpen } from '../src/views/cockpit/Cockpit.js';
+import { currentRow } from '../src/views/cockpit/Cockpit.js';
 import { untried } from '../src/views/cockpit/TryCards.js';
 import type { Step, StepState } from '../src/views/analysis/steps.js';
 
@@ -56,20 +56,13 @@ describe('the line under each step on 总览', () => {
   });
 });
 
-describe('which task and which step 总览 opens on', () => {
+describe('which task 总览 opens on', () => {
   it('opens on the task worked on last, or the one chosen while it is still there', () => {
     const rows = [row({}, { task: task('a'), active_at: '2026-10-02T00:00:00Z' }), row({}, { task: task('b'), active_at: '2026-10-05T00:00:00Z' }), row({}, { task: task('c') })];
     expect(currentRow(rows, null)?.task.id).toBe(task('b').id);
     expect(currentRow(rows, task('c').id)?.task.id).toBe(task('c').id);
     expect(currentRow(rows, task('z').id)?.task.id).toBe(task('b').id);
     expect(currentRow([], null)).toBeNull();
-  });
-
-  it('goes on with the first step that waits, else the first not begun, else 汇报', () => {
-    expect(stepToOpen(states({ scope: 'attention', close: 'todo' }))).toBe('scope');
-    expect(stepToOpen(states({ results: 'not_started', report: 'todo' }))).toBe('report');
-    expect(stepToOpen(states({ results: 'not_started' }))).toBe('results');
-    expect(stepToOpen(states())).toBe('report');
   });
 
   it('offers features no real task used and the preferences do not keep, three at most', () => {

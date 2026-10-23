@@ -280,7 +280,7 @@
 
 .fnd-panel {
   border: 1px solid var(--fnd-line);
-  border-radius: var(--fnd-radius-container);
+  border-radius: var(--fnd-radius-mark);
   background: var(--fnd-surface);
   padding: 20px 24px;
 }
@@ -324,7 +324,7 @@
   width: 100%;
   text-align: left;
   border: 1px solid var(--fnd-line);
-  border-radius: var(--fnd-radius-container);
+  border-radius: var(--fnd-radius-mark);
   background: var(--fnd-surface);
   padding: 20px 20px;
   cursor: pointer;

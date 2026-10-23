@@ -1,175 +1,109 @@
-@layer components {
-/* 总览 (Overview.tsx). Headings follow the workspace's three levels; notes sit under their heading. */
-.fnd-overview { display: flex; flex-direction: column; gap: var(--fnd-section-gap, 32px); }
-.fnd-overview__head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px; }
+@layer layout {
+/* One task frame, divided content, no nested cards. Keep product type and semantic colours. */
+.fnd-overview { display: flex; flex-direction: column; gap: 24px; }
+.fnd-overview__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 20px; border-bottom: 1px solid var(--fnd-line); }
 .fnd-overview__head p { margin: 4px 0 0; }
-.fnd-overview__title { margin: 0; font-size: var(--fnd-size-title); line-height: 28px; }
+.fnd-overview__title { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--fnd-size-title); line-height: 28px; }
+.fnd-overview__title > svg { color: var(--fnd-muted); }
+.fnd-overview__current { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .fnd-overview__section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.fnd-overview__h { margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; font-weight: 600; }
+.fnd-overview__h, .fnd-cockpit__h { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--fnd-size-body); line-height: 22px; font-weight: 600; }
+.fnd-overview__h > svg, .fnd-cockpit__h > svg { flex: none; color: var(--fnd-muted); }
 .fnd-overview__note { margin: 0; font-size: var(--fnd-size-small); }
 .fnd-overview__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .fnd-overview__roll { display: inline-flex; align-items: center; gap: 6px; color: var(--fnd-muted); }
-/* With no task at all the three ways in are the page: a card each, the largest type on the page after the title. */
-.fnd-overview__first { display: flex; flex-direction: column; gap: 12px; }
-.fnd-overview__first > .fnd-overview__h { font-size: var(--fnd-size-lead); }
-.fnd-overview__ways { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
-.fnd-overview__way {
-  display: flex; flex-direction: column; gap: 8px; padding: 24px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container);
-  background: var(--fnd-surface); box-shadow: var(--fnd-shadow-sm);
-}
-.fnd-overview__way p { margin: 0; }
-.fnd-overview__way > .fnd-overview__actions { margin-top: auto; padding-top: 8px; }
-.fnd-overview__way-icon { width: 28px; height: 28px; color: var(--fnd-seg, var(--fnd-ink)); }
-.fnd-overview__way-title { margin: 0; font-size: var(--fnd-size-lead); line-height: 28px; font-weight: 600; }
-/* 60 秒看看它能做什么: offered once, on a card like the lists below it. */
-.fnd-overview__first-look { padding: 20px 24px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container);
-  background: var(--fnd-surface); box-shadow: var(--fnd-shadow-sm); }
 
-.fnd-overview__grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
-.fnd-overview__grid:has(> :only-child) { grid-template-columns: minmax(0, 1fr); }
-/* The page is the canvas; each list sits on a card above it. 开始 stays on the canvas: it is a row of ways in, not content. */
-.fnd-overview__grid > .fnd-overview__section, .fnd-overview__recent-section, .fnd-overview__card {
-  padding: 20px 24px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-surface); box-shadow: var(--fnd-shadow-sm);
-}
-@media (max-width: 960px) {
-  .fnd-overview__grid { grid-template-columns: minmax(0, 1fr); }
-}
-
-/* The four segments' colours, wherever a step, a group or a way in names its segment (tokens.css --fnd-seg-*). */
-.fnd-overview [data-segment='close'] { --fnd-seg: var(--fnd-seg-close); }
-.fnd-overview [data-segment='finance'] { --fnd-seg: var(--fnd-seg-finance); }
-.fnd-overview [data-segment='operations'] { --fnd-seg: var(--fnd-seg-operations); }
-.fnd-overview [data-segment='report'] { --fnd-seg: var(--fnd-seg-report); }
-
-/*
- * 总览's main card (cockpit/Cockpit.tsx): the one task, framed in a quiet gold line, the only gold frame on the page
- * (DESIGN.md, the halo borrowing: a static border, no glow, nothing that moves).
- */
-.fnd-cockpit {
-  display: flex; flex-direction: column; gap: 20px; padding: 24px;
-  border: 1px solid color-mix(in srgb, var(--fnd-selected) 55%, var(--fnd-line)); border-radius: var(--fnd-radius-container);
-  background: var(--fnd-surface); box-shadow: var(--fnd-shadow-sm);
-}
-.fnd-cockpit__head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 24px; }
+/* Task identity fills the header; the six steps are a continuous rail. */
+.fnd-cockpit { min-width: 0; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-mark); background: var(--fnd-surface); }
+.fnd-cockpit__head { padding: 20px 24px; }
 .fnd-cockpit__name { min-width: 0; }
-.fnd-cockpit__eyebrow { margin: 0; font-size: var(--fnd-size-label); color: var(--fnd-muted); }
+.fnd-cockpit__eyebrow { display: flex; align-items: center; gap: 6px; margin: 0; font-size: var(--fnd-size-label); color: var(--fnd-muted); }
 .fnd-cockpit__title { margin: 4px 0 0; font-size: var(--fnd-size-title); line-height: 28px; font-weight: 600; overflow-wrap: anywhere; }
 .fnd-cockpit__title .fnd-muted { font-weight: 400; }
-.fnd-cockpit__status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: 4px 0 0; font-size: var(--fnd-size-small); }
+.fnd-cockpit__status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: 8px 0 0; font-size: var(--fnd-size-small); }
 .fnd-cockpit__status .fnd-overview__conclusion { justify-self: auto; }
-/* Which task: pills on one track, the chosen one lifted with a gold ring. Only the task switch is a pill. */
-.fnd-cockpit__switch {
-  display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-pill);
-  background: var(--fnd-surface-strong);
-}
-.fnd-cockpit__pill {
-  max-width: 14em; padding: 4px 12px; border: 0; border-radius: var(--fnd-radius-pill); background: transparent; color: var(--fnd-muted);
-  font: inherit; font-size: var(--fnd-size-small); line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
-  transition: background var(--fnd-transition), color var(--fnd-transition);
-}
-.fnd-cockpit__pill:hover { color: var(--fnd-ink); }
-.fnd-cockpit__pill[aria-pressed='true'] { background: var(--fnd-surface); color: var(--fnd-ink); font-weight: 600; box-shadow: inset 0 0 0 1px var(--fnd-selected); }
+.fnd-cockpit__switch { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 24px; border-top: 1px solid var(--fnd-line); }
+.fnd-cockpit__pill { max-width: 20em; padding: 4px 8px; border: 1px solid transparent; border-radius: var(--fnd-radius-mark); background: transparent; color: var(--fnd-muted); font: inherit; font-size: var(--fnd-size-small); line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.fnd-cockpit__pill:hover { color: var(--fnd-ink); background: var(--fnd-bg); }
+.fnd-cockpit__pill[aria-pressed='true'] { background: var(--fnd-bg); border-color: var(--fnd-line); color: var(--fnd-ink); font-weight: 600; }
 .fnd-cockpit__pill:focus-visible { outline: 2px solid var(--fnd-focus); outline-offset: 2px; }
-
-/* 大号六步条: the four segments over six tiles, each tile topped in its segment's colour so the grouping holds when it wraps. */
-.fnd-cockpit__strip { display: flex; flex-direction: column; gap: 8px; }
-.fnd-cockpit__groups, .fnd-cockpit__steps { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
-.fnd-cockpit__groups span {
-  padding-bottom: 4px; border-bottom: 2px solid currentColor; color: var(--fnd-seg); font-size: var(--fnd-size-label); font-weight: 600;
-}
-.fnd-cockpit__steps { margin: 0; padding: 0; list-style: none; }
+.fnd-cockpit__strip { border-top: 1px solid var(--fnd-line); }
+.fnd-cockpit__steps { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none; }
 .fnd-cockpit__steps > li { display: flex; min-width: 0; }
-.fnd-cockpit__step {
-  display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 12px; border: 1px solid var(--fnd-line);
-  border-top: 2px solid var(--fnd-seg); border-radius: var(--fnd-radius-control); background: var(--fnd-bg); color: inherit;
-  font: inherit; text-align: left; cursor: pointer; transition: background var(--fnd-transition), border-color var(--fnd-transition);
-}
-.fnd-cockpit__step:hover { background: var(--fnd-surface-strong); border-color: var(--fnd-line-hover); border-top-color: var(--fnd-seg); }
-.fnd-cockpit__step:focus-visible { outline: 2px solid var(--fnd-focus); outline-offset: 2px; }
-.fnd-cockpit__step-head { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.fnd-cockpit__steps > li + li { border-left: 1px solid var(--fnd-line); }
+.fnd-cockpit__step { display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 12px 16px; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background var(--fnd-transition); }
+.fnd-cockpit__step:hover { background: var(--fnd-bg); }
+.fnd-cockpit__step:focus-visible { outline: 2px solid var(--fnd-focus); outline-offset: -3px; }
+.fnd-cockpit__step-head { display: flex; align-items: center; gap: 6px; font-size: var(--fnd-size-small); font-weight: 600; }
 .fnd-cockpit__step-icon { flex: none; color: var(--fnd-muted); }
 .fnd-cockpit__step[data-state='done'] .fnd-cockpit__step-icon { color: var(--fnd-level-ok); }
 .fnd-cockpit__step[data-state='attention'] .fnd-cockpit__step-icon { color: var(--fnd-level-watch); }
 .fnd-cockpit__step[data-state='todo'] .fnd-cockpit__step-icon { color: var(--fnd-warning); }
 .fnd-cockpit__step-state { font-size: var(--fnd-size-label); color: var(--fnd-muted); }
 .fnd-cockpit__step[data-state='todo'] .fnd-cockpit__step-state { color: var(--fnd-warning); }
-.fnd-cockpit__step-line {
-  font-size: var(--fnd-size-small); color: var(--fnd-ink); overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
-}
-@media (max-width: 960px) {
-  .fnd-cockpit__groups { display: none; }
-  .fnd-cockpit__steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-@media (max-width: 600px) {
-  .fnd-cockpit__steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-.fnd-cockpit__next { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
-.fnd-cockpit__next > .fnd-muted { font-size: var(--fnd-size-small); }
-.fnd-cockpit__todos { display: flex; flex-direction: column; gap: 4px; }
-.fnd-cockpit__h { margin: 0; font-size: var(--fnd-size-body); line-height: 20px; font-weight: 600; }
+.fnd-cockpit__step-line { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: var(--fnd-size-label); line-height: 20px; color: var(--fnd-muted); }
 
-/* 关键数字: the board's figures, one tile each, the value in figure type. */
-.fnd-cockpit__figures { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-@media (max-width: 960px) {
-  .fnd-cockpit__figures { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-.fnd-cockpit__figure {
-  display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 12px 16px; border: 1px solid var(--fnd-line);
-  border-radius: var(--fnd-radius-control); background: var(--fnd-bg);
-}
+/* Figures and to-dos are two sections of the same surface, separated once. */
+.fnd-cockpit__body { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); border-top: 1px solid var(--fnd-line); }
+.fnd-cockpit__body:has(> :only-child) { grid-template-columns: minmax(0, 1fr); }
+.fnd-cockpit__body:empty { display: none; }
+.fnd-overview__figures-section { padding: 20px 24px; }
+.fnd-overview__figures-section > .fnd-overview__note { font-size: var(--fnd-size-label); }
+.fnd-cockpit__body > :nth-child(2) { border-left: 1px solid var(--fnd-line); }
+.fnd-cockpit__todos { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 20px 24px; }
+.fnd-cockpit__body > .fnd-overview__clear { padding: 20px 24px; }
+.fnd-cockpit__figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 8px 0 0; padding: 0; list-style: none; }
+.fnd-cockpit__figure { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 12px 16px 12px 0; }
+.fnd-cockpit__figure:nth-child(even) { padding-left: 20px; border-left: 1px solid var(--fnd-line); }
+.fnd-cockpit__figure:nth-child(n+3) { border-top: 1px solid var(--fnd-line); }
 .fnd-cockpit__figure p { margin: 0; }
 .fnd-cockpit__figure-title { font-size: var(--fnd-size-small); color: var(--fnd-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fnd-cockpit__figure-value { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: var(--fnd-size-title); line-height: 28px; font-weight: 600; }
 .fnd-cockpit__figure-foot { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: var(--fnd-size-label); color: var(--fnd-muted); }
 .fnd-cockpit__figure-foot [data-state='pinned'] { color: var(--fnd-warning); }
-.fnd-cockpit__empty { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.fnd-cockpit__empty { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 16px 0; }
 .fnd-cockpit__empty p { margin: 0; }
 
-/* 还没试过: three cards on the canvas, each a sentence and 试一下; folding the block is kept in 设置's preferences. */
-.fnd-cockpit__tries > .fnd-overview__note { margin: 4px 0 12px; }
-.fnd-cockpit__try-list { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-.fnd-cockpit__try {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 16px; border: 1px solid var(--fnd-line);
-  border-radius: var(--fnd-radius-container); background: var(--fnd-surface);
-}
-.fnd-cockpit__try-icon {
-  display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: var(--fnd-radius-mark);
-  color: var(--fnd-seg); background: color-mix(in srgb, currentColor 12%, transparent);
-}
-.fnd-cockpit__try-icon svg { width: 18px; height: 18px; }
-.fnd-cockpit__try-text { display: flex; flex-direction: column; gap: 4px; }
-.fnd-cockpit__try-text p { margin: 0; }
+/* Brief, feature discovery and secondary lists live on the canvas with section rules. */
+.fnd-overview .analysis-brief { padding: 16px 0 0; border: 0; border-top: 1px solid var(--fnd-line); border-radius: 0; background: transparent; }
+.fnd-overview .analysis-brief:not([open]) { padding-block: 12px 0; }
+.fnd-overview .analysis-brief__lines { margin-top: 12px; }
+.fnd-cockpit__tries { padding-top: 16px; border-top: 1px solid var(--fnd-line); }
+.fnd-cockpit__tries > .fnd-overview__note { margin: 8px 0 12px; }
+.fnd-cockpit__try-list { display: grid; margin: 0; padding: 0; list-style: none; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-mark); background: var(--fnd-surface); }
+.fnd-cockpit__try { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px 16px; }
+.fnd-cockpit__try + .fnd-cockpit__try { border-top: 1px solid var(--fnd-line); }
+.fnd-cockpit__try-icon { display: inline-flex; flex: none; color: var(--fnd-muted); }
+.fnd-cockpit__try-icon svg { width: 16px; height: 16px; }
+.fnd-cockpit__try-text { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+.fnd-cockpit__try-text p { margin: 0; overflow-wrap: anywhere; }
 .fnd-cockpit__try-text .fnd-muted { font-size: var(--fnd-size-small); }
-.fnd-cockpit__try-title { font-weight: 600; }
-.fnd-cockpit__try > button { margin-top: auto; }
-
-.fnd-overview__group { font-size: var(--fnd-size-body); }
-.fnd-overview__group > .fnd-overview__note { margin: 4px 0 8px; }
-/* One quiet line of what the app recomputed this month; the cards open under it. */
-.fnd-overview__recomputed { font-size: var(--fnd-size-body); }
-.fnd-overview__recomputed > .fnd-overview__note { margin: 4px 0 8px; }
-.fnd-overview__todos { margin: 0; padding: 0; list-style: none; display: grid; }
-.fnd-overview__todos li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--fnd-line); }
+.fnd-cockpit__try-title { font-size: var(--fnd-size-small); font-weight: 600; }
+.fnd-cockpit__try > button { flex: none; }
+.fnd-overview__grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; align-items: start; padding-top: 20px; border-top: 1px solid var(--fnd-line); }
+.fnd-overview__grid:has(> :only-child) { grid-template-columns: minmax(0, 1fr); }
+.fnd-overview__grid > .fnd-overview__section, .fnd-overview__recent-section { padding: 0; }
+.fnd-overview__start { padding-top: 20px; border-top: 1px solid var(--fnd-line); }
+.fnd-overview__start > .fnd-overview__actions { margin-top: 4px; }
+.fnd-overview__group, .fnd-overview__recomputed { font-size: var(--fnd-size-body); }
+.fnd-overview__group > .fnd-overview__note, .fnd-overview__recomputed > .fnd-overview__note { margin: 4px 0 8px; }
+.fnd-overview__todos { display: grid; margin: 0; padding: 0; list-style: none; }
+.fnd-overview__todos li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--fnd-line); }
 .fnd-overview__todos li:first-child { border-top: 0; }
-.fnd-overview__todo-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.fnd-overview__todos li > button { flex: none; }
+.fnd-overview__todo-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; font-size: var(--fnd-size-small); }
 .fnd-overview__todo-task { font-size: var(--fnd-size-small); color: var(--fnd-muted); }
 .fnd-overview__todo-task .fnd-overview__task-title { color: var(--fnd-muted); }
 .fnd-overview__clear { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--fnd-level-ok); }
-.fnd-overview__tag { margin-left: 6px; padding: 0 6px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-pill); font-size: var(--fnd-size-label); color: var(--fnd-muted); white-space: nowrap; }
+.fnd-overview__tag { margin-left: 6px; padding: 0 6px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-mark); font-size: var(--fnd-size-label); color: var(--fnd-muted); white-space: nowrap; }
 
-.fnd-overview__progress { margin: 0; padding: 0; list-style: none; display: grid; }
+.fnd-overview__progress { display: grid; margin: 0; padding: 0; list-style: none; }
 .fnd-overview__progress li + li { border-top: 1px solid var(--fnd-line); }
-.fnd-overview__progress-row {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; width: 100%; padding: 12px 8px; margin: 0 -8px;
-  border: 0; border-radius: var(--fnd-radius-control); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
-  transition: background var(--fnd-transition);
-}
+.fnd-overview__progress-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; width: 100%; padding: 12px 8px; border: 0; border-radius: var(--fnd-radius-mark); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background var(--fnd-transition); }
 .fnd-overview__progress-row:hover { background: var(--fnd-surface-strong); }
 .fnd-overview__progress-row:focus-visible { outline: 2px solid var(--fnd-focus); outline-offset: 2px; }
 .fnd-overview__progress-name { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
 .fnd-overview__dots { display: inline-flex; gap: 4px; align-items: center; }
-/* 本月进度's six marks: 月结's three together, then a hairline before each analysis and 汇报, as on the task screen. */
 .fnd-overview__step { display: inline-flex; align-items: center; }
 .fnd-overview__step[data-opens-group]::before { content: ''; width: 1px; height: 12px; margin: 0 4px; background: var(--fnd-line); }
 .fnd-overview__dot { color: var(--fnd-muted); }
@@ -178,20 +112,56 @@
 .fnd-overview__dot[data-state='todo'] { color: var(--fnd-warning); }
 .fnd-overview__headline { grid-column: 1; font-size: var(--fnd-size-small); color: var(--fnd-ink); }
 .fnd-overview__conclusion { grid-column: 2; justify-self: end; font-size: var(--fnd-size-small); color: var(--fnd-muted); white-space: nowrap; }
-
-.fnd-overview__recent { margin: 0; padding: 0; list-style: none; display: grid; }
-.fnd-overview__recent li { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) auto; gap: 12px; padding: 6px 0; border-top: 1px solid var(--fnd-line); align-items: baseline; }
+.fnd-overview__recent { display: grid; margin: 0; padding: 0; list-style: none; }
+.fnd-overview__recent li { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) auto; gap: 12px; padding: 12px 0; border-top: 1px solid var(--fnd-line); align-items: baseline; }
 .fnd-overview__recent li:first-child { border-top: 0; }
 .fnd-overview__recent-what { overflow-wrap: anywhere; }
 .fnd-overview__when { white-space: nowrap; font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums; }
+
+/* First use keeps the three choices, but as divided rows rather than icon tiles. */
+.fnd-overview__first { display: flex; flex-direction: column; gap: 12px; }
+.fnd-overview__first > .fnd-overview__h { font-size: var(--fnd-size-lead); }
+.fnd-overview__ways { display: grid; margin: 0; padding: 0; list-style: none; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-mark); background: var(--fnd-surface); }
+.fnd-overview__way { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px 16px; padding: 20px 24px; }
+.fnd-overview__way + .fnd-overview__way { border-top: 1px solid var(--fnd-line); }
+.fnd-overview__way > :not(.fnd-overview__way-icon) { grid-column: 2; }
+.fnd-overview__way p { margin: 0; }
+.fnd-overview__way > .fnd-overview__actions { margin-top: 4px; }
+.fnd-overview__way-icon { grid-row: 1; width: 18px; height: 18px; margin-top: 4px; color: var(--fnd-muted); }
+.fnd-overview__way-title { margin: 0; font-size: var(--fnd-size-body); line-height: 24px; font-weight: 600; }
+.fnd-overview__first-look { padding: 16px 20px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-mark); background: var(--fnd-surface); }
+
+@media (max-width: 1100px) {
+  .fnd-cockpit__step-line { -webkit-line-clamp: 3; line-clamp: 3; }
+  .fnd-cockpit__body { grid-template-columns: minmax(0, 1fr); }
+  .fnd-cockpit__body > :nth-child(2) { border-left: 0; border-top: 1px solid var(--fnd-line); }
+  .fnd-cockpit__figures { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .fnd-cockpit__figure:nth-child(n) { padding: 12px; border-top: 0; border-left: 1px solid var(--fnd-line); }
+  .fnd-cockpit__figure:first-child { padding-left: 0; border-left: 0; }
+}
+@media (max-width: 960px) {
+  .fnd-overview__grid { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .fnd-cockpit__steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .fnd-cockpit__steps > li:nth-child(3n+1) { border-left: 0; }
+  .fnd-cockpit__steps > li:nth-child(n+4) { border-top: 1px solid var(--fnd-line); }
+  .fnd-cockpit__figures { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fnd-cockpit__figure:nth-child(odd) { padding-left: 0; border-left: 0; }
+  .fnd-cockpit__figure:nth-child(n+3) { border-top: 1px solid var(--fnd-line); }
+}
 @media (max-width: 720px) {
   .fnd-overview__recent li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .fnd-overview__progress-row { grid-template-columns: minmax(0, 1fr); }
+  .fnd-overview__conclusion { grid-column: 1; justify-self: start; }
+}
+@media (max-width: 600px) {
+  .fnd-cockpit__steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fnd-cockpit__steps > li:nth-child(n) { border-left: 1px solid var(--fnd-line); border-top: 1px solid var(--fnd-line); }
+  .fnd-cockpit__steps > li:nth-child(odd) { border-left: 0; }
+  .fnd-cockpit__steps > li:nth-child(-n+2) { border-top: 0; }
+  .fnd-cockpit__head, .fnd-overview__figures-section, .fnd-cockpit__todos { padding: 16px; }
 }
 
-/* Where 总览's 去处理 landed: a short outline that fades, so the eye finds the place. No motion when reduced. */
 .fnd-arrival { outline: 2px solid var(--fnd-selected); outline-offset: 4px; border-radius: var(--fnd-radius-control); transition: outline-color 1.2s var(--fnd-easing, ease) 0.3s; }
 .fnd-arrival[data-arrival='fading'] { outline-color: transparent; }
-@media (prefers-reduced-motion: reduce) {
-  .fnd-arrival { transition: none; }
-}
+@media (prefers-reduced-motion: reduce) { .fnd-arrival { transition: none; } }
 }

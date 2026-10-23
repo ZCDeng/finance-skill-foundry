@@ -6,7 +6,7 @@
 .fnd-settings__notice { margin: 0; padding: 8px 12px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); color: var(--fnd-warning); font-size: var(--fnd-size-small); }
 .fnd-settings__section { display: flex; flex-direction: column; gap: 8px; }
 .fnd-settings__h { margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; font-weight: var(--fnd-weight-strong); }
-.fnd-settings__rows { border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-surface); box-shadow: var(--fnd-shadow-sm); }
+.fnd-settings__rows { border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-mark); background: var(--fnd-surface); }
 .fnd-settings__row { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 16px 20px; }
 .fnd-settings__row + .fnd-settings__row { border-top: 1px solid var(--fnd-line); }
 .fnd-settings__text { min-width: 0; }
