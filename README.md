@@ -2,11 +2,11 @@
 
 把月结数字变成经营判断。FA Foundry 让 AI 直接读你们自己的月结套表，按财务的方法把利润偏离、现金、回款和全年预计算清楚，写成管理层能用的分析，每个数字都能点回 Excel 原单元格。分析由 AI 动手，口径、差异处置和结论由财务经理拍板。
 
-**[产品介绍网页](https://fa-foundry.pages.dev)** · **桌面版本 0.14.4（已本地发布）** · [公开下载 0.14.3（已签名公证）](https://github.com/ZCDeng/finance-skill-foundry/releases/tag/v0.14.3) · 仅支持 macOS Apple Silicon
+**[产品介绍网页](https://fa-foundry.pages.dev)** · **当前版本 0.14.4** · [下载 macOS 应用（已签名公证）](https://github.com/ZCDeng/finance-skill-foundry/releases/tag/v0.14.4) · 仅支持 macOS Apple Silicon
 
 0.14.4 重新整理总览：当前任务的六步进度、关键数字和待办集中展示，用细分割线和少量线性图标组织内容，减少嵌套卡片。总览右上角的「继续」按钮已移除，可直接点六步入口或待办中的「去处理」。
 
-0.14.4 已完成 Developer ID 签名、Apple 公证并安装到本机 `/Applications/FA Foundry.app`；该版本的分发包尚未上传 GitHub Release，公开下载仍为 0.14.3。
+0.14.4 已完成 Developer ID 签名、Apple 公证及安装验证。下载 Release 中的 `FA-Foundry-0.14.4-macOS-arm64.zip`，解压后将 `FA Foundry.app` 移到「应用程序」；同页提供 `SHA256SUMS.txt` 校验下载文件。
 
 [代码审查](docs/reviews/2026-09-05-codex-review.md) · [产品与架构方案](docs/plans/2026-09-05-finance-analysis-workbench-plan.md) · [验收设计](docs/plans/2026-09-05-finance-analysis-workbench-test-spec.md) · [实施与验证记录](docs/plans/2026-09-05-execution-log.md)
 
@@ -23,7 +23,7 @@
 - **总览布局**：当前任务使用连续面板，六步进度横向排列，关键数字与待办并列；其他任务按行展示，可切换查看。
 - **图标与分割线**：为页面标题、分区和操作补充线性图标，用细边界区分内容；数据面板与设置分组统一小圆角，减少静态阴影和彩色装饰。
 - **入口精简**：移除总览右上角「继续」及其说明，保留六步导航和待办「去处理」，直接进入相应工作区。
-- **安装验证**：应用测试 1545 项、打包及公证脚本测试 8 项通过；签名校验、Apple 公证及票据验证通过，候选包与安装版各通过 7 项独立分发检查。实际安装版已核对总览、步骤导航及版本号。本次验证使用隔离示例，未重跑完整 Python 套件或在线模型验收。
+- **安装验证**：应用测试 1545 项、打包及公证脚本测试 8 项通过；签名校验、Apple 公证及票据验证通过，候选包与安装版各通过 7 项独立分发检查。实际安装版已核对总览、步骤导航及版本号。[发布源码 CI](https://github.com/ZCDeng/finance-skill-foundry/actions/runs/39910536522) 完整回归 3464 项通过、72 项跳过，类型检查与构建通过。本地验收使用隔离示例，未验证在线模型。
 
 ## 0.11–0.13 新增
 
