@@ -8,6 +8,12 @@
 
 0.14.4 已完成 Developer ID 签名、Apple 公证及安装验证。下载 Release 中的 `FA-Foundry-0.14.4-macOS-arm64.zip`，解压后将 `FA Foundry.app` 移到「应用程序」；同页提供 `SHA256SUMS.txt` 校验下载文件。
 
+**阶段预发布：[0.15.0-beta.1](https://github.com/ZCDeng/finance-skill-foundry/releases/tag/v0.15.0-beta.1)** · 2026-10-27。财务方法、确定性计算、来源绑定和交付校验的工程阶段版本，尚未完成完整财务验收；稳定入口继续使用 0.14.4。
+
+Beta 已完成签名、公证、隔离安装及公开下载哈希核验；应用测试 1548 项、发布聚焦 Python 43 项、独立分发 7 项、候选与安装界面各 10 项通过。完整 CI 因 45 分钟上限取消，日志留下 3 个待确证身份的失败标记，不能称为全仓通过。R3 原 283 槽位为 3 机械通过、4 失败、276 未验证；人工审查待完成，历史失败保留。
+
+Beta 与稳定版内部产品名相同，普通双击不会自动隔离数据。解压后改名为 `FA Foundry Beta.app`，通过发布页的 `launch-beta.command` 使用独立数据目录。[发布记录及 CI 后续事项](docs/release-0.15.0-beta.1.md) · [详细修复与验收方案](docs/plans/2026-10-27-financial-repair-and-acceptance-plan.md)。
+
 [代码审查](docs/reviews/2026-09-05-codex-review.md) · [产品与架构方案](docs/plans/2026-09-05-finance-analysis-workbench-plan.md) · [验收设计](docs/plans/2026-09-05-finance-analysis-workbench-test-spec.md) · [实施与验证记录](docs/plans/2026-09-05-execution-log.md)
 
 ## 第一次使用

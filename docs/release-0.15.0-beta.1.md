@@ -87,9 +87,10 @@ BETA_STATE="$HOME/Library/Application Support/FA Foundry Beta/0.15.0-beta.1"
 
 ZIP 文件：`FA-Foundry-0.15.0-beta.1-macOS-arm64.zip`，563,475,999 字节；SHA-256：`fb3c4b94fb9944d5185b7fc366e1471bedd3da9fbc0ff83e8697a9336a693e1c`。
 
-<!-- PUBLIC_DOWNLOAD_RESULT -->
-发布草稿四项附件已上传，GitHub 摘要和本地一致；尚待公开后匿名下载核验，当前不宣称已公开发布。
-<!-- PUBLIC_DOWNLOAD_RESULT_END -->
+[0.15.0-beta.1 已公开发布](https://github.com/ZCDeng/finance-skill-foundry/releases/tag/v0.15.0-beta.1)，属性为 prerelease，最新稳定版仍为 0.14.4。标签指向 `78803e5648cb09b2f8f9b376896a0de3633d58ce`，与产品提交之间仅增加本发布说明及详细方案；本段公开下载回执在发布后追加，不移动原标签。
+
+2026-10-27 03:10（Asia/Shanghai）完成无认证匿名下载：ZIP 的 SHA-256、563,475,999 字节大小、校验文件、ZIP CRC 和包内 0.15.0-beta.1 版本均符合本地公证包。详细方案和 `launch-beta.command` 下载内容也逐字节一致。GitHub 公开元数据及四个附件摘要已独立回读，证据为 `public-download.json`、`public-release-metadata.json` 和 `tag-source-equivalence.json`。
+
 
 后续方案已完成独立工程及财务方法 AI 审查；最终计划 SHA-256 为 `bb5f3b727a85a477b0bf1b6ebf5086c3423b5d9a468fd677fc37c835f29d38cb`。工程 E1–E6 与专业 P-01/P-02 规划问题均已关闭，未授予实现完成、原模型验收或人工签收。
 
