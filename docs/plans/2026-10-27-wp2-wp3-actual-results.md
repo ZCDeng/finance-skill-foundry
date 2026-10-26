@@ -40,8 +40,15 @@ WP1 的十字段修复和方案记载的历史 R3 都不是原模型通过。R3 
 
 方法先行仍由未改的评分器拒绝：`test_compatibility_does_not_waive_reading_method_resource` 与 `test_e03_requires_both_method_resources_before_calculation` 在独立复核里通过，失败码仍是 `resource_not_read_before_calculation:method-resource`。同值异单位仍由 `test_another_same_valued_fact_cannot_supply_a_token_unit` 拒绝。本轮没有因此升语义版本。
 
+## E30 目标冲突的纯计算
+
+这是账本 C 的一个窄函数，不是原 E30 模型 slot，也没有登记成新的 scenario kind 或 MCP 工具。`foundry/finance_scenarios.py::assess_target_feasibility` 对公开的 100、120、0 给出剩余目标 `-20`、不可行原因 `remaining_target_below_minimum`、下界缺口 `20`。实际值保持 120，结果不钳成 0，也不生成月度分配。剩余 `-30` 仍高于地板 `-50` 时，负的剩余目标保持可行，因此这不是“凡是负数就拒绝”。传入月份、权重和截止日也不会造出月分配。
+
+`tests/test_finance_target_feasibility.py`：4 passed，0.04 秒。模型仍不能调用这个函数。原 E30 身份保持未作为本候选通过。
+
 ## 仍未关闭
 
+- E30 的纯计算没有接上 scenario/MCP。接上会改变工具契约，需要单独的兼容验证，不能在未冻结前当成原身份通过。
 - 5.3 的原生 P/Q typed 模板没有新改。现有 fact identity 加单位路径仍在，语义版本保持 19。不能把这一点写成 r012 或四个 E02 超时 slot 已通过。
 - 5.4 的模型尾部没有新的无模型回放测量之外的结论。工具返回体积没有改，420 秒和 80 次工具预算没有放宽。
 - G3 未做。没有新的 283 slot，也没有 DeepSeek 凭据可用。
