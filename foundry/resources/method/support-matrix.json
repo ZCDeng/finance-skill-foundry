@@ -1,0 +1,383 @@
+{
+  "schema_version": "foundry.finance.method_support.v1",
+  "capability_version": "finance-methods-20261023",
+  "policy": "Implementation, deterministic tests, real-model evaluation and named human professional review are independent. This registry is shipped evidence metadata, not a permission grant or a statutory certification.",
+  "entries": [
+    {
+      "method_id": "F01",
+      "name": "任务口径与来源",
+      "basis": [
+        "management"
+      ],
+      "report_purpose": "management_analysis",
+      "effective_period": "declared task period; no statutory basis inferred",
+      "implementation": "scoped_profile_and_manager_confirmation",
+      "limit": "Professional profile fields, source scope and applicable rule identities are server checked; legacy context is not approved policy.",
+      "resources": [
+        "accounting-basis.md"
+      ],
+      "evidence": {
+        "deterministic": {
+          "status": "bounded_tests_verified",
+          "tests": [
+            "tests/test_finance_professional_protocol.py"
+          ]
+        },
+        "live_model": {
+          "status": "not_evaluated"
+        },
+        "human_professional": {
+          "status": "not_reviewed"
+        }
+      },
+      "professional_release": false
+    },
+    {
+      "method_id": "F02",
+      "name": "月结",
+      "basis": [
+        "management"
+      ],
+      "report_purpose": "close_workpaper",
+      "effective_period": "declared closing period",
+      "implementation": "existing_controls_and_close_state",
+      "limit": "Checklist guidance and confirmed controls; no ERP posting, statutory close certification or audit opinion.",
+      "resources": [
+        "accounting-basis.md",
+        "close-checklist.md",
+        "model-checks.md"
+      ],
+      "evidence": {
+        "deterministic": {
+          "status": "tests_available",
+          "tests": [
+            "tests/test_finance_controls.py",
+            "tests/test_finance_close_status.py"
+          ]
+        },
+        "live_model": {
+          "status": "not_evaluated"
+        },
+        "human_professional": {
+          "status": "not_reviewed"
+        }
+      },
+      "professional_release": false
+    },
+    {
+      "method_id": "F03",
+      "name": "分录计提预付",
+      "basis": [
+        "management",
+        "CAS",
+        "IFRS",
+        "US_GAAP"
+      ],
+      "report_purpose": "draft_for_review",
+      "effective_period": "requires applicable confirmed transaction policy",
+      "implementation": "guidance_and_adjustment_drafts",
+      "limit": "Accounting-basis options route review; they do not establish complete recognition, translation or tax compliance. No posting.",
+      "resources": [
+        "accounting-basis.md",
+        "close-checklist.md",
+        "model-checks.md"
+      ],
+      "evidence": {
+        "deterministic": {
+          "status": "guidance_regression_verified",
+          "tests": [
+            "tests/test_finance_rule_corrections.py"
+          ]
+        },
+        "live_model": {
+          "status": "not_evaluated"
+        },
+        "human_professional": {
+          "status": "not_reviewed"
+        }
+      },
+      "professional_release": false
+    },
+    {
+      "method_id": "F04",
+      "name": "对账",
+      "basis": [
+        "management"
+      ],
+      "report_purpose": "reconciliation_workpaper",
+      "effective_period": "matched source cut-off dates",
+      "implementation": "guidance_with_existing_controls_sql",
+      "limit": "Matching completeness, approved grouping and cut-off judgments need case-specific evidence; equal totals alone do not prove reconciliation.",
+      "resources": [
+        "close-checklist.md",
+        "model-checks.md"
+      ],
+      "evidence": {
+        "deterministic": {
+          "status": "guidance_regression_verified",
+          "tests": [
+            "tests/test_finance_rule_corrections.py",
+            "tests/test_finance_controls.py"
+          ]
+        },
+        "live_model": {
+          "status": "not_evaluated"
+        },
+        "human_professional": {
+          "status": "not_reviewed"
+        }
+      },
+      "professional_release": false
+    },
+    {
+      "method_id": "F05",
+      "name": "科目滚动",
+      "basis": [
+        "management"
+      ],
+      "report_purpose": "balance_rollforward_workpaper",
+      "effective_period": "consistent opening and closing dates",
+      "implementation": "existing_signed_sum_arithmetic",
+      "limit": "Signed-sum balance is arithmetic evidence, not proof of transaction recognition, undisclosed plugs or complete account coverage.",
+      "resources": [
+        "close-checklist.md",
+        "model-checks.md"
+      ],
+      "evidence": {
+        "deterministic": {
+          "status": "tests_available",
+          "tests": [
+            "tests/test_finance_controls.py"
+          ]
+        },
+        "live_model": {
+          "status": "not_evaluated"
+        },
+        "human_professional": {
+          "status": "not_reviewed"
+        }
+      },
+      "professional_release": false
+    },
+    {
+      "method_id": "F06",
+      "name": "经营差异",
+      "basis": [
+        "management"
+      ],
+      "report_purpose": "variance_analysis",
+      "effective_period": "comparable declared periods and scopes",
+      "implementation": "native_two_factor_and_volume_mix_price",
+      "limit": "Fixed volume-mix-price order with comparable baskets, archived rows and bounded completion; attribution is not business causality.",
+      "resources": [
+        "accounting-basis.md",
+        "forecast-models.md",
+        "model-checks.md"
+      ],
+      "evidence": {
+        "deterministic": {
+          "status": "bounded_tests_verified",
+          "tests": [
+            "tests/test_finance_variance.py",
+            "tests/test_finance_three_factor.py",
+            "tests/test_finance_professional_protocol.py"
+          ]
+        },
+        "live_model": {
+          "status": "not_evaluated"
+        },
+        "human_professional": {
+          "status": "not_reviewed"
+        }
+      },
+      "professional_release": false
+    },
+    {
+      "method_id": "F07",
+      "name": "应收账龄收缴",
+      "basis": [
+        "management"
+      ],
+      "report_purpose": "receivables_and_collection_screen",
+      "effective_period": "declared aging date and billing/collection periods",
+      "implementation": "existing_aging_and_collection_engine",
+      "limit": "Break-even and dependent gaps are estimates. Mixed VAT requires homogeneous runs or checked row-level work. No complete statutory impairment model.",
+      "resources": [
+        "accounting-basis.md",
+        "close-checklist.md",
+        "forecast-models.md",
+        "model-checks.md"
+      ],
+      "evidence": {
+        "deterministic": {
+          "status": "regression_verified",
+          "tests": [
+            "tests/test_collection_metrics.py",
+            "tests/test_finance_rule_corrections.py",
+            "tests/test_finance_scenarios.py"
+          ]
+        },
+        "live_model": {
+          "status": "not_evaluated"
+        },
+        "human_professional": {
+          "status": "not_reviewed"
+        }
+      },
+      "professional_release": false
+    },
+    {
+      "method_id": "F08",
+      "name": "13周现金",
+      "basis": [
+        "management"
+      ],
+      "report_purpose": "liquidity_forecast",
+      "effective_period": "declared 13-week horizon",
+      "implementation": "existing_weekly_cash_engine",
+      "limit": "Opening available cash, restricted-fund adjustments and assumptions require evidence. Week-end balances do not prove intraweek liquidity or committed financing.",
+      "resources": [
+        "forecast-models.md",
+        "model-checks.md"
+      ],
+      "evidence": {
+        "deterministic": {
+          "status": "regression_verified",
+          "tests": [
+            "tests/test_finance_scenarios.py"
+          ]
+        },
+        "live_model": {
+          "status": "not_evaluated"
+        },
+        "human_professional": {
+          "status": "not_reviewed"
+        }
+      },
+      "professional_release": false
+    },
+    {
+      "method_id": "F09",
+      "name": "驱动预测",
+      "basis": [
+        "management"
+      ],
+      "report_purpose": "driver_forecast",
+      "effective_period": "frozen actuals and explicit future periods",
+      "implementation": "source_bound_driver_dag",
+      "limit": "Raw archived-column bindings, explicit unit conversion and ancestor identity checks; generic DAG names do not grant registered financial semantics. Mixed ledger/scenario results remain unverified.",
+      "resources": [
+        "accounting-basis.md",
+        "forecast-models.md",
+        "model-checks.md"
+      ],
+      "evidence": {
+        "deterministic": {
+          "status": "bounded_tests_verified",
+          "tests": [
+            "tests/test_finance_trusted_driver.py"
+          ]
+        },
+        "live_model": {
+          "status": "not_evaluated"
+        },
+        "human_professional": {
+          "status": "not_reviewed"
+        }
+      },
+      "professional_release": false
+    },
+    {
+      "method_id": "F10",
+      "name": "三表联动",
+      "basis": [
+        "management"
+      ],
+      "report_purpose": "noncircular_management_model",
+      "effective_period": "declared scenario period",
+      "implementation": "registered_linked_management_template_v1",
+      "limit": "Single entity, currency, ledger/scenario and month; 16 inputs and 8 source-backed zero boundaries, separately approved for the scenario. No actual/forecast bridge, statutory statements, consolidation, leases, tax/FX/OCI effects or circular financing.",
+      "resources": [
+        "accounting-basis.md",
+        "forecast-models.md",
+        "model-checks.md"
+      ],
+      "evidence": {
+        "deterministic": {
+          "status": "bounded_tests_verified",
+          "tests": [
+            "tests/test_finance_three_statement.py",
+            "tests/test_finance_professional_protocol.py"
+          ]
+        },
+        "live_model": {
+          "status": "not_evaluated"
+        },
+        "human_professional": {
+          "status": "not_reviewed"
+        }
+      },
+      "professional_release": false
+    },
+    {
+      "method_id": "F11",
+      "name": "模型和工作簿检查",
+      "basis": [
+        "management"
+      ],
+      "report_purpose": "scoped_model_review",
+      "effective_period": "declared snapshot and target engine version",
+      "implementation": "existing_workbook_health_hints_and_check_guidance",
+      "limit": "Scanner hints and cached values do not prove full workbook audit, original formula overwrite without baseline or actual target Excel recalculation.",
+      "resources": [
+        "model-checks.md"
+      ],
+      "evidence": {
+        "deterministic": {
+          "status": "tests_available",
+          "tests": [
+            "tests/test_workbook_health.py"
+          ]
+        },
+        "live_model": {
+          "status": "not_evaluated"
+        },
+        "human_professional": {
+          "status": "not_reviewed"
+        }
+      },
+      "professional_release": false
+    },
+    {
+      "method_id": "F12",
+      "name": "解释和复核交付",
+      "basis": [
+        "management"
+      ],
+      "report_purpose": "evidence_bound_management_draft",
+      "effective_period": "current draft and applicable source/rule identity",
+      "implementation": "source_fact_requirements_current_completion",
+      "limit": "Current professional views invalidate withdrawn approvals and changed relevant rules while preserving historical records. Financial judgment still needs professional review.",
+      "resources": [
+        "accounting-basis.md",
+        "model-checks.md"
+      ],
+      "evidence": {
+        "deterministic": {
+          "status": "bounded_tests_verified",
+          "tests": [
+            "tests/test_finance_explanations.py",
+            "tests/test_finance_professional_protocol.py"
+          ]
+        },
+        "live_model": {
+          "status": "not_evaluated"
+        },
+        "human_professional": {
+          "status": "not_reviewed"
+        }
+      },
+      "professional_release": false
+    }
+  ]
+}

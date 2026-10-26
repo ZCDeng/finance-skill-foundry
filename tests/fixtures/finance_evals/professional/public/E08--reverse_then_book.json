@@ -1,0 +1,33 @@
+{
+  "case_id": "E08--reverse_then_book",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "december_service",
+      "value": "100"
+    },
+    {
+      "name": "january_bill",
+      "value": "100"
+    },
+    {
+      "name": "january_payment",
+      "value": "100"
+    },
+    {
+      "name": "policy",
+      "value": "1月先全额冲回，再完整入账账单"
+    },
+    {
+      "name": "tax",
+      "value": "excluded"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "按给定政策提出12月及1月分录草稿。"
+}

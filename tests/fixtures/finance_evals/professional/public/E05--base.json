@@ -1,0 +1,29 @@
+{
+  "case_id": "E05--base",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "january_cash",
+      "value": "120"
+    },
+    {
+      "name": "service_months",
+      "value": "12"
+    },
+    {
+      "name": "performance",
+      "value": "全年均匀履约，1月完成一个月"
+    },
+    {
+      "name": "tax",
+      "value": "excluded"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "计算1月服务合同收入、现金及合同负债。"
+}

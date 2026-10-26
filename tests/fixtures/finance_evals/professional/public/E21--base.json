@@ -1,0 +1,37 @@
+{
+  "case_id": "E21--base",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "opening_debt",
+      "value": "100"
+    },
+    {
+      "name": "new_borrowing",
+      "value": "30"
+    },
+    {
+      "name": "principal_repaid",
+      "value": "20"
+    },
+    {
+      "name": "FX",
+      "value": "2"
+    },
+    {
+      "name": "interest",
+      "value": "5"
+    },
+    {
+      "name": "additional_credit",
+      "value": "none"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "编制债务滚动并区分本金和利息。"
+}

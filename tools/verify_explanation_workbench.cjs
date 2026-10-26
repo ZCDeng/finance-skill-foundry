@@ -118,7 +118,7 @@ function sanitizedEnv() {
 async function screenshot(name) {
   const file = path.join(screenshotsDir, `${name}.png`);
   if (page) {
-    await page.screenshot({path: file, fullPage: true});
+    await page.screenshot({path: file, fullPage: !name.startsWith('popover-')});
     report.screenshots.push(file);
   }
   return file;
@@ -375,6 +375,7 @@ async function clickIfVisible(locator) {
 }
 
 async function selectTask(taskTitle) {
+  await page.getByRole('button', {name: '工作区', exact: true}).click();
   await clickIfVisible(page.getByRole('button', {name: '展开任务列表', exact: true}));
   const taskButton = page.locator(`.workspace-task[title="${cssEscape(taskTitle)}"]`).first();
   await taskButton.waitFor({state: 'visible', timeout: 30000});
@@ -586,9 +587,9 @@ async function verifyWorkbenchControlsAndScenario(seed) {
   const setup = page.locator('details.analysis-finance-setup').first();
   await ensureDetailsOpen(setup);
   await chooseSearchableOption(setup, '预算资料（可选）', '预算', 'QA 预算');
-  const organization = setup.getByLabel('组织', {exact: true}).first();
-  await organization.fill('华东运营中心');
-  await setup.getByLabel('期间', {exact: true}).first().fill('2026-09');
+  const scopeText = await setup.getByRole('group', {name: '计算用的范围'}).textContent();
+  check('finance_uses_shared_scope', 'finance workbench reads the scope confirmed in the 范围 step',
+    scopeText, scopeText.includes('O1') && scopeText.includes('2026') && scopeText.includes('9'));
   await setup.getByRole('button', {name: '对比期间打开年月选择', exact: true}).click();
   const periodDialog = page.getByRole('dialog', {name: '对比期间年月选择'});
   await periodDialog.waitFor({state: 'visible', timeout: 10000});
@@ -601,11 +602,14 @@ async function verifyWorkbenchControlsAndScenario(seed) {
   const scenario = setup.locator('details.analysis-scenario-panel').first();
   await ensureDetailsOpen(scenario);
   await chooseSearchableOption(scenario, '应收/发票资料', 'invoices', 'invoices');
-  await chooseSearchableOption(scenario, '核销活动（可选）', 'activity', 'activity');
+  await chooseSearchableOption(scenario, '核销记录（可选）', 'activity', 'activity');
   const agingDate = scenario.getByLabel('账龄日期', {exact: true});
   await agingDate.fill('2026-09-30');
   await agingDate.press('Enter');
   const committedAgingDate = await agingDate.inputValue();
+  await agingDate.scrollIntoViewIfNeeded();
+  await agingDate.focus();
+  await delay(250);
   await agingDate.press('ArrowDown');
   const dateDialog = page.getByRole('dialog', {name: '账龄日期日期选择'});
   await dateDialog.waitFor({state: 'visible', timeout: 10000});
@@ -618,7 +622,7 @@ async function verifyWorkbenchControlsAndScenario(seed) {
   const statusLabel = await scenario.getByRole('button', {name: '应收状态筛选', exact: true}).textContent();
   check('status_search_multiselect_keyboard', 'installed renderer searchable multi-select accepts Chinese status search and keyboard options', statusLabel, statusLabel.includes('争议应收') && statusLabel.includes('逾期应收'));
 
-  await scenario.getByRole('button', {name: /运行基准情景/}).click();
+  await scenario.getByRole('button', {name: /计算基准情景/}).click();
   let agingRun;
   const isAgingScenarioRun = (run) => {
     const result = run?.result || {};
@@ -663,10 +667,11 @@ async function verifyWorkbenchControlsAndScenario(seed) {
     excludedCount: agingRun?.result?.excluded_detail_rows?.length,
     statusFilter: agingRun?.result?.evidence?.status_filter,
   }, Boolean(agingRun?.id) && (agingRun.result.detail_rows?.length ?? 0) >= 2 && (agingRun.result.excluded_detail_rows?.length ?? 0) >= 1
-    && agingRun.result.evidence?.status_filter?.include?.includes('disputed') && agingRun.result.evidence.status_filter.include.includes('overdue'));
+    && agingRun.result.evidence?.status_filter?.include?.includes('disputed') && agingRun.result.evidence.status_filter.include.includes('overdue')
+    && agingRun.result.rows.every((row) => row.as_of === committedAgingDate));
   report.controlChecks.push({
     comparePeriod: compareValue,
-    agingDate: await agingDate.inputValue(),
+    agingDate: agingRun.result.rows[0]?.as_of,
     statusLabel,
     agingRunId: agingRun?.id,
   });
@@ -682,6 +687,13 @@ async function verifyUi(seed) {
   });
   page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
+  await page.waitForFunction(() => window.foundry?.harnessOpen && window.foundry?.financeCall, {timeout: 60000});
+  // This harness also checks raw coverage counters, which the current app hides
+  // behind the persisted technical-details preference by default.
+  const preferences = await invokeBridge('preferencesSet', [{technical: true}]);
+  check('enable_technical_details_for_evidence_audit', 'packaged preferences IPC in isolated QA profile', preferences,
+    preferences.ok && preferences.value?.technical === true);
+  await page.reload();
   await page.waitForFunction(() => window.foundry?.harnessOpen && window.foundry?.financeCall, {timeout: 60000});
   await page.evaluate(() => {
     window.__qaBlockedModelUrls = [];
@@ -756,6 +768,7 @@ async function verifyUi(seed) {
     && qualityText.includes('本次分析范围已更新')
     && qualityText.includes('尚未提供“争议应收余额”的计算依据')
     && qualityText.includes('尚未完成“争议应收余额”的指定来源核查'));
+  await draftPanel.locator('summary').filter({hasText: /^本次分析要求$/}).click();
   const staleText = await draftPanel.getByRole('region', {name: '本次分析要求'}).textContent();
   check('old_draft_stale_after_requirements_revision', 'requirements changed after this draft, so the opened old draft must be marked stale', {
     staleText,
@@ -774,7 +787,7 @@ async function verifyUi(seed) {
   );
   check('fact_drilldown_displays_source_row', 'real UI invokes drilldown-fact through IPC and packaged CLI', drilldown.slice(0, 1200), true);
 
-  await page.getByRole('button', {name: '编辑文稿'}).click();
+  await draftPanel.getByRole('tab', {name: '编辑', exact: true}).click();
   const body = page.getByLabel('文稿正文');
   await body.waitFor({state: 'visible', timeout: 15000});
   const currentBody = await body.inputValue();
@@ -782,7 +795,7 @@ async function verifyUi(seed) {
   await page.getByRole('button', {name: '重检当前正文'}).click();
   const badQuality = await until(
     () => quality.evaluate((el) => el.textContent || ''),
-    (text) => text.includes('999') || text.includes('需要复核') || text.includes('未引用'),
+    (text) => text.includes('999') && (text.includes('uncited_number') || text.includes('fact_value_mismatch')),
     'wrong number quality issue',
     30000,
   );
@@ -798,8 +811,10 @@ async function verifyUi(seed) {
 
   const bgDetails = page.locator('details.analysis-background-panel').first();
   await bgDetails.locator('summary').first().click();
+  await bgDetails.locator('summary').filter({hasText: /^适用范围/}).click();
   await page.getByLabel('背景组织').fill('O1');
   await page.getByLabel('背景期间').fill('2026-09');
+  await page.getByLabel('背景期间').press('Enter');
   await bgDetails.locator('input').first().fill('QA 管理判断');
   await bgDetails.locator('textarea.analysis-code').first().fill('QA 背景：销售节奏提前，利润差异需要经理复核。');
   await page.getByRole('button', {name: '保存背景'}).click();
@@ -815,7 +830,12 @@ async function verifyUi(seed) {
   const state = cli('analysis-state', [], seed.taskId);
   const drafts = state.drafts || [];
   const savedWrongDraft = drafts.find((draft) => draft.body?.includes('999 万元'));
-  const backgrounds = cliSpec('finance-background-list', {context_id: seed.context.id}, seed.taskId);
+  // The context also contains undated activity/invoice aliases. Re-read by the
+  // exact scope saved above instead of letting context-primary-scope pick one.
+  const backgrounds = cliSpec('finance-background-list', {
+    scope: {ledger: 'L1', organization: 'O1', period: '2026-09', currency: 'CNY', unit: '万元'},
+    as_of: '2026-09',
+  }, seed.taskId);
   check('cli_persistence_after_ui_actions', 'packaged CLI rereads UI-saved draft/background from isolated FOUNDRY_VAR', {
     draftCount: drafts.length,
     savedWrongDraftId: savedWrongDraft?.id,

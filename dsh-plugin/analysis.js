@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs";
 import { invokeFoundry, toolDefinition } from "./index.js";
+import { workflowModelResult } from "./model-result.js";
 import { createAnalysisRuntime } from "./analysis-runtime.js";
 import { createCompletionRuntime } from "./completion-runtime.js";
+import { installFinalDeliveryRuntime } from "./final-delivery-runtime.js";
 import { hideDeveloperSections } from "./seat-prompt.js";
-import { FINANCE_TOOLS, NUMERIC_PRESENTATION, REPORT_DOCUMENT, PERIOD_BINDING } from "./finance-tools.js";
+import { FINANCE_TOOLS, NUMERIC_PRESENTATION, REPORT_DOCUMENT, PERIOD_BINDING, FINANCE_METHOD_PREFLIGHT } from "./finance-tools.js";
 
 const PROFILE = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"))
   .dsh.foundry.profiles.analysis;
@@ -28,7 +30,7 @@ const scriptTopic = {
   type: "string", enum: ["collection_health"],
   description: "可选：脚本替哪种引擎分析出草稿。只在回款健康因表结构待确认（pending_structure）跑不了财务引擎、经理选了先出脚本草稿时写 collection_health；结果放在「经营分析」并标为脚本草稿，不进看板情景卡、月结和下月自动重算。",
 };
-const resultRowContract = "结果行约定（写 result_file 时遵守；不合约定时运行照常成功，提示写在运行记录 row_declarations.warnings，后台任务的完成回报也在 warnings 里带回 code 和中文 message，按提示改脚本后重跑）：长表每行一个数，列为 metric_key、scenario、value、unit，另写 organization、period、metric_label、basis；同一比较的实际、预算、差异、达成率行用相同的 metric_key、organization、period 和期间后缀。metric_key 用约定指标名 revenue、operating_profit、profit、gross_profit、period_expense、expense、cost 等，或需求版本 items 里列出的 metric；差异和达成率可写成 revenue_variance、revenue_achievement_ratio。scenario 用约定情景名：实际 actual、actual_ytd、actual_month，预算 budget、budget_ytd、budget_month，估算预算 estimated_budget，差异 variance，达成率 achievement_ratio 或 achievement_pct（是小数还是百分数只看 unit 列：小数写「比率」，百分数写 %）；带期间后缀的写法 actual_1_8（1-8 月累计）、budget_2026_08（2026 年 8 月单月）、variance_1_8 表示同一比较期间；其他情景名（如 budget_bud_fy）不参与配对，确需保留时先列进需求版本的 scenarios，否则收到提示。unit 按单位表：「比率」或 ratio 为小数（0.945 即 94.5%），%、pct 或「百分比」为百分数（文稿正文里，比率行和 %、pct、百分比行不用事实占位符，手写百分数并在 claim 里带 presentation：比率行 scale 用 percent，%、pct、百分比行 scale 用 identity、写展示值加 %，如 3.30%），两个比率之差写「百分点」（3.3 即 3.3 个百分点，不乘 100，收缴率缺口这类差值用它），金额写实际单位（万元、元）；「-」表示未标单位，比率行不写单位也算未标单位；这样的行不参与金额配对并收到提示，应避免。metric_label 写这一行的口径标签，要写出对象（如「营业收入 1-8 月预算」「营业利润完成率」），结果区按它显示指标；没有进入实际与预算配对的行里，同一组织、同一期间的两行显示出来的指标名相同（估算行会补「（估算）」，写成 revenue 这类指标代码的显示为中文名）而指标键不同（指标键取 metric、metric_key、business_key、result_key、item、name、指标 中第一个不为 null 的列），就收到 label_ambiguous 提示，结果区只能在名字后补中文名或指标键区分；需求版本列出的 metric 是 ratio 这类泛称时，metric_label 也必须写出对象。估算行在 basis 列写 estimate（可另写估算方法列），不要只靠文字里的估算、推算字样。";
+const resultRowContract = "结果行约定（写 result_file 时遵守；不合约定时运行照常成功，提示写在运行记录 row_declarations.warnings，后台任务的完成回报也在 warnings 里带回 code 和中文 message，按提示改脚本后重跑）：长表每行一个数，列为 metric_key、scenario、value、unit，另写 organization、period、metric_label、basis；同一比较的实际、预算、差异、达成率行用相同的 metric_key、organization、period 和期间后缀。metric_key 用约定指标名 revenue、operating_profit、profit、gross_profit、period_expense、expense、cost 等，或需求版本 items 里列出的 metric；差异和达成率可写成 revenue_variance、revenue_achievement_ratio。scenario 用约定情景名：实际 actual、actual_ytd、actual_month，预算 budget、budget_ytd、budget_month，估算预算 estimated_budget，差异 variance，达成率 achievement_ratio 或 achievement_pct（是小数还是百分数只看 unit 列：小数写「比率」，百分数写 %）；带期间后缀的写法 actual_1_8（1-8 月累计）、budget_2026_08（2026 年 8 月单月）、variance_1_8 表示同一比较期间；其他情景名（如 budget_bud_fy）不参与配对，确需保留时先列进需求版本的 scenarios，否则收到提示。unit 按单位表：「比率」或 ratio 为小数（0.945 即 94.5%），%、pct 或「百分比」为百分数（文稿正文里，比率行和 %、pct、百分比行不用事实占位符，手写百分数并在 claim 里带 presentation：比率行 scale 用 percent，%、pct、百分比行 scale 用 identity、写展示值加 %，如 3.30%），两个比率之差写「百分点」（3.3 即 3.3 个百分点，不乘 100，收缴率缺口这类差值用它），金额写实际单位（万元、元）；同一行的 value 是比率时，金额分子 numerator 与分母 denominator 仍须使用各自的 numerator_unit 和 denominator_unit（或 amount_unit），不能把金额标为比率；「-」表示未标单位，比率行不写单位也算未标单位；这样的行不参与金额配对并收到提示，应避免。metric_label 写这一行的口径标签，要写出对象（如「营业收入 1-8 月预算」「营业利润完成率」），结果区按它显示指标；没有进入实际与预算配对的行里，同一组织、同一期间的两行显示出来的指标名相同（估算行会补「（估算）」，写成 revenue 这类指标代码的显示为中文名）而指标键不同（指标键取 metric、metric_key、business_key、result_key、item、name、指标 中第一个不为 null 的列），就收到 label_ambiguous 提示，结果区只能在名字后补中文名或指标键区分；需求版本列出的 metric 是 ratio 这类泛称时，metric_label 也必须写出对象。估算行在 basis 列写 estimate（可另写估算方法列），不要只靠文字里的估算、推算字样。";
 const relationship = {
   type: "object",
   required: ["left", "right", "left_keys", "right_keys", "cardinality"],
@@ -236,10 +238,10 @@ const claim = {
 const SPECS = {
   ...FINANCE_TOOLS,
   "method-resource": {
-    description: "读取已随包技能明确引用的配套说明。skill 工具加载正文后，用此入口读取 FOUNDRY.md 的运行模式规则、CONNECTORS.md 的连接类别说明或 report-visuals.md 的文稿图表方法，也可核对 NOTICE/LICENSE。只能读取四项随包技能的这些资源，不能传本机路径；不读取用户同名技能或账套资料。返回来源路径、内容哈希与全文。",
+    description: "读取已随包八项技能明确引用的配套说明。原生 skill 工具加载正文后，先读该方法的 FOUNDRY.md；差异与量价闭合再读 model-checks.md，等成功返回后才首次计算或缺数据诊断。CONNECTORS.md 只解答连接问题，不能替代这两项。其他准则、月结、预测或图表说明仅按方法适用性读取，也可核对 NOTICE/LICENSE。不能传本机路径；不读取用户同名技能或账套资料。返回来源路径、内容哈希与全文。",
     parameters: object({
-      skill: { type: "string", enum: ["financial-statements", "variance-analysis", "reconciliation", "journal-entry"] },
-      resource: { type: "string", enum: ["FOUNDRY.md", "CONNECTORS.md", "report-visuals.md", "NOTICE", "LICENSE"] },
+      skill: { type: "string", enum: ["financial-statements", "variance-analysis", "reconciliation", "journal-entry", "setup", "close", "bva", "cash"] },
+      resource: { type: "string", enum: ["FOUNDRY.md", "CONNECTORS.md", "report-visuals.md", "NOTICE", "LICENSE", "accounting-basis.md", "close-checklist.md", "model-checks.md", "forecast-models.md"] },
     }),
     kind: "read", argv: (input) => ["method-resource", "--skill", input.skill, "--resource", input.resource],
   },
@@ -265,18 +267,23 @@ const SPECS = {
     parameters: object({ dataset: string("analysis-state 或 dataset-add 返回的快照 id") }),
     kind: "read", argv: (input) => ["dataset-read", "--dataset", input.dataset],
   },
+  "dataset-display-rename": {
+    description: "修改当前会话已绑定资料的显示标题，保留原始名称、文件内容、快照和财务计算身份。返回 display_name 与独立显示标题版本；不替换资料，也不使已有计算或确认失效。",
+    parameters: object({ dataset: string("已绑定快照 id"), name: string("新显示标题，最多 200 字") }),
+    kind: "edit", argv: (input) => ["dataset-display-rename", "--dataset", input.dataset, "--name", input.name],
+  },
   "analysis-save": {
     description: "保存可修改的分析定义，不执行计算。默认 SQL 分支必须包含 question、显式只读 SQL、bindings（SQL表别名到快照id）；自由 SQL 可用于临时测算，但不会因为金额相同就获得完整 verified 来源行追溯。结构化聚合分支设置 engine='structured_aggregate'，只接一个 binding 和 aggregate_plan，不接 SQL/parameters/relationships；它会用声明式 filters/exclusions/group_by/measures/dedupe 生成可下钻来源行。question 仅说明业务目的，不会自动变成公式。金额口径、比较期间、币种和分摊规则须明确，跨表 SQL JOIN 仍必须声明 relationships，包含 left/right/left_keys/right_keys/cardinality。",
     parameters: object({ spec: analysisSpec }),
     kind: "edit", argv: (input) => ["analysis-save", "--spec", json(input.spec)],
   },
   "analysis-run": {
-    description: "执行已保存的显式 SQL 分析，固化输入快照、计算表达式、参数、执行状态和输出。只能访问本次绑定的数据。金额按 JSON 字符串返回；检查状态与局限后再引用结果，不把运行成功等同于经理认可。stdout 为运行 JSON，result 包含 columns、rows、row_count、truncated。",
+    description: FINANCE_METHOD_PREFLIGHT + "执行已保存的显式 SQL 分析，固化输入快照、计算表达式、参数、执行状态和输出。只能访问本次绑定的数据。金额按 JSON 字符串返回；检查状态与局限后再引用结果，不把运行成功等同于经理认可。stdout 为运行 JSON，result 包含 columns、rows、row_count、truncated。",
     parameters: object({ analysis: string("analysis-save 返回的分析版本id") }),
     kind: "execute", argv: (input) => ["analysis-run", "--analysis", input.analysis],
   },
   "analysis-script": {
-    description: "在已验证的隔离运行环境中执行 Python 或受限 shell 清洗、计算或生成图表。绑定快照由服务复制至只读目录（环境变量 FOUNDRY_INPUTS）：每个别名有 .json 标准化数据及原件。当前工作目录即本次输出目录（FOUNDRY_OUTPUTS），只能向此处写文件。无网络、无宿主密钥、不能读其他任务或历史记录。spec 明确 code、bindings，可附 question、language、assumptions、timeout_seconds。保存真实代码、环境、输入输出哈希与执行状态；不可用或失败时照实报告。需要在结果区和文稿中引用数值时，指定 result_file 为脚本写出的 CSV 或 JSON 表格文件；服务校验其清单和摘要后填充 result.rows。金额以精确数字字符串写入；同一数值列只放数字或 null，单位放 unit，解释和小计说明放 note，不把“26 个项目”等文本混入数值列。附来源工作表、单元格、单位；此结果仍为脚本计算，复现与原始行取证不会自动变成已验证。" + resultRowContract,
+    description: FINANCE_METHOD_PREFLIGHT + "在已验证的隔离运行环境中执行 Python 或受限 shell 清洗、计算或生成图表。绑定快照由服务复制至只读目录（环境变量 FOUNDRY_INPUTS）：每个别名有 .json 标准化数据及原件。当前工作目录即本次输出目录（FOUNDRY_OUTPUTS），只能向此处写文件。无网络、无宿主密钥、不能读其他任务或历史记录。spec 明确 code、bindings，可附 question、language、assumptions、timeout_seconds。保存真实代码、环境、输入输出哈希与执行状态；不可用或失败时照实报告。需要在结果区和文稿中引用数值时，指定 result_file 为脚本写出的 CSV 或 JSON 表格文件；服务校验其清单和摘要后填充 result.rows。金额以精确数字字符串写入；同一数值列只放数字或 null，单位放 unit，解释和小计说明放 note，不把“26 个项目”等文本混入数值列。附来源工作表、单元格、单位；此结果仍为脚本计算，复现与原始行取证不会自动变成已验证。" + resultRowContract,
     parameters: object({ spec: {
       type: "object", required: ["code", "bindings"],
       properties: {
@@ -297,7 +304,7 @@ const SPECS = {
     kind: "execute", argv: (input) => ["analysis-script", "--spec", json(input.spec)],
   },
   "analysis-script-start": {
-    description: "在后台执行隔离 Python/受限 shell 分析，立即返回持久 job id。spec 与 analysis-script 一致，输入快照和上下文在启动时固定。用 analysis-jobs / analysis-job-output 查看，analysis-job-cancel 取消，失败后 analysis-job-retry 创建可追溯的新尝试。后台记录不等于执行成功。" + resultRowContract,
+    description: FINANCE_METHOD_PREFLIGHT + "在后台执行隔离 Python/受限 shell 分析，立即返回持久 job id。spec 与 analysis-script 一致，输入快照和上下文在启动时固定。用 analysis-jobs / analysis-job-output 查看，analysis-job-cancel 取消，失败后 analysis-job-retry 创建可追溯的新尝试。后台记录不等于执行成功。" + resultRowContract,
     parameters: object({ spec: { type: "object", required: ["code", "bindings"], properties: {
       code: string("完整代码；通过环境变量 FOUNDRY_INPUTS 读输入，在当前工作目录写输出"), language: { type: "string", enum: ["python", "shell"] },
       bindings: { type: "object", additionalProperties: { type: "string" } }, question: string("业务问题"),
@@ -373,7 +380,7 @@ const SPECS = {
 };
 
 export const name = "finance-skill-foundry-analysis";
-export const inject = ["tools", "subagents"];
+export const inject = ["tools", "subagents", "agents"];
 
 function runtimeParts(runtime) {
   return typeof runtime === "function" ? { analysis: runtime } : (runtime ?? {});
@@ -405,6 +412,7 @@ export function definitions(runtime, invoke = invokeFoundry) {
       : invoke(foundryArgs(tool, input), exec);
     return toolDefinition(tool, {
       ...SPECS[tool], requireSession: true,
+      modelText: (raw) => workflowModelResult(tool, raw),
       execute: (input, exec) => parts.completion
         ? parts.completion(tool, input, exec, run)
         : run(input, exec),
@@ -417,6 +425,7 @@ export function allowlist() {
 }
 
 export function apply(ctx) {
+  installFinalDeliveryRuntime(ctx);
   const runtime = {
     analysis: createAnalysisRuntime(ctx, PROFILE.childTools),
     completion: createCompletionRuntime(ctx),

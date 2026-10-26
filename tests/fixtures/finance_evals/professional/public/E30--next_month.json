@@ -1,0 +1,29 @@
+{
+  "case_id": "E30--next_month",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "january_actual",
+      "value": "10"
+    },
+    {
+      "name": "february_new_actual",
+      "value": "20"
+    },
+    {
+      "name": "previous_february_forecast",
+      "value": "25"
+    },
+    {
+      "name": "rolling_policy",
+      "value": "actual locks; forecast starts after last actual"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "更新到下一月并保留已有实际。"
+}

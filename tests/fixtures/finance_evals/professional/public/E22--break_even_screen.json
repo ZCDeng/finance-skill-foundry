@@ -1,0 +1,49 @@
+{
+  "case_id": "E22--break_even_screen",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "revenue",
+      "value": "100"
+    },
+    {
+      "name": "gross_margin",
+      "value": "0.4"
+    },
+    {
+      "name": "expense_ratio",
+      "value": "0.1"
+    },
+    {
+      "name": "cash_cost",
+      "value": "60"
+    },
+    {
+      "name": "cash_expense",
+      "value": "10"
+    },
+    {
+      "name": "opening_cash",
+      "value": "0"
+    },
+    {
+      "name": "collections",
+      "value": "70"
+    },
+    {
+      "name": "capex",
+      "value": "50"
+    },
+    {
+      "name": "tax_interest_financing",
+      "value": "excluded"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "算收支平衡收缴率，并判断现金压力。"
+}

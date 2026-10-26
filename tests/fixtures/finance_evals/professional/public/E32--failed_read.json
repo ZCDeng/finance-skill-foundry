@@ -1,0 +1,17 @@
+{
+  "case_id": "E32--failed_read",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "trace",
+      "value": "method.read.error=1;calculate.start=2"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "审查给定工具事件轨迹是否满足方法先行。"
+}

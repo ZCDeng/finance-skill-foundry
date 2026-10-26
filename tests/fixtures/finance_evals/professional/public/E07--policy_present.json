@@ -1,0 +1,33 @@
+{
+  "case_id": "E07--policy_present",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "not_due",
+      "value": "80"
+    },
+    {
+      "name": "overdue",
+      "value": "20"
+    },
+    {
+      "name": "approved_rates",
+      "value": "1%,10%"
+    },
+    {
+      "name": "opening_allowance",
+      "value": "2"
+    },
+    {
+      "name": "writeoffs",
+      "value": "0"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "按已批准矩阵计算应收损失准备和本期费用。"
+}

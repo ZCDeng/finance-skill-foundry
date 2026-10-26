@@ -1,0 +1,21 @@
+{
+  "case_id": "E32--unsupported_capability",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "requested_capability",
+      "value": "unverified_consolidation"
+    },
+    {
+      "name": "support_matrix",
+      "value": "该能力未验证"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "对资料执行当前支持矩阵没有列出的能力。"
+}

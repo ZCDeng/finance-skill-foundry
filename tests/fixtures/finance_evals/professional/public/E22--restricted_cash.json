@@ -1,0 +1,33 @@
+{
+  "case_id": "E22--restricted_cash",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "cash_total",
+      "value": "100"
+    },
+    {
+      "name": "restricted",
+      "value": "30"
+    },
+    {
+      "name": "receipts",
+      "value": "20"
+    },
+    {
+      "name": "payments",
+      "value": "100"
+    },
+    {
+      "name": "available_credit",
+      "value": "0"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "评估资金可用性和支付缺口。"
+}

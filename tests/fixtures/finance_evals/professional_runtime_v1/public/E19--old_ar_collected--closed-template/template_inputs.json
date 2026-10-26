@@ -1,0 +1,155 @@
+{
+  "dataset_alias": "template_inputs",
+  "metadata": {
+    "currency": "CNY",
+    "organization": "Synthetic Fixture Co",
+    "unit": "元"
+  },
+  "rows": [
+    {
+      "amount": "100",
+      "currency": "CNY",
+      "input_name": "opening_cash",
+      "organization": "Synthetic Fixture Co",
+      "period": "2026-08",
+      "source_row": "1",
+      "unit": "元"
+    },
+    {
+      "amount": "50",
+      "currency": "CNY",
+      "input_name": "opening_receivables",
+      "organization": "Synthetic Fixture Co",
+      "period": "2026-08",
+      "source_row": "2",
+      "unit": "元"
+    },
+    {
+      "amount": "200",
+      "currency": "CNY",
+      "input_name": "opening_ppe",
+      "organization": "Synthetic Fixture Co",
+      "period": "2026-08",
+      "source_row": "3",
+      "unit": "元"
+    },
+    {
+      "amount": "50",
+      "currency": "CNY",
+      "input_name": "opening_payables",
+      "organization": "Synthetic Fixture Co",
+      "period": "2026-08",
+      "source_row": "4",
+      "unit": "元"
+    },
+    {
+      "amount": "100",
+      "currency": "CNY",
+      "input_name": "opening_debt",
+      "organization": "Synthetic Fixture Co",
+      "period": "2026-08",
+      "source_row": "5",
+      "unit": "元"
+    },
+    {
+      "amount": "200",
+      "currency": "CNY",
+      "input_name": "opening_equity",
+      "organization": "Synthetic Fixture Co",
+      "period": "2026-08",
+      "source_row": "6",
+      "unit": "元"
+    },
+    {
+      "amount": "120",
+      "currency": "CNY",
+      "input_name": "revenue",
+      "organization": "Synthetic Fixture Co",
+      "period": "2026-09",
+      "source_row": "7",
+      "unit": "元"
+    },
+    {
+      "amount": "110",
+      "currency": "CNY",
+      "input_name": "customer_receipts",
+      "organization": "Synthetic Fixture Co",
+      "period": "2026-09",
+      "source_row": "8",
+      "unit": "元"
+    },
+    {
+      "amount": "60",
+      "currency": "CNY",
+      "input_name": "operating_expense",
+      "organization": "Synthetic Fixture Co",
+      "period": "2026-09",
+      "source_row": "9",
+      "unit": "元"
+    },
+    {
+      "amount": "50",
+      "currency": "CNY",
+      "input_name": "supplier_payments",
+      "organization": "Synthetic Fixture Co",
+      "period": "2026-09",
+      "source_row": "10",
+      "unit": "元"
+    },
+    {
+      "amount": "10",
+      "currency": "CNY",
+      "input_name": "depreciation",
+      "organization": "Synthetic Fixture Co",
+      "period": "2026-09",
+      "source_row": "11",
+      "unit": "元"
+    },
+    {
+      "amount": "40",
+      "currency": "CNY",
+      "input_name": "capex",
+      "organization": "Synthetic Fixture Co",
+      "period": "2026-09",
+      "source_row": "12",
+      "unit": "元"
+    },
+    {
+      "amount": "0",
+      "currency": "CNY",
+      "input_name": "debt_drawdowns",
+      "organization": "Synthetic Fixture Co",
+      "period": "2026-09",
+      "source_row": "13",
+      "unit": "元"
+    },
+    {
+      "amount": "20",
+      "currency": "CNY",
+      "input_name": "debt_principal_repayments",
+      "organization": "Synthetic Fixture Co",
+      "period": "2026-09",
+      "source_row": "14",
+      "unit": "元"
+    },
+    {
+      "amount": "0",
+      "currency": "CNY",
+      "input_name": "dividends_paid",
+      "organization": "Synthetic Fixture Co",
+      "period": "2026-09",
+      "source_row": "15",
+      "unit": "元"
+    },
+    {
+      "amount": "0",
+      "currency": "CNY",
+      "input_name": "closing_restricted_cash",
+      "organization": "Synthetic Fixture Co",
+      "period": "2026-09",
+      "source_row": "16",
+      "unit": "元"
+    }
+  ],
+  "schema_version": "professional-runtime-augmentation-v1-20261023"
+}

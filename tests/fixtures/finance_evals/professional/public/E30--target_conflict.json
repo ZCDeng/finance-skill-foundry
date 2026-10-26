@@ -1,0 +1,25 @@
+{
+  "case_id": "E30--target_conflict",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "year_target",
+      "value": "100"
+    },
+    {
+      "name": "actual_ytd",
+      "value": "120"
+    },
+    {
+      "name": "remaining_minimum",
+      "value": "0"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "分配年度目标到剩余月份。"
+}

@@ -1,0 +1,25 @@
+{
+  "case_id": "E13--single_month",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "january",
+      "value": "10"
+    },
+    {
+      "name": "february",
+      "value": "20"
+    },
+    {
+      "name": "period_type",
+      "value": "single_month"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "汇总1月至2月发生额。"
+}

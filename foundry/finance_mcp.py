@@ -415,6 +415,7 @@ TOOL_METHODS = {
     "analysis_requirements_save": "analysis_requirements_save",
     "analysis_requirements_list": "analysis_requirements_list",
     "list_finance_context": "list_finance_context",
+    "finance_profile_status": "finance_profile_status",
     "run_metric": "run_metric",
     "explain_variance": "explain_variance",
     "save_scenario": "save_scenario",
@@ -507,10 +508,25 @@ def _tools() -> list[dict[str, Any]]:
         "type": "object",
         "properties": {
             "invoices_alias": text,
+            "template_id": {"type": "string", "enum": ["linked_three_statement_management_v1"]},
+            "source_bindings": {"type": "object", "description": "Server resolved inputs by alias, column, scalar selector, aggregation single or sum, period, scope, currency and unit. Model boundaries use boundary.<registered name> and explicit zero sources. Direct values remain unverified."},
+            "proposed_entries": {"type": "object", "additionalProperties": {"type": "string"}, "description": "transaction_review only: proposed accounting amounts under review, never original source facts. Inputs allow only scope/source_bindings/proposed_entries; bindings use single original transaction and effective policy cells."},
             "activity_alias": text,
-            "as_of": text,
-            "scope": scope_schema,
-            "buckets": {"type": "array", "items": {"type": "object"}},
+            "as_of": {**text, "description": "Aging cutoff YYYY-MM-DD; distinct from a source period and never a reason to fill scope.period."},
+            "scope": {**scope_schema, "description": "Explicit source filters; use scope.period only for a declared source period, and as_of separately for the aging cutoff."},
+            "buckets": {
+                "type": "array", "minItems": 1,
+                "description": "Canonical inclusive integer-day buckets, starting at 0 without gaps or overlaps. not_due is separate. Only name/min/max are supported.",
+                "items": {
+                    "type": "object", "required": ["name", "min"], "additionalProperties": False,
+                    "properties": {
+                        "name": {"type": "string", "minLength": 1, "description": "Unique bucket name, excluding reserved not_due."},
+                        "min": {"type": "integer", "minimum": 0},
+                        "max": {"type": ["integer", "null"], "minimum": 0,
+                                "description": "Inclusive last day; absent or null means unbounded and is allowed only in the final bucket."},
+                    },
+                },
+            },
             "status_filter": status_filter_schema,
             "opening_cash": text,
             "start_date": text,
@@ -536,6 +552,11 @@ def _tools() -> list[dict[str, Any]]:
         "additionalProperties": True,
     }
     return [
+        {
+            "name": "finance_profile_status",
+            "description": "Read the scoped reporting profile and server verified manager confirmation status. Assistant grants cannot confirm or revoke profiles.",
+            "inputSchema": {"type": "object", "required": ["context_id"], "properties": {"context_id": context_id, "scenario_id": text}},
+        },
         {
             "name": "analysis_requirements_save",
             "description": "Before calculation, persist versioned user question, scope, required semantic metrics and requested drilldowns. Removing items requires a change reason; it does not complete the original question. Returned support is independently checked against bound snapshots; requires_input asks for data or field mapping, never zero substitution. support.items name the accepted_evidence that can answer each item now and the blocked_evidence with its blockers. scope.unit and currency only constrain amount items, never ratio items; the ledger is proven by the bound snapshot hashes and is not copied onto result rows. The hierarchy level drilldown (or drill_down) is refused as a dimension (a key named level or group_by is an ordinary row filter); the refusal's details.suggested_items can be resubmitted unchanged. A level carried over unchanged from the parent version (compared key by key) is dropped from the new version and recorded in authoring_warnings; like removing an item, dropping a level leaves the original requirement incomplete, and completion names it as hierarchy_dimension_dropped. Hierarchy levels written into scope are refused the same way (details.suggested_scope can be resubmitted); scope.granularity only describes the analysis and never filters rows.",
@@ -597,7 +618,8 @@ def _tools() -> list[dict[str, Any]]:
                     "actual_scenario": text,
                     "baseline_scenario": text,
                     "dimensions": {"type": "array", "items": text},
-                    "method": {"type": "string", "enum": ["quantity_then_price", "base_weights_with_interaction"]},
+                    "method": {"type": "string", "enum": ["quantity_then_price", "base_weights_with_interaction", "volume_mix_price"]},
+                    "quantity_unit_field": text,
                     "actual_filters": {"type": "object"},
                     "baseline_filters": {"type": "object"},
                     "negative_budget_policy": {"type": "string", "enum": ["absolute_baseline", "signed_baseline"]},
@@ -639,13 +661,13 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "save_scenario",
             "title": "Save finance scenario",
-            "description": "Save receivables aging, 13-week cash, driver-model or collection_health scenarios without payment or posting capability. collection_health reads named cells of the bound table snapshots and computes, per entity, gross margin, expense ratio, the break-even collection rate (1 - gross margin + expense ratio) and the gap to it, trailing-twelve-month revenue, DSO, AR build-up, the implied collection rate, cash collection ratio, impairment to gross profit and provision structure, each with its formula, screening level, estimate flag and source cells; a metric missing an input is skipped and listed, never guessed. Aging inputs support invoices_alias, activity_alias, as_of, buckets and status_filter {field, include, exclude, mapping}. Mapping follows source/manager status semantics; rows, detail_rows and excluded_detail_rows retain stable keys, as_of, balances and source evidence. Current status does not prove historical status.",
+            "description": "Save receivables aging, 13-week cash, driver-model, collection_health or transaction_review scenarios without payment or posting capability. transaction_review checks source-bound transaction facts and an effective registered policy against proposed_entries. Missing inputs or mismatches block completion; results require professional review and are not certified financial amounts. collection_health reads named cells of the bound table snapshots and computes, per entity, gross margin, expense ratio, the break-even collection rate (1 - gross margin + expense ratio) and the gap to it, trailing-twelve-month revenue, DSO, AR build-up, the implied collection rate, cash collection ratio, impairment to gross profit and provision structure, each with its formula, screening level, estimate flag and source cells; a metric missing an input is skipped and listed, never guessed. Aging inputs support invoices_alias, activity_alias, as_of, buckets and status_filter {field, include, exclude, mapping}. Mapping follows source/manager status semantics; rows, detail_rows and excluded_detail_rows retain stable keys, as_of, balances and source evidence. Current status does not prove historical status.",
             "inputSchema": {
                 "type": "object",
                 "required": ["label"],
                 "properties": {
                     "context_id": context_id,
-                    "kind": {"type": "string", "enum": ["receivables_aging", "cash_13_weeks", "driver_model", "collection_health"]},
+                    "kind": {"type": "string", "enum": ["receivables_aging", "cash_13_weeks", "driver_model", "collection_health", "transaction_review"]},
                     "inputs": scenario_inputs_schema,
                     "label": text,
                     "parent_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},

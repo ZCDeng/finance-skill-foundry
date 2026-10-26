@@ -37,7 +37,7 @@ const seen = [], restrictions = [], guards = [];
 apply({on: () => {}, tools: {register: (d) => seen.push(d), restrict: (r) => restrictions.push(r),
   schemas: () => [{name: 'create'}, {name: 'univer_execute'}], guard: (g) => guards.push(g)}});
 process.stdout.write(JSON.stringify({names: seen.map((d) => d.name), restrictions,
-  guards: [guards[0]({name: 'analysis-run'}) ?? null, guards[0]({name: 'late-shell'})],
+  guards: ['analysis-run', 'late-shell'].map(name => guards.map(guard => guard({name})).find(Boolean) ?? null),
   descriptions: Object.fromEntries(seen.map((d) => [d.name, d.description]))}));
 """)
     assert result["names"] == PROFILE["tools"]
@@ -384,6 +384,7 @@ const inputs = {
  'analysis-refresh': {},
  'dataset-add': {path: '/task/uploads/actual.csv', name: '实际', meta: {currency: 'CNY'}},
  'dataset-read': {dataset: 'snapshot-1'},
+ 'dataset-display-rename': {dataset: 'snapshot-1', name: 'meeting-notes'},
  'method-resource': {skill: 'variance-analysis', resource: 'FOUNDRY.md'},
  'analysis-save': {spec: {question: '差异', sql: 'SELECT amount FROM actual', bindings: {actual: 'snapshot-1'}, requirements_id: 'req-1', result_role: 'business', scope: {period: '2026-08'}}},
  'analysis-run': {analysis: 'analysis-1'},
@@ -406,6 +407,7 @@ const inputs = {
  'month_brief': {},
  'month_brief_word': {spec: {signature: 'a'.repeat(64), lines: {risk: '先看宝鸡：风险雷达 6 分（红）。'}}},
  'finance_context_save': {spec: {bindings: {actual: 'snapshot-1'}, scopes: {actual: {ledger: 'L1', currency: 'CNY', unit: '元'}}}},
+ 'finance_profile_status': {spec: {context_id: 'context-1'}},
  'finance_map_save': {spec: {rows: [{account_code: '001', management_account: 'revenue'}]}},
  'run_metric': {spec: {context_id: 'context-1', metric: {kind: 'management_pnl'}}},
  'explain_variance': {spec: {context_id: 'context-1'}},
@@ -458,8 +460,10 @@ process.stdout.write(JSON.stringify(results));
     for row, tool in zip(rows, direct):
         assert row[:5] == ["--var", str(tmp_path / "var"), "--session", "analysis-session", aliases.get(tool, tool.replace("_", "-"))]
         assert "--task" not in row
-    assert rows[4][4:] == ["method-resource", "--skill", "variance-analysis", "--resource", "FOUNDRY.md"]
-    saved_spec = json.loads(rows[5][6])
+    calls_by_command = {row[4]: row for row in rows}
+    assert calls_by_command["method-resource"][4:] == ["method-resource", "--skill", "variance-analysis", "--resource", "FOUNDRY.md"]
+    assert calls_by_command["dataset-display-rename"][5:] == ["--dataset", "snapshot-1", "--name", "meeting-notes"]
+    saved_spec = json.loads(calls_by_command["analysis-save"][6])
     assert saved_spec["bindings"] == {"actual": "snapshot-1"}
     assert saved_spec["requirements_id"] == "req-1"
     assert saved_spec["result_role"] == "business"

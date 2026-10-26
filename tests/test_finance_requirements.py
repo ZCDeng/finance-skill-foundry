@@ -89,6 +89,71 @@ def test_omitting_all_runs_still_reports_missing_required_profit(analysis):
     assert result['items'][0]['status'] == 'pending'
 
 
+@pytest.mark.parametrize('question,label,filtered,disputed,expected', [
+    ('报告完整应收毛额，不得遗漏未结争议应收', None, True, '20', 'pending'),
+    ('报告完整应收毛额，不得遗漏未结争议应收', None, False, '20', 'answered'),
+    ('报告非争议应收余额', None, True, '20', 'answered'),
+    ('报告完整应收毛额及子集', '非争议应收余额', True, '20', 'answered'),
+    ('报告完整应收毛额', None, True, '0', 'answered'),
+])
+def test_full_receivables_requirement_does_not_count_a_filtered_population(
+    analysis, tmp_path, monkeypatch, question, label, filtered, disputed, expected,
+):
+    scope = {'ledger': 'L1', 'organization': 'O1', 'currency': 'CNY', 'unit': '元'}
+    path = tmp_path / 'invoices.json'
+    path.write_text(json.dumps([
+        {'id': identifier, 'amount': amount, 'invoice_status': status,
+         'issue_date': '2026-08-01', 'due_date': '2026-08-01', **scope}
+        for identifier, amount, status in [('active', '95', '正常'), ('disputed', disputed, '争议')]
+    ]))
+    dataset = analysis.add_dataset(path, name='invoices')
+    service = FinanceStore(analysis.task)
+    context = service.save_context({'bindings': {'invoices': dataset['id']}, 'scopes': {'invoices': scope}})
+    service.analysis_requirements_save({
+        'context_id': context['id'], 'question': question,
+        'items': [{'id': 'ar', 'metric': 'open_amount', 'requires_drilldown': False,
+                   **({'label': label} if label else {})}],
+    })
+    inputs = {'as_of': '2026-09-05', 'scope': scope}
+    if filtered:
+        inputs['status_filter'] = {'field': 'invoice_status', 'include': ['active'],
+                                   'mapping': {'active': ['正常'], 'disputed': ['争议']}}
+    scenario = service.save_scenario({'context_id': context['id'], 'kind': 'receivables_aging',
+                                     'label': '应收核验', 'inputs': inputs})
+    run = service.run_scenario({'scenario_id': scenario['id']})
+    facts = service.prepare_explanation({'run_ids': [run['id']]})['facts']
+    claims = [{'basis': 'calculation', 'run_id': run['id'], 'row': fact['row'],
+               'column': fact['column'], 'value': fact['value'], 'fact_id': fact['id']} for fact in facts]
+    result = check_requirements(analysis, {'run_ids': [run['id']], 'claims': claims})
+    assert result['items'][0]['status'] == expected
+    if expected == 'pending':
+        assert any(location['evidence'].get('not_counted_reason') == 'receivables_population_filtered'
+                   for location in result['items'][0]['locations'])
+        from foundry import finance_claim_semantics, finance_requirements
+        amount = next(fact for fact in facts if fact['column'] == 'open_amount' and fact['value'] == '95')
+        with monkeypatch.context() as previous:
+            previous.setattr(finance_requirements, '_receivables_population_filtered', lambda *args: False)
+            previous.setattr(finance_claim_semantics, 'check_claim_semantics', lambda *args, **kwargs: [])
+            previous.setattr(finance_claim_semantics, 'CLAIM_SEMANTICS_VERSION', 0, raising=False)
+            historical = service.save_explanation_draft({
+                'run_ids': [run['id']], 'body': '完整应收毛额为{{fact:%s}}。' % amount['id'],
+            })
+            assert historical['completion']['status'] == 'complete'
+        path = analysis._object_path('drafts', historical['id'])
+        before = path.read_bytes()
+        assert analysis.draft_in_view(analysis.get_draft(historical['id']), None)['quality']['status'] == 'needs_attention'
+        assert analysis.completion_in_view(historical['completion'], None)['status'] != 'complete'
+        assert path.read_bytes() == before
+        full_scenario = service.save_scenario({'context_id': context['id'], 'kind': 'receivables_aging',
+            'label': '完整应收核验', 'inputs': {'as_of': '2026-09-05', 'scope': scope}})
+        full_run = service.run_scenario({'scenario_id': full_scenario['id']})
+        full_facts = service.prepare_explanation({'run_ids': [full_run['id']]})['facts']
+        full_claims = [{'basis': 'calculation', 'run_id': full_run['id'], 'row': fact['row'],
+                       'column': fact['column'], 'value': fact['value'], 'fact_id': fact['id']} for fact in full_facts]
+        complete = check_requirements(analysis, {'run_ids': [run['id'], full_run['id']], 'claims': claims + full_claims})
+        assert complete['items'][0]['status'] == 'answered'
+
+
 def test_removed_item_preserves_original_obligation(analysis):
     first = save_requirements(analysis, spec())
     second = save_requirements(analysis, spec(parent_id=first['id'], items=[], change_reason='经理改为只核对范围'))
@@ -565,6 +630,28 @@ def test_ratio_metric_key_pin_without_declared_scenarios_still_requires_ratio_va
             if fixup['code'] == 'add_calculation_claim'] == [(1, 'value')]
 
 
+@pytest.mark.parametrize("unit", ["比率", "ratio", "%", "pct", "元", "百分点", None])
+def test_pinned_ratio_accepts_declared_rate_unit_without_fabricated_scenario(analysis, unit):
+    requirement = save_requirements(analysis, spec(
+        items=[{"id": "collection", "metric": "ratio", "dimensions": {"metric_key": "collection_rate_current"}}],
+    ))
+    run = _run(analysis, engine="python", result={
+        "columns": ["metric_key", "value", "unit"],
+        "rows": [{"metric_key": "collection_rate_current", "value": "0.9", "unit": unit},
+                 {"metric_key": "collection_rate_total", "value": "0.5", "unit": unit}],
+    })
+    result = check_requirements(analysis, {
+        "requirements_id": requirement["id"], "run_ids": [run["id"]],
+        "claims": [_claim(run, row=0, column="value", value="0.9")],
+    })
+    assert result["items"][0]["status"] == ("answered" if unit in {"比率", "ratio", "%", "pct"} else "pending")
+    unrelated = check_requirements(analysis, {
+        "requirements_id": requirement["id"], "run_ids": [run["id"]],
+        "claims": [_claim(run, row=1, column="value", value="0.5")],
+    })
+    assert unrelated["items"][0]["status"] == "pending"
+
+
 def test_required_scenarios_are_deduped_and_must_be_non_empty_strings(analysis):
     requirement = save_requirements(analysis, spec(
         items=[{'id': 'profit', 'metric': 'profit', 'scenarios': [' actual ', 'budget', 'actual']}],
@@ -730,22 +817,22 @@ def test_source_scope_matches_source_side_without_requiring_baseline(analysis):
     save_requirements(analysis, spec(scope={'source': {'source_id': 'trial-balance',
                                                        'ledger': 'L1',
                                                        'period': '2026-09'}},
-                                     items=[{'id': 'custom_margin',
-                                             'metric': 'custom_margin',
+                                     items=[{'id': 'custom_margin_ratio',
+                                             'metric': 'custom_margin_ratio',
                                              'requires_drilldown': False}]))
     source_run = _run(analysis, id_suffix='source', finance_scope={
         'source': {'source_id': 'trial-balance', 'ledger': 'L1', 'period': '2026-09'},
     }, result={
         'method': 'sql',
         'columns': ['metric', 'value'],
-        'rows': [{'metric': 'custom_margin', 'value': '0.42'}],
+        'rows': [{'metric': 'custom_margin_ratio', 'value': '0.42'}],
     })
     wrong_source = _run(analysis, id_suffix='wrong-source', finance_scope={
         'source': {'source_id': 'trial-balance', 'ledger': 'L1', 'period': '2026-08'},
     }, result={
         'method': 'sql',
         'columns': ['metric', 'value'],
-        'rows': [{'metric': 'custom_margin', 'value': '0.42'}],
+        'rows': [{'metric': 'custom_margin_ratio', 'value': '0.42'}],
     })
 
     passed = check_requirements(analysis, {'run_ids': [source_run['id']],
@@ -779,12 +866,12 @@ def test_bindings_allow_single_alias_but_reject_mixed_multi_binding(analysis):
 
 def test_sql_unsupported_does_not_claim_finance_closure(analysis):
     save_requirements(analysis, spec(items=[
-        {'id': 'custom_margin', 'metric': 'custom_margin', 'requires_drilldown': False},
+        {'id': 'custom_margin_ratio', 'metric': 'custom_margin_ratio', 'requires_drilldown': False},
     ]))
     run = _run(analysis, result={
         'method': 'sql',
         'columns': ['metric', 'value'],
-        'rows': [{'metric': 'custom_margin', 'value': '0.42'}],
+        'rows': [{'metric': 'custom_margin_ratio', 'value': '0.42'}],
     })
 
     result = check_requirements(analysis, {'run_ids': [run['id']],
@@ -1525,6 +1612,60 @@ def test_revenue_price_quantity_requirement_matches_real_service_f11_shape(tmp_p
     assert {location['column'] for location in result['items'][0]['locations']} == {
         'total_variance', 'quantity_contribution', 'price_contribution', 'interaction'
     }
+
+
+@pytest.mark.parametrize('metric', ['revenue', 'price_quantity'])
+@pytest.mark.parametrize('method', ['quantity_then_price', 'base_weights_with_interaction'])
+def test_quantity_price_without_amount_has_executable_path_and_closes_source_chain(tmp_path, metric, method):
+    task = TaskStore(tmp_path / 'var').create(title='无金额列的数量价格来源')
+    service = FinanceStore(task)
+    path = tmp_path / 'quantity-price.json'
+    path.write_text(json.dumps([
+        {'scenario': 'budget', 'product': '商品B', 'quantity': '20', 'price': '5'},
+        {'scenario': 'actual', 'product': '商品B', 'quantity': '18', 'price': '7'},
+    ]), encoding='utf-8')
+    dataset = service.analysis.add_dataset(path, name='quantity-price')
+    scope = {'ledger': 'commerce', 'organization': '电商部', 'period': '2026-08',
+             'currency': 'CNY', 'unit': '元'}
+    context = service.save_context({'bindings': {'pq': dataset['id']}, 'scopes': {'pq': scope}})
+    requirement = save_requirements(service.analysis, spec(
+        question='商品B收入量价拆分并核查每个贡献的来源', scope=scope, bindings={'pq': dataset['id']},
+        items=[{'id': 'pq', 'metric': metric, 'dimensions': {'method': method, 'product': '商品B'},
+                'requires_drilldown': True}],
+    ))
+    pending = check_requirements(service.analysis, {'requirements_id': requirement['id'], 'claims': [], 'run_ids': []})
+    paths = pending['items'][0]['evidence_paths']
+    assert any(path['path'] == 'price_quantity_bridge' for path in paths['accepted']), paths
+    assert not any('bindings_without_engine_rows' in path['blockers'] for path in paths['blocked']), paths
+    assert pending['coverage']['status'] == 'needs_attention'
+
+    # A general ledger amount path must still reject this source: only the native quantity-price reader can use it.
+    from foundry.finance_requirements import _evidence_environment, _evidence_paths
+    pnl_paths = _evidence_paths({'metric': 'profit'}, _evidence_environment(service.analysis, requirement))
+    assert any('bindings_without_engine_rows' in path['blockers'] for path in pnl_paths['blocked'])
+
+    run = service.explain_variance({'context_id': context['id'], 'kind': 'price_quantity', 'method': method})
+    assert run['execution_status'] == 'succeeded'
+    assert run['result']['rows'][0]['total_variance'] == '26'
+    claimed = {'requirements_id': requirement['id'], 'claims': _pq_claims(run), 'run_ids': [run['id']]}
+    partial = check_requirements(service.analysis, claimed)
+    assert partial['coverage']['status'] == 'pass'
+    assert partial['provenance']['status'] == 'needs_attention'
+    for location in partial['items'][0]['locations']:
+        service.drilldown_fact({key: location[key] for key in ('run_id', 'row', 'column')})
+    checked = check_requirements(service.analysis, claimed)
+    assert checked['coverage']['status'] == 'pass'
+    assert checked['provenance']['status'] == 'pass'
+    assert checked['items'][0].get('fixups', []) == []
+    draft = service.save_explanation_draft({
+        'body': '量价贡献见计算依据；业务原因需另行核实。',
+        'requirements_id': requirement['id'], 'run_ids': [run['id']],
+    })
+    assert draft['explanation_check']['status'] == 'pass', draft['explanation_check']['issues']
+    assert draft['quality']['requirements']['original_requirements_completed'] is True
+    assert draft['completion']['status'] == 'complete'
+    assert draft['completion']['original_requirements_completed'] is True
+
 
 def test_price_quantity_amount_requirement_with_explicit_method_matches_f11_shape(analysis):
     requirement = _require_pq(analysis, method='quantity_then_price', product='商品B')
@@ -2276,11 +2417,20 @@ def test_unclaimed_valid_profit_bridge_returns_claim_fixup_without_passing(analy
     assert claim_fixup['fact_id']
 
 
-def test_source_fixup_flows_to_completion_action_without_marking_complete(analysis):
+def test_source_fixup_flows_to_completion_action_without_marking_complete(tmp_path):
     from foundry.finance_completion import record_completion
 
-    save_requirements(analysis, spec())
-    run = _run(analysis)
+    service, context, _ = _finance_service_from_rows(tmp_path, {
+        scenario: _control_rows([(scenario, account, amount) for account, amount in
+                                 zip(('revenue', 'cost', 'expense'), amounts)])
+        for scenario, amounts in (('actual', ('120', '70', '20')), ('budget', ('100', '60', '15')))
+    }, {scenario: {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09',
+                   'currency': 'CNY', 'unit': '万元', 'scenario': scenario}
+        for scenario in ('actual', 'budget')}, title='来源修复指引')
+    analysis = service.analysis
+    requirement = service.analysis_requirements_save({**spec(), 'context_id': context['id']})
+    assert requirement['semantic_fingerprint']
+    run = service.explain_variance({'context_id': context['id']})
     quality = augment_quality(
         analysis,
         {'run_ids': [run['id']], 'claims': [_claim(run)]},
@@ -2306,6 +2456,7 @@ def test_source_fixup_flows_to_completion_action_without_marking_complete(analys
 
     assert completion['status'] == 'repair_available'
     assert completion['repair_allowed'] is True
+    assert completion['requirements_semantic_fingerprint'] == requirement['semantic_fingerprint']
     action = next(action for action in completion['actions'] if action['code'] == 'requested_source_missing')
     assert action['fixups'] == [source_fixup]
 

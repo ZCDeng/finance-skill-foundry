@@ -122,8 +122,11 @@ class Reference:
         context = self.manager.save_context({
             "name": "华宸物业 2026 年 8 月月结",
             "bindings": {"kpi": tables["01·核心指标看板"], "city": tables["11·城市公司明细表"]},
-            "scopes": {alias: {"period": PERIOD, "organization": COMPANY, "unit": UNIT, "currency": CURRENCY}
-                       for alias in ("kpi", "city")},
+            "scopes": {
+                "kpi": {"period": PERIOD, "organization": COMPANY, "unit": UNIT, "currency": CURRENCY},
+                # City rows retain their own organizations; the sheet is not a group-only source.
+                "city": {"period": PERIOD, "unit": UNIT, "currency": CURRENCY},
+            },
         })
         self.manager.analysis_requirements_save({
             "context_id": context["id"], "question": QUESTION, "items": [],

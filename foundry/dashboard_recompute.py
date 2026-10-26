@@ -226,7 +226,7 @@ def recipe_of(source, run: dict, *, elsewhere: bool) -> dict:
             raise NotRerun("这次计算用了科目映射，映射在原任务里，带不过来")
         recipe = {
             "engine": "finance", "operation": revision["operation"], "spec": spec, "revision_id": revision["id"],
-            "context": {key: context.get(key) for key in ("id", "name", "scopes", "policies", "account_map_id")},
+            "context": {key: context.get(key) for key in ("id", "name", "scopes", "policies", "account_map_id", "reporting_profile")},
             "bindings": dict(context["bindings"]),
         }
         if revision["operation"] == "scenario":
@@ -363,6 +363,7 @@ def run_again(target, recipe: dict, bindings: dict[str, str], move: tuple[str, s
         name = f"{name}（按 {move[1] if move else '新资料'} 重算）"[:200]
         saved = target.save_context({
             "name": name, "bindings": bindings, "scopes": scopes, "policies": context.get("policies") or {},
+            **({"reporting_profile": context["reporting_profile"]} if context.get("reporting_profile") else {}),
             **({} if elsewhere else {"account_map_id": context.get("account_map_id"), "parent_id": context["id"]}),
         })
         spec = dict(recipe["spec"])

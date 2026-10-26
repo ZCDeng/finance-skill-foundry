@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -86,7 +87,17 @@ def install_presets(dsh_home: Path) -> list[Path]:
     carried over deliberately, and a half-updated preset in the home is worse
     than a stale one.
     """
+    def make_target_writable(target: Path) -> None:
+        # Never traverse a linked target or chmod any link's referent.
+        if target.is_symlink():
+            return
+        for copied in [target, *target.rglob("*")]:
+            if not copied.is_symlink():
+                copied.chmod(copied.stat().st_mode | stat.S_IWUSR, follow_symlinks=False)
+
     root = Path(dsh_home) / ".agent-presets"
+    if root.is_symlink():
+        raise LockRefused(f"preset root symlink is refused: {root}")
     root.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     for preset_id in preset_ids():
@@ -94,8 +105,14 @@ def install_presets(dsh_home: Path) -> list[Path]:
         if not (source / "agent.cordis.yml").is_file():
             raise FoundryError(f"preset {preset_id} has no agent.cordis.yml at {source}")
         target = root / preset_id
+        assert_no_escaping_symlink(target, "preset target")
+        if target.exists():
+            make_target_writable(target)
         shutil.rmtree(target, ignore_errors=True)
         shutil.copytree(source, target)
+        # Frozen resources are read-only; the installed copy must support both
+        # placeholder replacement and removal of nested directories on reinstall.
+        make_target_writable(target)
         preset = target / "agent.cordis.yml"
         text = preset.read_text(encoding="utf-8")
         if METHOD_SKILL_DIR_TOKEN in text:

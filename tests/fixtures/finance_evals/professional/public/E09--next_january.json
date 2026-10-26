@@ -1,0 +1,25 @@
+{
+  "case_id": "E09--next_january",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "prior_balance",
+      "value": "90"
+    },
+    {
+      "name": "monthly_amortization",
+      "value": "10"
+    },
+    {
+      "name": "cutoff",
+      "value": "2027-01-31"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "接续下一月，不改历史实际。"
+}

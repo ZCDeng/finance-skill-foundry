@@ -1561,9 +1561,18 @@ def test_a_legacy_drilldown_item_is_not_handed_to_the_manager_while_the_assistan
 
     assert 'awaiting_manager' not in item
     assert 'revise_requirement_dimension' in [fixup['code'] for fixup in item['fixups']]
-    assert completion['status'] == 'repair_available'
+    assert not record.get('semantic_fingerprint')
+    assert completion['status'] == 'needs_requirements'
     assert completion['repair_allowed'] is True
     assert '助手不要重复计算' not in action['message']
+    assert any(action['code'] == 'requirements_fingerprint_unverified' for action in completion['actions'])
+    revised = FinanceStore(analysis.task).analysis_requirements_save({
+        'parent_id': record['id'], 'question': record['question'], 'scope': record['scope'],
+        'bindings': record['bindings'], 'items': record['items'],
+    })
+    assert revised['parent_id'] == record['id']
+    assert revised['semantic_fingerprint']
+    assert revised['items'][0]['dimensions'] == {}
 
 
 # --- review fixes, round 3 (PR #23) -----------------------------------------------------------------
@@ -1672,12 +1681,18 @@ def test_a_draft_that_policy_5_completed_on_an_ungated_name_is_checked_again(ana
     assert again['completion']['original_requirements_completed'] is False
 
 
-def test_a_finance_engine_cell_answers_an_amount_outside_revenue_profit_cost_expense(analysis):
-    """Script values never answer an amount; the engine's own output of a non-P&L-line amount still does.
+def test_a_finance_engine_cell_answers_an_amount_outside_revenue_profit_cost_expense(analysis, tmp_path):
+    """Script values never answer an amount; a source-backed non-P&L engine amount does.
     revenue/profit/cost/expense keep the literal closure rule (see the engine-output test above)."""
     save_requirements(analysis, spec(items=[{'id': 'income', 'metric': 'other_income', 'requires_drilldown': False}]))
-    rows = {'columns': ['metric_key', 'value'], 'rows': [{'metric_key': 'other_income', 'value': '12'}]}
-    engine = _run(analysis, id_suffix='engine-other-income', result=rows)
+    path = tmp_path / 'other_income.json'
+    path.write_text('[{"amount":"12"}]')
+    dataset = analysis.add_dataset(path, name='其他收益来源')
+    rows = {'columns': ['metric_key', 'value'], 'rows': [{'metric_key': 'other_income', 'value': '12',
+            'source_rows': [{'dataset_id': dataset['id'], 'row_index': 1, 'source_row': 1}]}]}
+    engine = _run(analysis, id_suffix='engine-other-income', result=rows,
+                  bindings={'actual': dataset['id']}, input_hashes={'actual': dataset['data_hash']},
+                  source_hashes={'actual': dataset['source_hash']})
     script = _run(analysis, id_suffix='script-other-income', engine='python', result=rows)
 
     def check(run):

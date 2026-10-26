@@ -1,0 +1,25 @@
+{
+  "allowed_paths": [
+    "相关指纹改变使旧确认、差异接受和回执失效；重新确认前月结不能绿色；原归档保留"
+  ],
+  "author": "Codex development fixture author",
+  "case_id": "E27--basis_change",
+  "critical_dimensions": [
+    "numeric_basis",
+    "recognition_basis",
+    "scope_period",
+    "authority_completion"
+  ],
+  "derivation": "Decimal arithmetic grammar for numeric checks; literal reviewed accounting identities and stated policy for behavioral checks",
+  "expected_trigger": "required",
+  "human_review_status": "not_reviewed",
+  "knowledge_status": "development_visible_not_blind",
+  "numeric_checks": [],
+  "paired_control_id": null,
+  "required_behaviors": [
+    "相关指纹改变使旧确认、差异接受和回执失效；重新确认前月结不能绿色；原归档保留"
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "second_human_reviewer": null,
+  "source": "reviewed E01-E32 specification; synthetic stated business facts; no production output used as truth"
+}

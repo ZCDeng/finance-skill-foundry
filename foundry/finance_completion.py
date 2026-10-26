@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from foundry.analysis import _hash, _new
+from foundry.errors import FoundryError
 from foundry.locking import exclusive
 
 MAX_REPAIRS = 2
@@ -25,11 +26,16 @@ MAX_REPAIRS = 2
 # 13: a requirement counts only the runs the draft cites and runs on no file but the requirement's and the cited
 #     runs' files: one that also read other files is neither named nor counted (finance_requirements._within_files),
 #     so the check reads the same for every reader of the draft.
-COMPLETION_POLICY_VERSION = 13
+# 14: source-backed engine amounts and captured professional rule identities.
+# 15: completion requires a verified source-bound requirements fingerprint, including current reads of old receipts.
+# 16: source-replayed undefined collection rates stop repairs without numerical completion credit.
+COMPLETION_POLICY_VERSION = 16
 # Issues that may remain while the draft waits for the manager (estimates, declared gaps, structure).
-MANAGER_WAIT_ISSUES = {'requirement_unanswered', 'requirement_estimated', 'requested_source_missing'}
+MANAGER_WAIT_ISSUES = {'requirement_unanswered', 'requirement_estimated', 'requested_source_missing',
+                       'transaction_review_requires_professional_review'}
 COVERAGE_COMPLETE = {'pass', 'pass_with_accepted_estimates'}
 MANAGER_REASON_TEXT = {
+    'transaction_review_required': '交易确认检查待可信经理记录专业复核决定',
     'estimate_requires_acceptance': '估算组合待经理确认是否按估算列示',
     'unavailable_declared': '声明为资料缺失的组合待经理确认',
     'estimate_factor_not_reproducible': '估算系数无法由归档单元格复算，需经理决定口径',
@@ -38,6 +44,45 @@ MANAGER_REASON_TEXT = {
                                      '需经理改绑到引擎能读的明细表或改用其他依据：引擎只读列名为 amount、金额、发生额或本期金额的金额列，'
                                      '或列名恰为 revenue、cost、expense 的列；营业收入、营业成本、期间费用这类中文列名读不到'),
 }
+
+
+def _requirements_fingerprint_issue():
+    return {'code': 'requirements_fingerprint_unverified',
+            'message': ('当前需求的来源及语义指纹无法核验。请绑定已授权且可读取的实际数据快照（bindings 或 context_id），'
+                        '保存有效需求的新版本并确认 semantic_fingerprint，再按新版本重新运行计算并保存解释。'
+                        '资料尚未提供时保留待输入说明，不得捏造来源绑定或标记完成。')}
+
+
+def receipt_fingerprint_view(analysis, receipt, allowed=None):
+    """Recheck completed receipts against the reader's verified proof without rewriting historical bytes.
+
+    Session views have already applied their authority and lineage transformations before this hook. Compare with
+    that same view's fingerprint, not the manager's stored digest, and expose no source identifiers on failure.
+    """
+    if receipt and receipt.get('stop_reason') == 'verified_undefined_result':
+        from foundry.finance_non_numeric_outcomes import undefined_receipt_view
+        return undefined_receipt_view(analysis, receipt, allowed)
+    if not receipt or receipt.get('status') != 'complete' or not receipt.get('requirements_id'):
+        return receipt
+    from foundry.finance_requirements import requirements_readable
+
+    try:
+        requirement = analysis._get('requirements', receipt['requirements_id'])
+        if not requirement.get('items'):
+            return receipt
+        fingerprint = (analysis.fingerprint_in_view(requirement, allowed)
+                       if requirements_readable(requirement, allowed) else None)
+    except (FoundryError, OSError, KeyError, TypeError, ValueError):
+        fingerprint = None
+    if fingerprint and fingerprint == receipt.get('requirements_semantic_fingerprint'):
+        return receipt
+    issue = _requirements_fingerprint_issue()
+    return {**{key: value for key, value in receipt.items() if key != '_integrity_hash'},
+            'historical_status': receipt.get('historical_status', receipt['status']),
+            'current_completion_policy_version': COMPLETION_POLICY_VERSION,
+            'status': 'needs_requirements', 'response_status': 'needs_review',
+            'original_requirements_completed': False, 'repair_allowed': False,
+            'stop_reason': issue['code'], 'actions': [*(receipt.get('actions') or []), issue]}
 
 
 def _dropped_hierarchy_action(item):
@@ -105,7 +150,8 @@ def record_completion(analysis, draft, quality, *, allowed=None, cache=None):
         # A reader who reads the version with another fingerprint (a session the one it reads, the manager the stored
         # one) chains the same draft and check otherwise: its replay is answered with the receipt already filed for
         # them, keyed under that receipt's own chain.
-        same = same or next((row for row in receipts if row.get('draft_id') == draft['id']
+        same = same or next((row for row in receipts if assessed['semantic_fingerprint']
+                             and row.get('draft_id') == draft['id']
                              and row.get('chain_key') != assessed['chain_key']
                              and row.get('input_key') == completion_input_key(row.get('chain_key'), draft, quality,
                                                                               COMPLETION_POLICY_VERSION)), None)
@@ -158,13 +204,17 @@ def assess_completion(analysis, draft, quality, *, allowed=None, cache=None, sup
     awaiting_manager = (
         not awaiting_input and bool(waiting) and remaining <= (waiting.keys() | gaps.keys())
         and not requirements.get('scope_changed') and not stale_runs
-        and quality.get('checks', {}).get('numbers', {}).get('status') == 'pass'
+        and (quality.get('checks', {}).get('numbers', {}).get('status') == 'pass'
+             or all(issue.get('code') == 'transaction_review_requires_professional_review'
+                    for issue in quality.get('issues', [])))
         and all(issue.get('code') in MANAGER_WAIT_ISSUES and issue.get('requirement_item_id') in remaining
                 for issue in issues)
     )
     manager_reasons = sorted({reason for reasons in waiting.values() for reason in reasons})
     if awaiting_manager:
-        issues.extend({'code': 'awaiting_manager', 'requirement_item_id': key, 'reasons': waiting[key],
+        issues.extend({'code': ('transaction_review_requires_professional_review'
+                                 if waiting[key] == ['transaction_review_required'] else 'awaiting_manager'),
+                       'requirement_item_id': key, 'reasons': waiting[key],
                        'message': '剩余事项需要经理处理：'
                        + '、'.join(MANAGER_REASON_TEXT.get(reason, reason) for reason in waiting[key])
                        + '。助手不再自动修补，本轮答复如实说明这些待经理处理的事项。'}
@@ -172,6 +222,12 @@ def assess_completion(analysis, draft, quality, *, allowed=None, cache=None, sup
     if stale_runs:
         issues.append({'code': 'requirements_run_outdated', 'run_ids': sorted(stale_runs),
                        'message': '这些运行未绑定当前要求，且无法证明语义兼容。请按当前要求重新运行受影响的计算，再保存解释；已有草稿仍可编辑。'})
+    if requirement and requirement.get('items') and not semantic_fingerprint:
+        issues.append(_requirements_fingerprint_issue())
+    from foundry.finance_non_numeric_outcomes import verified_undefined_outcomes
+    non_numeric = verified_undefined_outcomes(
+        analysis, draft, quality, requirement, requirements, runs,
+        semantic_fingerprint=semantic_fingerprint, stale_runs=stale_runs, allowed=allowed)
     # A new run or draft must not reset the repair budget for the same question.
     # A deliberate requirements revision starts a new completion scope.
     chain_key = completion_chain_key(semantic_fingerprint, requirement_id, run_hashes)
@@ -181,6 +237,7 @@ def assess_completion(analysis, draft, quality, *, allowed=None, cache=None, sup
             'semantic_fingerprint': semantic_fingerprint, 'run_hashes': run_hashes, 'reused_runs': reused_runs,
             'stale_runs': stale_runs, 'issues': issues, 'awaiting_input': awaiting_input,
             'awaiting_manager': awaiting_manager, 'manager_reasons': manager_reasons, 'chain_key': chain_key,
+            'verified_non_numeric_outcomes': non_numeric,
             'issue_fingerprint': issue_fingerprint, 'input_key': input_key}
 
 
@@ -213,21 +270,28 @@ def receipt_fields(analysis, assessed, history):
     awaiting_input, manager_reasons = assessed['awaiting_input'], assessed['manager_reasons']
     issue_fingerprint = assessed['issue_fingerprint']
     repairs = min(len(history), MAX_REPAIRS)
+    requirement = analysis._get('requirements', requirement_id) if requirement_id else {}
+    invalid_fingerprint = bool(requirement.get('items')
+                               and not assessed['semantic_fingerprint'])
     unassessed = (not requirement_id
-                  or not analysis._get('requirements', requirement_id).get('items')
+                  or not requirement.get('items')
                   or requirements.get('coverage', {}).get('status') in {None, 'not_assessed'})
-    complete = (quality['status'] == 'pass' and not unassessed
+    complete = (quality['status'] == 'pass' and not unassessed and not invalid_fingerprint
                 and requirements.get('coverage', {}).get('status') in COVERAGE_COMPLETE
                 and requirements.get('provenance', {}).get('status') in COVERAGE_COMPLETE
                 and not stale_runs)
     stalled = bool(history) and history[-1].get('issue_fingerprint') == issue_fingerprint and not complete
     exhausted = len(history) >= MAX_REPAIRS
+    undefined = bool(assessed.get('verified_non_numeric_outcomes')) and not unassessed and not invalid_fingerprint
     status = ('complete' if complete else 'awaiting_input' if awaiting_input
               else 'awaiting_manager' if assessed['awaiting_manager'] and not unassessed
-              else 'needs_requirements' if unassessed else 'needs_review' if stalled or exhausted else 'repair_available')
+              else 'needs_requirements' if unassessed or invalid_fingerprint
+              else 'needs_review' if undefined
+              else 'needs_review' if stalled or exhausted else 'repair_available')
     stop_reason = ('complete' if complete else 'verified_input_gap' if awaiting_input
                    else ('estimate_requires_acceptance' if 'estimate_requires_acceptance' in manager_reasons
                          else 'manager_decision_required') if status == 'awaiting_manager'
+                   else 'verified_undefined_result' if undefined
                    else 'no_progress' if stalled else 'repair_budget_exhausted' if exhausted else None)
     actions = [{'code': issue.get('code'), 'message': issue.get('message'),
                 **({'requirement_item_id': issue['requirement_item_id']} if issue.get('requirement_item_id') else {}),
@@ -236,6 +300,9 @@ def receipt_fields(analysis, assessed, history):
                for issue in assessed['issues']]
     if unassessed:
         actions.insert(0, {'code': 'requirements_not_defined', 'message': '请先登记用户问题、分析范围和必答指标，再复核这份文稿。'})
+    if undefined:
+        actions.append({'code': 'verified_undefined_result',
+                        'message': '已从完整来源构成复算确认收缴率分母为零、结果未定义；原数值要求未完成，停止自动修补并交专业复核。'})
     # A level the user asked for that a later version dropped: not a repair (the level is not a row field),
     # but the reply must say the original requirement is not complete (original_requirements_completed).
     actions.extend(_dropped_hierarchy_action(item) for item in requirements.get('items', [])
@@ -246,10 +313,11 @@ def receipt_fields(analysis, assessed, history):
                 reused_run_ids=sorted(assessed['reused_runs']), run_hashes=assessed['run_hashes'],
                 chain_key=assessed['chain_key'], input_key=assessed['input_key'], issue_fingerprint=issue_fingerprint,
                 status=status, repair_attempts=repairs, max_repairs=MAX_REPAIRS,
-                response_status=('ended_with_limitations' if awaiting_input or status == 'awaiting_manager'
+                response_status=('ended_with_limitations' if awaiting_input or status == 'awaiting_manager' or undefined
                                  else 'complete' if complete else 'needs_review'),
                 original_requirements_completed=bool(requirements.get('original_requirements_completed')) and complete,
                 repair_allowed=status in {'repair_available','needs_requirements'} and not exhausted and not stalled,
                 stop_reason=stop_reason,
+                **({'verified_non_numeric_outcomes': assessed['verified_non_numeric_outcomes']} if undefined else {}),
                 **({'manager_reasons': manager_reasons} if status == 'awaiting_manager' else {}),
                 actions=actions, checks=quality.get('checks', {}))

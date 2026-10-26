@@ -1,0 +1,62 @@
+{
+  "schema_version": "finance-independent-three-statement-v1",
+  "case_id": "SUP-E18-01--management-closed",
+  "nature": "explicit hypothetical synthetic forecast records; not actual occurred transactions",
+  "opening_receivable": {
+    "receivable_id": "AR-202609-001",
+    "contract_id": "S-OLD-01",
+    "customer_id": "C-OLD-01",
+    "origin_period": "2026-09",
+    "opening_amount": "80",
+    "prior_performance_satisfied": true,
+    "prior_revenue_recognized": true,
+    "other_price_interest_impairment_fx_tax_effects": "0"
+  },
+  "base_current_service": {
+    "contract_id": "S-CUR-01",
+    "customer_id": "C-CUR-01",
+    "performance_period": "2026-10",
+    "performed_in_forecast": true,
+    "revenue": "210",
+    "receipts": "130"
+  },
+  "cash_receipt_allocations": [
+    {
+      "allocation_id": "RCPT-OLD-01",
+      "receivable_id": "AR-202609-001",
+      "amount": "50",
+      "period": "2026-10",
+      "recognition": "settlement of identified prior-period receivable; no new performance or revenue"
+    },
+    {
+      "allocation_id": "RCPT-CUR-01",
+      "contract_id": "S-CUR-01",
+      "amount": "130",
+      "period": "2026-10",
+      "recognition": "collection against the modeled current-period performed service"
+    }
+  ],
+  "supplier_allocation": {
+    "opening_operating_ap_paid": "70",
+    "current_operating_ap_paid": "5",
+    "current_expense_recognized_through_operating_ap": "95",
+    "capital_payables_included": false,
+    "depreciation_included": false
+  },
+  "incremental_change_vs_base": {
+    "old_ar_receipts_delta": "0",
+    "new_fulfilled_cash_service_revenue": "0",
+    "new_fulfilled_cash_service_receipt": "0",
+    "incremental_expense": "0",
+    "incremental_depreciation": "0",
+    "incremental_tax": "0"
+  },
+  "additional_sale": null,
+  "scope": {
+    "organization": "Supplement Fixture Co",
+    "ledger": "supplement-ledger-01",
+    "scenario": "management-forecast",
+    "currency": "CNY",
+    "unit": "元"
+  }
+}

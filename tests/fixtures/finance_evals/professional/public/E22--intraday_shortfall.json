@@ -1,0 +1,29 @@
+{
+  "case_id": "E22--intraday_shortfall",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "opening_available",
+      "value": "10"
+    },
+    {
+      "name": "monday_payment",
+      "value": "30"
+    },
+    {
+      "name": "friday_receipt",
+      "value": "40"
+    },
+    {
+      "name": "credit",
+      "value": "0"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "评估本周逐日资金是否能支付。"
+}

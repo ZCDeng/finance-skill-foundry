@@ -14,9 +14,17 @@ from foundry.finance_files import FinanceFiles
 from foundry.source_refresh import SourceRefreshService, SourceScope
 
 OPERATIONS = {
+    "finance-transaction-review-prepare": "finance_transaction_review_prepare",
+    "finance-transaction-review-save": "finance_transaction_review_save",
+    "finance-transaction-review-revoke": "finance_transaction_review_revoke",
     "analysis-requirements-save": "analysis_requirements_save",
     "analysis-requirements-list": "analysis_requirements_list",
     "finance-context-save": "save_context",
+    "finance-profile-confirm": "finance_profile_confirm",
+    "finance-profile-revoke": "finance_profile_revoke",
+    "finance-profile-status": "finance_profile_status",
+    "finance-rule-epoch-advance": "finance_rule_epoch_advance",
+    "finance-rule-epoch-list": "finance_rule_epoch_list",
     "finance-map-save": "save_account_map",
     "finance-metric-save": "save_metric_definition",
     "run-metric": "run_metric",
@@ -93,9 +101,9 @@ LIST_COMMANDS = {
 }
 COMPLETION_COMMANDS = {"finance-completion-begin", "finance-completion-status", "finance-completion-stop"}
 COMMANDS = {*LIST_COMMANDS, *OPERATIONS, *FILE_OPERATIONS, *COMPLETION_COMMANDS, "finance-source-refresh", "source-locator-preview-file",
-            "dashboard-carry", "dashboard-snapshot"}
+            "dashboard-carry", "dashboard-snapshot", "finance-delivery-verify", "finance-public-text-verify"}
 # A whole report document (or a board laid out as a page) can outgrow an argv; these also read --spec-file.
-SPEC_FILE_COMMANDS = {"save-explanation-draft", "report-review", "dashboard-snapshot"}
+SPEC_FILE_COMMANDS = {"save-explanation-draft", "report-review", "dashboard-snapshot", "finance-delivery-verify", "finance-public-text-verify"}
 
 
 def add_parsers(sub):
@@ -174,7 +182,13 @@ def dispatch(args):
     service = FinanceStore(context.task, snapshot_ids=context.snapshot_ids if context.session_id else None,
                            session_id=context.session_id, context_revision=context.context_revision,
                            actor=getattr(args, "actor", "") or None)
-    if args.cmd == "finance-completion-recoveries":
+    if args.cmd == "finance-public-text-verify":
+        from foundry.finance_delivery_verification import verify_public_text
+        result = verify_public_text(service, _json_spec(args, "public text verification spec"))
+    elif args.cmd == "finance-delivery-verify":
+        from foundry.finance_delivery_verification import verify_delivery
+        result = verify_delivery(service, _json_spec(args, "delivery verification spec"))
+    elif args.cmd == "finance-completion-recoveries":
         if context.session_id:
             raise FoundryError("completion recovery requires the task editor")
         from foundry.finance_completion_operations import list_completion_recoveries

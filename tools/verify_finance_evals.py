@@ -12,6 +12,7 @@ import argparse
 from decimal import Decimal, InvalidOperation, localcontext
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -138,31 +139,96 @@ def _clean_env(extra: dict[str, str]) -> dict[str, str]:
     return env
 
 
-def _stop(child: subprocess.Popen | None) -> None:
-    if child is not None and child.poll() is None:
-        os.killpg(child.pid, signal.SIGTERM)
+def _stop(child: subprocess.Popen | None, *, grace_seconds: float = 15) -> None:
+    if child is not None and grace_seconds == 0:
+        # Kill the owned group even if its leader has just exited. A successful
+        # wait on Node alone cannot prove that a tool descendant stopped.
         try:
-            child.wait(timeout=15)
-        except subprocess.TimeoutExpired:
             os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        child.wait(timeout=5)
+        return
+    if child is not None and child.poll() is None:
+        try:
+            os.killpg(child.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            child.wait(timeout=5)
+            return
+        try:
+            child.wait(timeout=grace_seconds)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
             child.wait(timeout=5)
 
 
-def _wait_report(child: subprocess.Popen, path: Path, timeout: int) -> dict[str, Any]:
+def _supervisor_timeout(child, path, observed, active, cases, expires_monotonic):
+    """Stop a blocked runtime and retain every planned identity without inventing runs."""
+    requested_at = time.time_ns() // 1_000_000
+    termination_error = None
+    try:
+        _stop(child, grace_seconds=0)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        termination_error = f"{type(error).__name__}: {error}"
+    terminated = child.poll() is not None and termination_error is None
+    row = active
+    deadline = row["deadline"]
+    row.update(completed=False, completed_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+               error=f"case {row['id']} exceeded {deadline['limit_ms'] / 1000:g}s (independent supervisor)",
+               duration_ms=deadline["limit_ms"] + max(0, time.monotonic() - expires_monotonic) * 1000)
+    deadline.update(exceeded=True, execution_ended=terminated, runtime_terminated=terminated, phase="independent_supervisor",
+                    supervisor_termination={"requested_at_epoch_ms": requested_at, "process_group": child.pid,
+                                            "returncode": child.returncode, "confirmed": terminated,
+                                            "strategy": "SIGKILL_process_group", "error": termination_error})
+    existing = {item["id"] for item in observed.get("cases", [])}
+    for seed in cases or []:
+        if seed["id"] not in existing:
+            observed.setdefault("cases", []).append({"id": seed["id"], "slot": seed.get("slot"),
+                "attempt": seed.get("attempt", 1), "task_id": seed["taskId"], "session_id": seed["sessionId"],
+                "input_sha256": seed["inputSha256"], "completed": False, "execution_status": "not_started",
+                "error": "not_started_due_to_supervisor_stop", "calls": [], "tool_events": [], "messages": []})
+    observed.update(status="completed", supervisor={"status": "terminated_after_case_deadline" if terminated else "termination_unconfirmed", "case_id": row["id"],
+        "later_cases": "not_started_due_to_supervisor_stop", "evidence_collection": "runtime_interrupted; persisted task files retained"})
+    temporary = path.with_name(path.name + ".supervisor.tmp")
+    temporary.write_text(json.dumps(observed, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
+    with path.with_name(path.name + ".supervisor.jsonl").open("a", encoding="utf-8") as sink:
+        sink.write(json.dumps({"id": row["id"], "deadline": deadline, "duration_ms": row["duration_ms"],
+                               "error": row["error"]}, ensure_ascii=False) + "\n")
+    return observed
+
+
+def _wait_report(child: subprocess.Popen, path: Path, timeout: int, *, cases=None) -> dict[str, Any]:
     deadline = time.monotonic() + timeout
+    case_deadlines = {}
     while time.monotonic() < deadline:
         if path.exists():
             try:
                 observed = json.loads(path.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 observed = None
+            if observed and observed.get("deadline_policy") == "absolute-case-v1":
+                for row in observed.get("cases", []):
+                    budget = row.get("deadline") or {}
+                    if (budget.get("schema_version") != 1 or budget.get("runtime_terminated")
+                            or (budget.get("execution_ended") and not budget.get("exceeded"))):
+                        continue
+                    key = (row["id"], budget.get("started_monotonic_ns"))
+                    if key not in case_deadlines:
+                        remaining = max(0, min(budget["limit_ms"], budget["expires_at_epoch_ms"] - time.time() * 1000))
+                        case_deadlines[key] = time.monotonic() + remaining / 1000
+                    if time.monotonic() >= case_deadlines[key]:
+                        return _supervisor_timeout(child, path, observed, row, cases, case_deadlines[key])
             if observed and observed.get("status") != "running":
                 if observed.get("status") != "completed":
                     raise RuntimeError(observed.get("error", "finance eval observation failed"))
                 return observed
         if child.poll() is not None:
             raise RuntimeError(f"harness exited with code {child.returncode}; see runtime.log")
-        time.sleep(0.25)
+        time.sleep(0.05)
     raise TimeoutError("finance eval harness timed out")
 
 
@@ -941,13 +1007,19 @@ def _r4_canonical_requirement_basis(record: dict[str, Any], datasets: dict[str, 
             periods = []
         if not isinstance(periods, list):
             raise AssertionError("r4/v3 requirements item periods must be arrays")
-        items.append({
+        canonical_item = {
             "id": item["id"],
             "metric": METRIC_ALIASES.get(item["metric"], item["metric"]),
             "dimensions": item.get("dimensions", {}),
             "periods": sorted(set(periods)),
             "requires_drilldown": item.get("requires_drilldown", False),
-        })
+        }
+        # These server-signed grain fields exist in both semantic versions.
+        # Omitting them rejects valid requirements and can hide tampered grains.
+        for key in ("organizations", "scenarios", "grain_basis"):
+            if item.get(key):
+                canonical_item[key] = sorted(set(item[key])) if key != "grain_basis" else item[key]
+        items.append(canonical_item)
     return {
         "version": SEMANTIC_VERSION,
         "question": record.get("question"),
@@ -1168,6 +1240,16 @@ def _terminal_events(observed: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _case_hard_errors(observed: dict[str, Any]) -> list[dict[str, Any]]:
     errors = []
+    budget = observed.get("deadline") or {}
+    # New observer receipts bind the original limit. Historical observations have
+    # no such receipt and keep their original interpretation when rescored.
+    if budget.get("schema_version") == 1:
+        duration, limit = observed.get("duration_ms"), budget.get("limit_ms")
+        if (budget.get("exceeded") or not isinstance(duration, (int, float))
+                or isinstance(duration, bool) or not isinstance(limit, (int, float))
+                or isinstance(limit, bool) or not math.isfinite(duration) or not math.isfinite(limit)
+                or duration < 0 or limit <= 0 or duration > limit):
+            errors.append({"source": "deadline", "error": "absolute case deadline exceeded or invalid receipt"})
     terminals = _terminal_events(observed)
     ended_normally = bool(terminals and terminals[-1].get("data", {}).get("reason", {}).get("kind") == "completed")
     observer_error = observed.get("error")
@@ -1252,7 +1334,7 @@ def _has_voucher_detail(value: Any) -> bool:
     return False
 
 
-def _score_case(foundry: Path, var: Path, case: dict[str, Any], observed: dict[str, Any], *, r4: bool = False) -> dict[str, Any]:
+def _score_case(foundry: Path, var: Path, case: dict[str, Any], observed: dict[str, Any], *, r4: bool = False, state_override: dict[str, Any] | None = None) -> dict[str, Any]:
     hard_errors = _case_hard_errors(observed)
     if hard_errors:
         raise AssertionError(f"case has hard turn/runtime errors: {hard_errors[:3]}")
@@ -1266,7 +1348,7 @@ def _score_case(foundry: Path, var: Path, case: dict[str, Any], observed: dict[s
     missing_methods = {"financial-statements", "variance-analysis"} - catalog_names
     if missing_methods:
         raise AssertionError(f"case method catalog missing required skills: {sorted(missing_methods)}")
-    state = _call(foundry, var, "analysis-state", task=case["taskId"])
+    state = json.loads(json.dumps(state_override)) if state_override is not None else _call(foundry, var, "analysis-state", task=case["taskId"])
     drilled_runs = {_call_spec(call).get("run_id") for call in observed.get("calls", [])
                     if call.get("name") == "drilldown_fact" and not call.get("isError")}
     state["runs"] = sorted(state.get("runs", []), key=lambda run: run.get("id") in drilled_runs)
@@ -1503,7 +1585,7 @@ def rescore_observation(foundry: Path, fixture: dict[str, Any], source: Path, ou
     return result
 
 
-def score_observation(foundry: Path, var: Path, cases: list[dict[str, Any]], observed: dict[str, Any], *, scoring_contract: str = SCORING_CONTRACT_R3) -> dict[str, Any]:
+def score_observation(foundry: Path, var: Path, cases: list[dict[str, Any]], observed: dict[str, Any], *, scoring_contract: str = SCORING_CONTRACT_R3, state_snapshots: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
     if scoring_contract not in {SCORING_CONTRACT_R3, SCORING_CONTRACT_R4}:
         raise AssertionError(f"unsupported scoring contract: {scoring_contract}")
     observed_by_id = {row["id"]: row for row in observed.get("cases", [])}
@@ -1515,7 +1597,10 @@ def score_observation(foundry: Path, var: Path, cases: list[dict[str, Any]], obs
             failures.append(_failure_record(case, None, "case was selected but no attempt record was observed"))
             continue
         try:
-            results.append(_score_case(foundry, var, case, row, r4=scoring_contract == SCORING_CONTRACT_R4))
+            if state_snapshots is None:
+                results.append(_score_case(foundry, var, case, row, r4=scoring_contract == SCORING_CONTRACT_R4))
+            else:
+                results.append(_score_case(foundry, var, case, row, r4=scoring_contract == SCORING_CONTRACT_R4, state_override=state_snapshots[case["taskId"]]))
         except Exception as exc:  # retain failure detail for manual review
             failures.append(_failure_record(case, row, str(exc)))
     seen = len(observed.get("cases", []))
@@ -1727,7 +1812,7 @@ def main() -> int:
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
                 )
-                observed = _wait_report(child, args.output / "session.json", args.timeout_seconds * max(1, len(seeded)) + 120)
+                observed = _wait_report(child, args.output / "session.json", args.timeout_seconds * max(1, len(seeded)) + 120, cases=seeded)
             if observed["model"] != selection:
                 raise AssertionError("actual session changed the configured model")
             _verify_method_loads(observed, manifest)

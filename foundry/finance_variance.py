@@ -185,6 +185,8 @@ def explain_variance(normalized: dict, spec: dict) -> dict:
                 {
                     **context,
                     "metric": account,
+                    "actual_scenario": actual_label,
+                    "baseline_scenario": baseline_label,
                     "actual": _text(av) if a or calculable else None,
                     "baseline": _text(bv) if b or calculable else None,
                     "actual_scope": (a or {}).get(
@@ -252,6 +254,8 @@ def explain_variance(normalized: dict, spec: dict) -> dict:
         "columns": [
             *dimensions,
             "metric",
+            "actual_scenario",
+            "baseline_scenario",
             "actual",
             "baseline",
             "amount_change",
@@ -335,6 +339,8 @@ def price_quantity_bridge(rows: list[dict], spec: dict) -> dict:
     """Compare explicitly paired product observations; never invent drivers."""
     spec = _require_spec(spec, "price/quantity variance spec")
     method = spec.get("method", "quantity_then_price")
+    if method == "volume_mix_price":
+        return _volume_mix_price_bridge(rows, spec)
     if method not in {"quantity_then_price", "base_weights_with_interaction"}:
         raise FoundryError("unknown price/quantity decomposition method")
     field_map = spec.get("field_map", {})
@@ -464,6 +470,184 @@ def price_quantity_bridge(rows: list[dict], spec: dict) -> dict:
             "baseline_filters": spec.get("baseline_filters", {}),
         },
         "interpretation": "数量与价格按声明顺序分解；算术贡献不证明业务因果。",
+    }
+
+
+_VMP_AMOUNTS = (
+    "actual", "baseline", "total_variance", "volume_contribution",
+    "mix_contribution", "price_contribution", "residual",
+    "actual_volume", "baseline_volume",
+)
+
+
+def _volume_mix_price_bridge(rows, spec):
+    """Decompose a comparable basket in the fixed volume -> mix -> price order.
+
+    A product observation must already be aggregated to quantity and weighted
+    price. Missing products, returns and incompatible units need a different
+    business model; none is manufactured by filling a missing observation.
+    """
+    field_map = spec.get("field_map", {})
+    if not isinstance(field_map, dict):
+        raise FoundryError("price/quantity field_map must be an object")
+    fields = {
+        "quantity": "quantity", "price": "price", "amount": "amount",
+        "scenario": "scenario", "product": "product", **field_map,
+    }
+    quantity_unit_field = spec.get("quantity_unit_field", "quantity_unit")
+    if any(not isinstance(value, str) or not value.strip() for value in fields.values()):
+        raise FoundryError("price/quantity field_map values must be column names")
+    if not isinstance(quantity_unit_field, str) or not quantity_unit_field.strip():
+        raise FoundryError("quantity_unit_field must be a column name")
+    dimensions = _dimensions(spec, default=["product"])
+    if not _explicit_period_comparison(spec):
+        dimensions = list(dict.fromkeys([*dimensions, "period"]))
+    dimensions = [dim for dim in dimensions if dim not in {"scenario", "product", fields["product"]}]
+    labels = {
+        "actual": spec.get("actual_scenario", "actual"),
+        "baseline": spec.get("baseline_scenario", "budget"),
+    }
+    filters = {side: _filters(spec, f"{side}_filters") for side in labels}
+    groups = defaultdict(lambda: {"actual": [], "baseline": []})
+    for side, label in labels.items():
+        for row in rows:
+            if row.get(fields["scenario"]) == label and _matches_filters(row, filters[side]):
+                groups[tuple(row.get(dim) for dim in dimensions)][side].append(row)
+
+    result, diagnostics = [], []
+    if not groups:
+        diagnostics.append({
+            "severity": "warning", "code": "volume_mix_price_no_observations",
+            "message": "筛选范围内没有可比商品观察，不能分解量价贡献。",
+        })
+    for key, sides in sorted(groups.items(), key=lambda item: repr(item[0])):
+        context = dict(zip(dimensions, key))
+        ordered = {
+            side: sorted(observations, key=lambda row: (repr(row.get(fields["product"])), repr(row.get("source"))))
+            for side, observations in sides.items()
+        }
+        sources = []
+        for observations in ordered.values():
+            for row in observations:
+                source = row.get("source")
+                if source and source not in sources:
+                    sources.append(source)
+        reasons = []
+
+        def issue(code, message, **details):
+            if code not in reasons:
+                reasons.append(code)
+            diagnostics.append({"severity": "warning", "code": code,
+                                "group": context, "message": message, **details})
+
+        if any(not isinstance(context.get(field), str) or not context[field].strip() for field in ("currency", "unit")):
+            issue("volume_mix_price_monetary_basis_missing", "币种和金额单位必须明确，不能自动推定。")
+        quantity_units = {
+            row.get(quantity_unit_field)
+            for observations in ordered.values() for row in observations
+            if isinstance(row.get(quantity_unit_field), str) and row[quantity_unit_field].strip()
+        }
+        if any(not isinstance(row.get(quantity_unit_field), str) or not row[quantity_unit_field].strip()
+               for observations in ordered.values() for row in observations):
+            issue("volume_mix_price_quantity_unit_missing", "篮子中每个观察都必须声明数量单位。")
+        if len(quantity_units) > 1:
+            issue("volume_mix_price_quantity_unit_mismatch", "数量单位不同的商品不能直接汇总为总量或结构占比。")
+        quantity_unit = next(iter(quantity_units)) if len(quantity_units) == 1 else None
+        observations = {"actual": {}, "baseline": {}}
+        declared_count = 0
+        values = []
+        for side, selected in ordered.items():
+            if not selected:
+                issue("volume_mix_price_side_missing", "篮子缺少实际或基准观察，不能分解。", side=side)
+            for row in selected:
+                product = row.get(fields["product"])
+                if (not isinstance(product, (str, int)) or isinstance(product, bool)
+                        or (isinstance(product, str) and not product.strip())):
+                    issue("volume_mix_price_product_missing", "商品必须具有非空、稳定的标识。", side=side)
+                    continue
+                if product in observations[side]:
+                    issue("volume_mix_price_duplicate_product", "同侧商品存在多条观察；请先明确汇总数量及加权价格。", side=side, product=product)
+                    continue
+                # Remember even invalid observations to distinguish missing
+                # products from invalid numeric data without replacing either.
+                observations[side][product] = None
+                if any(row.get(fields[field]) in (None, "") for field in ("quantity", "price")):
+                    issue("price_quantity_missing", "缺少对应数量和价格，不能分解量价贡献。", side=side, product=product)
+                    continue
+                try:
+                    quantity = _decimal(row[fields["quantity"]])
+                    price = _decimal(row[fields["price"]])
+                    stated = row.get(fields["amount"])
+                    declared = None if stated in (None, "") else _decimal(stated)
+                except FoundryError:
+                    issue("volume_mix_price_invalid_number", "数量、价格及声明金额必须是有限数值。", side=side, product=product)
+                    continue
+                if quantity <= 0:
+                    issue("volume_mix_price_nonpositive_quantity", "零量或负数量需单独处理，不能用于本可比篮子模型。", side=side, product=product)
+                if price < 0:
+                    issue("volume_mix_price_negative_price", "负价格需单独解释退货或调整，不能用于本可比篮子模型。", side=side, product=product)
+                observations[side][product] = (quantity, price, declared)
+                values.extend([quantity, price])
+                if declared is not None:
+                    declared_count += 1
+                    values.append(declared)
+        if set(observations["actual"]) != set(observations["baseline"]):
+            issue("volume_mix_price_unmatched_products", "实际与基准的商品集合不一致；新旧商品不能按零数量配对。",
+                  actual_only=sorted(set(observations["actual"]) - set(observations["baseline"]), key=repr),
+                  baseline_only=sorted(set(observations["baseline"]) - set(observations["actual"]), key=repr))
+
+        output = {
+            **context, **{name: None for name in _VMP_AMOUNTS},
+            "quantity_unit": quantity_unit, "source_rows": sources,
+            "actual_scope": _side_scope(ordered["actual"], label=labels["actual"], filters=filters["actual"]),
+            "baseline_scope": _side_scope(ordered["baseline"], label=labels["baseline"], filters=filters["baseline"]),
+            "comparison_status": "incomplete", "applicability": "not_comparable",
+            "amount_basis": "reported_amount" if declared_count == sum(map(len, ordered.values())) else "quantity_times_price",
+        }
+        # Products and their sums must remain exact even for large monetary
+        # magnitudes or small quantities; division alone may be nonterminating.
+        span = (max((value.adjusted() for value in values), default=0)
+                - min((value.as_tuple().exponent for value in values), default=0))
+        with localcontext() as ctx:
+            ctx.prec = max(80, 3 * max(span, 1) + 2 * len(str(len(values))) + 8)
+            for side, products in observations.items():
+                for product, observation in products.items():
+                    if observation is None:
+                        continue
+                    quantity, price, declared = observation
+                    if declared is not None and quantity * price != declared:
+                        issue("price_quantity_amount_mismatch", "声明金额与数量乘单价不一致，不能作为可比金额桥。",
+                              side=side, product=product, declared=_text(declared), computed=_text(quantity * price))
+            if not reasons:
+                actuals, baselines = observations["actual"], observations["baseline"]
+                va = sum((item[0] for item in actuals.values()), Decimal(0))
+                vb = sum((item[0] for item in baselines.values()), Decimal(0))
+                actual_amount = sum((q * p for q, p, _ in actuals.values()), Decimal(0))
+                baseline_amount = sum((q * p for q, p, _ in baselines.values()), Decimal(0))
+                at_actual_mix = sum((actuals[product][0] * baselines[product][1] for product in actuals), Decimal(0))
+                at_actual_volume = va * baseline_amount / vb
+                # Use the same rounded intermediate level in both adjacent
+                # differences. Increased precision makes these subtractions
+                # exact; no component is adjusted using a calculated residual.
+                ctx.prec *= 2
+                total = actual_amount - baseline_amount
+                volume = at_actual_volume - baseline_amount
+                mix = at_actual_mix - at_actual_volume
+                price = actual_amount - at_actual_mix
+                amounts = (actual_amount, baseline_amount, total, volume, mix, price,
+                           total - volume - mix - price, va, vb)
+                output.update({name: _text(value) for name, value in zip(_VMP_AMOUNTS, amounts)})
+                output.update(comparison_status="complete", applicability="comparable")
+        if reasons:
+            output["reason_codes"] = reasons
+        result.append(output)
+    return {
+        "domain": "foundry.finance.variance.v1", "method": "volume_mix_price",
+        "columns": [*dimensions, *_VMP_AMOUNTS, "quantity_unit", "amount_basis", "comparison_status", "applicability"],
+        "rows": result, "diagnostics": diagnostics,
+        "comparison": {"actual_scenario": labels["actual"], "baseline_scenario": labels["baseline"],
+                       "actual_filters": spec.get("actual_filters", {}), "baseline_filters": spec.get("baseline_filters", {})},
+        "interpretation": "同质数量单位的可比商品篮子，固定按总量、结构、价格顺序分解；算术贡献不证明业务因果。",
     }
 
 

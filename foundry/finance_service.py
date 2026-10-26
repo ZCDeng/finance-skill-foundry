@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import copy
 import re
-from decimal import localcontext
+from decimal import Decimal, localcontext
 from time import perf_counter
 
 from foundry.analysis import (DRAFT_UNAVAILABLE, PARENT_UNAVAILABLE, RUN_UNAVAILABLE, AnalysisStore, _assert_id, _default_materiality,
-                             _hash, _hash_bytes, _new, _safe_text, _saved_by)
+                             _draft_required_check_authorship, _hash, _hash_bytes, _new, _safe_text, _saved_by)
 from foundry.errors import FoundryError
 from foundry.structure_records import (
     ACKNOWLEDGED,
@@ -41,7 +41,7 @@ from foundry.finance_variance import explain_variance, price_quantity_bridge
 
 # 3: display strings (amount_change_display, profit_impact_display, *_display) read at two places with grouped
 # thousands, so an earlier run's output hash cannot confirm or refute a rerun (it reads unverified).
-FINANCE_CALCULATION_VERSION = 3
+FINANCE_CALCULATION_VERSION = 4
 """What the finance engine computes, recorded on each run beside (not in) its result.
 
 2 marks an account with source rows on one side only as partial (缺项). Runs
@@ -55,10 +55,12 @@ WORKBOOK_SHELL_MESSAGE = (
     "so the finance engine has no rows to read; check finance_readiness, confirm the sheet with "
     "structure_proposal_list and structure_proposal_confirm, then bind the confirmed table"
 )
-SCENARIO_KINDS = frozenset({"receivables_aging", "cash_13_weeks", "driver_model", "collection_health"})
+SCENARIO_KINDS = frozenset({"receivables_aging", "cash_13_weeks", "driver_model", "collection_health", "transaction_review"})
 
 COLLECTIONS = {
     "contexts",
+    "profile_confirmations",
+    "rule_epochs", "transaction_reviews",
     "account_maps",
     "scenarios",
     "metric_definitions",
@@ -402,6 +404,12 @@ class FinanceStore:
         parent = (
             self._read("contexts", spec["parent_id"]) if spec.get("parent_id") else {}
         )
+        from foundry.finance_professional import clean_reporting_profile
+        profile = spec.get("reporting_profile", parent.get("reporting_profile"))
+        professional = {"reporting_profile": clean_reporting_profile(profile)} if profile is not None else {}
+        if spec.get("profile_confirmation_id"):
+            confirmation = self._read("profile_confirmations", spec["profile_confirmation_id"])
+            professional["profile_confirmation_id"] = confirmation["id"]
         for alias, value in bindings.items():
             assert_bindable(
                 value,
@@ -428,8 +436,59 @@ class FinanceStore:
             account_map_id=account_map["id"] if account_map else None,
             source_hashes=source_hashes,
             parent_id=parent.get("id"),
+            **professional,
         )
         return {**record, "diagnostics": self._normalize(record)["diagnostics"]}
+
+    def finance_profile_confirm(self, spec):
+        """Confirm exact professional fields, from a trusted manager call only."""
+        self._manager_only("confirm a reporting profile")
+        from foundry.finance_professional import confirmation_basis, profile_fields
+        context = self._read("contexts", spec.get("context_id"))
+        if "confirmed_model_boundaries" in spec:
+            from foundry.finance_driver_templates import BOUNDARY_INPUTS
+            from foundry.finance_professional import boundary_basis
+            named = spec["confirmed_model_boundaries"]
+            if (not isinstance(named, list) or not all(isinstance(name, str) for name in named)
+                    or sorted(named) != sorted(BOUNDARY_INPUTS)):
+                raise FoundryError("explicit confirmation must name all eight registered model boundaries")
+            proof = boundary_basis(self, context, spec.get("scenario_id"))
+            return self._write("profile_confirmations", context_id=context["id"], bindings=context["bindings"],
+                               confirmation_basis=confirmation_basis(context), confirmed_fields=[], field_values={},
+                               fields_hash=_hash(proof), confirmed_model_boundaries=named, boundary_basis=proof, status="confirmed",
+                               confirmed_by=self.actor, session_id=self.session_id)
+        if not context.get("reporting_profile"):
+            raise FoundryError("legacy context has no reporting profile to confirm")
+        fields = profile_fields(context["reporting_profile"])
+        selected = spec.get("confirmed_fields")
+        if not isinstance(selected, list) or not selected or any(not isinstance(key, str) or key not in fields for key in selected):
+            raise FoundryError("confirmed_fields must name existing profile fields")
+        selected = sorted(set(selected))
+        return self._write("profile_confirmations", context_id=context["id"], bindings=context["bindings"],
+                           confirmation_basis=confirmation_basis(context), confirmed_fields=selected,
+                           field_values={key: fields[key] for key in selected},
+                           fields_hash=_hash({key: fields[key] for key in selected}), status="confirmed",
+                           confirmed_by=self.actor, session_id=self.session_id)
+
+    def finance_profile_revoke(self, spec):
+        self._manager_only("revoke a reporting profile")
+        record = self._read("profile_confirmations", spec.get("id"))
+        reason = _safe_text(spec.get("reason"), "revocation reason", required=True, maximum=2000)
+        return self._write("profile_confirmations", context_id=record["context_id"], bindings=record["bindings"],
+                           confirmation_basis=record["confirmation_basis"], confirmed_fields=record["confirmed_fields"],
+                           **({"boundary_basis": record["boundary_basis"]} if record.get("boundary_basis") else {}),
+                           field_values=record["field_values"], fields_hash=record["fields_hash"], status="revoked",
+                           confirmation_root=record.get("confirmation_root") or record["id"], parent_id=record["id"],
+                           confirmed_by=self.actor, session_id=self.session_id, reason=reason)
+
+    def finance_profile_status(self, spec):
+        from foundry.finance_professional import rule_identity, boundary_basis
+        context = self._read("contexts", spec.get("context_id"))
+        scenario_ids = [spec["scenario_id"]] if spec.get("scenario_id") else []
+        return {"context_id": context["id"], "reporting_profile": context.get("reporting_profile"),
+                **({"model_boundary_preview": boundary_basis(self, context, spec["scenario_id"])} if scenario_ids else {}),
+                **rule_identity(self, context, ["driver.source_binding", "statements.linked_management"] if scenario_ids else ["driver.source_binding"],
+                                scenario_ids=scenario_ids)}
 
     def _normalize(self, context):
         self._authorize(context["bindings"])
@@ -564,7 +623,7 @@ class FinanceStore:
         kind = spec.get("kind", (parent or {}).get("kind"))
         if kind not in SCENARIO_KINDS:
             raise FoundryError(
-                "scenario kind must be receivables_aging, cash_13_weeks, driver_model or collection_health"
+                "scenario kind must be receivables_aging, cash_13_weeks, driver_model, collection_health or transaction_review"
             )
         label = _safe_text(
             spec.get("label", "财务情景"), "scenario label", required=True, maximum=200
@@ -582,6 +641,10 @@ class FinanceStore:
             inputs, diff = spec.get("inputs", {}), []
         if not isinstance(inputs, dict):
             raise FoundryError("scenario inputs must be an object")
+        if kind == "receivables_aging":
+            from foundry.finance_scenario_service import validate_receivables_aging_configuration
+
+            validate_receivables_aging_configuration(inputs)
         return self._write(
             "scenarios",
             label=label,
@@ -603,13 +666,15 @@ class FinanceStore:
             raise FoundryError("finance scenario run spec requires scenario_id")
         scenario = self._read("scenarios", spec["scenario_id"])
         context = self._read("contexts", scenario["context_id"])
+        from foundry.finance_scenario_service import require_runtime_requirements, scenario_configuration_error
+        if scenario_configuration_error(self, scenario, context) is None:
+            require_runtime_requirements(self, scenario, context)
         revision = self._save_revision(context, "scenario", spec)
         return self.run_revision(revision)
 
     def run_revision(self, revision):
         from foundry.finance_requirement_semantics import capture_requirements
         started = perf_counter()
-        requirements_snapshot = capture_requirements(self.analysis, self._authorize, allowed=self.allowed)
         self._authorize(revision["bindings"])
         context = self._read("contexts", revision["finance_context_id"])
         if context["bindings"] != revision["bindings"]:
@@ -617,6 +682,39 @@ class FinanceStore:
                 "finance revision bindings differ from immutable context"
             )
         spec = revision["finance_spec"]
+        from foundry.finance_professional import rule_identity, rule_ids_for
+        scenario_identity = self._read("scenarios", spec["scenario_id"]) if revision["operation"] == "scenario" else None
+        configuration_error = None
+        requirements_snapshot = None
+        if scenario_identity:
+            from foundry.finance_scenario_service import require_runtime_requirements, scenario_configuration_error
+            configuration_error = scenario_configuration_error(self, scenario_identity, context)
+            if configuration_error is None:
+                requirements_snapshot = require_runtime_requirements(self, scenario_identity, context)
+        if configuration_error is not None:
+            from foundry.finance_requirements import latest_requirements
+            current = latest_requirements(self.analysis, self.allowed)
+            # An audit pointer is not a matched obligation or professional approval.
+            # Do not reconstruct boundary proofs for a non-executable configuration.
+            requirements_snapshot = {"requirements_id": current["id"] if current else None,
+                                     "requirements_semantic_fingerprint": None}
+            professional_identity = None
+        else:
+            requirements_snapshot = capture_requirements(self.analysis, self._authorize, allowed=self.allowed)
+            if self.session_id and revision["operation"] == "variance" and spec.get("method") == "volume_mix_price":
+                requirement_id = requirements_snapshot.get("requirements_id")
+                current = self.analysis._get("requirements", requirement_id) if requirement_id else None
+                if (not current or current.get("context_id") != context["id"]
+                        or "variance.volume_mix_price" not in rule_ids_for(items=current.get("items"))):
+                    raise FoundryError("professional_requirements_required: register the complete original "
+                                       "volume_mix_price requirements with this real context_id and its required_bindings "
+                                       "before the first calculation or input diagnostic")
+            if scenario_identity:
+                require_runtime_requirements(self, scenario_identity, context,
+                                             requirements_snapshot=requirements_snapshot)
+            professional_identity = rule_identity(self, context, rule_ids_for(
+                operation=revision["operation"], spec=spec, scenario=scenario_identity),
+                scenario_ids=[scenario_identity["id"]] if scenario_identity else [])
         datasets = {
             alias: self.analysis.read_dataset(value)
             for alias, value in context["bindings"].items()
@@ -640,6 +738,8 @@ class FinanceStore:
         ]
         calculated = {}
         try:
+            if configuration_error is not None:
+                raise configuration_error
             with localcontext() as decimal_context:
                 decimal_context.prec = 80
                 if revision["operation"] == "scenario":
@@ -712,6 +812,8 @@ class FinanceStore:
                         "cost",
                         "expense",
                         "profit",
+                        "source_total",
+                        "adjusted_total",
                         "actual",
                         "baseline",
                         "contribution",
@@ -748,6 +850,9 @@ class FinanceStore:
             reproducibility_status = "unverified"
             execution_status = "failed"
             error_fields = {"error": error, "error_code": "finance_calculation_failed"}
+            if configuration_error is not None:
+                error_fields.update(error_phase="configuration_preflight",
+                                    requirements_validation="not_evaluated_invalid_configuration")
         # Engine time, beside the result like calculation_version: a slower run of the same output keeps its hash.
         duration_seconds = round(perf_counter() - started, 3)
         record = _new(
@@ -756,6 +861,7 @@ class FinanceStore:
             **requirements_snapshot,
             analysis_id=revision["id"],
             finance_context_id=context["id"],
+            professional_identity=professional_identity,
             session_id=self.session_id,
             context_revision=self.context_revision,
             bindings=context["bindings"],
@@ -858,6 +964,10 @@ class FinanceStore:
         if section != "rows":
             location["section"] = section
         trusted_run = run.get("engine") == "finance" or self.analysis.aggregate_sources_verified(run)
+        if (run.get("engine") == "finance"
+                and run.get("result", {}).get("scenario_kind") == "collection_health"
+                and row.get("manual_inputs")):
+            trusted_run = False
         evidence_status = "verified" if values and trusted_run else "unverified" if values else "missing"
         evidence_key = _hash({"location": location, "status": evidence_status, "sources": [r["source"] for r in values]})
         existing = next((r for r in self.analysis._list("evidence_checks") if r.get("evidence_key") == evidence_key), None)
@@ -893,6 +1003,9 @@ class FinanceStore:
         context_scopes = None
         if spec.get("context_id"):
             context = self._read("contexts", spec["context_id"])
+            if "bindings" in spec and spec["bindings"] != context["bindings"]:
+                raise FoundryError("explicit requirement bindings must exactly match context bindings; "
+                                   "retain all required_bindings and select/create the full context")
             spec = {**spec, "bindings": context["bindings"],
                     "scope": spec.get("scope", self._primary_scope(context.get("scopes", {})))}
             # A hierarchy level the context's own scope holds is carried over into the requirement scope
@@ -926,6 +1039,7 @@ class FinanceStore:
 
     def save_completion_draft(self, operation_id, call_id, spec):
         """Runtime-only automatic save; ordinary manager saves stay independent."""
+        from foundry.finance_saved_delivery import saved_delivery
         from foundry.finance_completion_operations import CompletionOperationStore, TERMINAL
         from foundry.finance_completion import record_completion
         from foundry.locking import exclusive
@@ -935,6 +1049,8 @@ class FinanceStore:
         if not isinstance(spec, dict):
             raise FoundryError("explanation draft spec must be an object")
         self._reject_completion_authority(spec)
+        if "draft_id" in spec:
+            raise FoundryError("draft_id refresh is not supported in runtime completion saves; submit a prepared template or full draft spec")
         # Authorize referenced records before persisting a recoverable payload.
         from foundry.finance_requirements import latest_requirements
         requirements = latest_requirements(self.analysis)
@@ -975,8 +1091,9 @@ class FinanceStore:
                     record_completion(self.analysis, previous, previous["explanation_check"], allowed=self.allowed,
                                       cache=cache), cache=cache, operations=operations)
                 operation = operations.settle(operation_id, attempt["revision"], previous, receipt)
-                return {**self._readable_draft(previous, cache=cache), "completion": receipt,
-                        "completion_operation": operation, "replayed": True, "validation_basis": "saved_draft_version"}
+                return saved_delivery(self, {**self._readable_draft(previous, cache=cache), "completion": receipt,
+                        "completion_operation": operation, "replayed": True,
+                        "validation_basis": "saved_draft_version"}, cache=cache)
 
             def check_deadline():
                 operation = operations.get(operation_id)
@@ -1017,13 +1134,14 @@ class FinanceStore:
             # The session's operation goes on as its own saves would have spent the budget (completion_in_view).
             receipt = self._settled_receipt(result["completion"], cache=cache, operations=operations)
             operation = operations.settle(operation_id, attempt["revision"], result, receipt)
-            return {**result, "completion": receipt, "completion_operation": operation}
+            return saved_delivery(self, {**result, "completion": receipt, "completion_operation": operation}, cache=cache)
 
     def recover_completion_draft(self, spec):
         """Manager-owned recovery of an explicitly selected completion attempt.
 
         The receipt returned is the one stored; a session's operation settles on that receipt as the session reads it
         (_operation_receipt), so where earlier drafts it may not read spent repairs the two can differ."""
+        from foundry.finance_saved_delivery import saved_delivery
         from foundry.analysis import _hash
         from foundry.finance_completion import record_completion
         from foundry.finance_completion_operations import (
@@ -1087,8 +1205,8 @@ class FinanceStore:
                           and self.analysis.completion_in_view(receipt, set(operation["snapshot_ids"])) is None)
                 settled = (operation if view is None or behind
                            else operations.settle(operation["id"], revision, previous_by_revision, view))
-                return {**self._readable_draft(previous_by_revision), "completion": receipt, "completion_operation": settled,
-                        "replayed": True, "validation_basis": "saved_draft_version"}
+                return saved_delivery(self, {**self._readable_draft(previous_by_revision), "completion": receipt,
+                        "completion_operation": settled, "replayed": True, "validation_basis": "saved_draft_version"})
             if int(operation.get("current_revision", 0)) != revision:
                 raise FoundryError("newer completion revision exists")
             if attempt.get("draft_id") or attempt.get("completion_id"):
@@ -1102,7 +1220,7 @@ class FinanceStore:
             result = self._save_explanation_draft(save_spec)
             view = self._operation_receipt(operation, result["completion"])
             settled = operation if view is None else operations.settle(operation["id"], revision, result, view)
-            return {**result, "completion_operation": settled}
+            return saved_delivery(self, {**result, "completion_operation": settled})
 
     def _operation_receipt(self, operation, receipt):
         """A receipt as the session that owns a completion operation now reads it, which its operation settles on; None
@@ -1124,9 +1242,15 @@ class FinanceStore:
             raise FoundryError("completion authority must come from the runtime, not draft spec")
 
     def save_explanation_draft(self, spec):
+        from foundry.finance_saved_delivery import saved_delivery
         if not isinstance(spec, dict):
             raise FoundryError("explanation draft spec must be an object")
+        if {"required_check_authorship", "_required_check_authorship"}.intersection(spec):
+            raise FoundryError("required check authorship is computed by the service, not draft spec")
         self._reject_completion_authority(spec)
+        if "draft_id" in spec:
+            from foundry.finance_explanations import refresh_saved_explanation
+            return saved_delivery(self, refresh_saved_explanation(self, spec))
         from foundry.finance_requirements import latest_requirements
         from foundry.finance_completion import record_completion
         from foundry.locking import exclusive
@@ -1147,16 +1271,31 @@ class FinanceStore:
                 # A retry is refused whatever the fresh save would refuse: the stored draft and the parent it names.
                 self._parent_draft(spec.get("parent_id"))
                 self._authorize_draft(previous)
-                receipt = record_completion(self.analysis, previous, previous["explanation_check"], allowed=self.allowed,
+                from foundry.finance_transaction_reviews import has_transaction
+                quality = (self.validate_explanation({"draft_id": previous["id"]})
+                           if has_transaction(self.analysis, previous) else previous["explanation_check"])
+                receipt = record_completion(self.analysis, previous, quality, allowed=self.allowed,
                                             cache=cache)
-                return {**self._readable_draft(previous, cache=cache),
+                return saved_delivery(self, {**self._readable_draft(previous, cache=cache),
                         "completion": self._readable_receipt(receipt, cache=cache), "replayed": True,
-                        "validation_basis": "saved_draft_version"}
+                        "validation_basis": "saved_draft_version"}, cache=cache)
             result = self._save_explanation_draft({**spec, "completion_request_key": key}, cache=cache)
-            return {**result, "completion": self._readable_receipt(result["completion"], cache=cache)}
+            return saved_delivery(self, {**result, "completion": self._readable_receipt(result["completion"], cache=cache)},
+                                  cache=cache)
 
     def _save_explanation_draft(self, spec, *, check_deadline=lambda: None, cache=None):
         check_deadline()
+        if {"required_check_authorship", "_required_check_authorship"}.intersection(spec):
+            raise FoundryError("required check authorship is computed by the service, not draft spec")
+        use_template = spec.get("use_prepared_template", False)
+        if not isinstance(use_template, bool):
+            raise FoundryError("use_prepared_template must be a boolean")
+        if "qualitative_note" in spec and not use_template:
+            raise FoundryError("qualitative_note requires prepared template save")
+        if use_template and ({"body", "body_template", "document", "claims", "fact_ids"}.intersection(spec)
+                             or not spec.get("run_ids") or not spec.get("requirements_id")):
+            raise FoundryError("prepared template save requires explicit run_ids and requirements_id; "
+                               "use qualitative_note instead of body, body_template, document, claims or fact_ids")
         parent = self._parent_draft(spec.get("parent_id"))
         self._authorize_evidence_recipes(spec.get("evidence_recipes", parent.get("evidence_recipes", [])))
         self._authorize_consistency_sources(spec.get("consistency_sources", parent.get("consistency_sources", {})))
@@ -1175,11 +1314,11 @@ class FinanceStore:
         # What this revision takes over from its parent before save_draft sees the spec, decided as each is composed
         # (the appendix and the read failures are composed again from this revision's own runs).
         inherited = set()
-        parent_prose = bool(parent) and "body" not in spec and spec.get("document") is None
+        parent_prose = bool(parent) and not use_template and "body" not in spec and spec.get("document") is None
         took_document = parent_prose and parent.get("document") is not None
         visual_claims = []
         visual_document = spec.get("document")
-        if visual_document is None and "body" not in spec:
+        if visual_document is None and "body" not in spec and not use_template:
             visual_document = parent.get("document")
         if visual_document is not None:
             visual_document, visual_runs, visual_claims = materialize_document(
@@ -1190,11 +1329,21 @@ class FinanceStore:
             self._named_run(run_id)
         prepared = (
             self.prepare_explanation({"run_ids": run_ids,
+                                      "fact_view": "inspection",
                                       "materiality": spec.get("materiality", parent.get("materiality", {}))})
             if run_ids
             else {"facts": []}
         )
         check_deadline()
+        if use_template:
+            template = prepared.get("draft_template")
+            if not template or template["requirements_id"] != spec["requirements_id"]:
+                raise FoundryError("prepared template is unavailable for the current authorized run and requirements; "
+                                   "inspect prepare_explanation and resolve the evidence or identity gap")
+            note = _safe_text(spec.get("qualitative_note", ""), "qualitative_note")
+            spec = {**{k: v for k, v in spec.items() if k not in {"use_prepared_template", "qualitative_note"}},
+                    **template, "title": spec.get("title", template["title"]),
+                    "body": template["body"] + ("\n\n" + note if note.strip() else "")}
         document = None
         if spec.get("document") is not None:
             from foundry.report_documents import report_document_markdown, validate_report_document
@@ -1238,13 +1387,34 @@ class FinanceStore:
         for visual_claim in visual_claims:
             if not any(all(claim.get(key) == visual_claim[key] for key in ("run_id", "row", "column")) for claim in auto_claims):
                 auto_claims.append(visual_claim)
+        supplied_claims = spec.get("claims", parent.get("claims", []))
+        declared_claims = spec.get("claims", [])
+        if not isinstance(supplied_claims, list) or not isinstance(declared_claims, list):
+            raise FoundryError("claims must be an array")
+        required_check_authorship = _draft_required_check_authorship(
+            prepared, [self._named_run(run_id) for run_id in run_ids],
+            claims=declared_claims,
+            fact_ids=explicit_fact_ids if "fact_ids" in spec else [],
+            template_fact_ids=template_fact_ids,
+            inherited=(None if (any(isinstance(claim, dict) and claim.get("basis") == "calculation"
+                                    for claim in declared_claims)
+                                or spec.get("fact_ids")
+                                or (template_fact_ids and ("body" in spec or "document" in spec)))
+                       else parent.get("required_check_authorship")),
+        )
+        if "claims" not in spec and set(run_ids) != set(parent.get("run_ids", [])):
+            # A run replacement regenerates its calculation claims just as it
+            # regenerates facts. Explicit claims still undergo full validation.
+            supplied_claims = [claim for claim in supplied_claims
+                               if not isinstance(claim, dict) or claim.get("basis") != "calculation"
+                               or claim.get("run_id") in run_ids]
         # A parent claim the revision would cite on its own (one of its runs' generated claims) is not taken over.
-        if parent and "claims" not in spec and parent.get("claims") and _dedupe_explanation_claims(
-                copy.deepcopy([*auto_claims, *parent["claims"]])) != _dedupe_explanation_claims(copy.deepcopy(auto_claims)):
+        if parent and "claims" not in spec and supplied_claims and _dedupe_explanation_claims(
+                copy.deepcopy([*auto_claims, *supplied_claims])) != _dedupe_explanation_claims(copy.deepcopy(auto_claims)):
             inherited.add("claims")
         claims = []
         for claim in _dedupe_explanation_claims(
-            [*auto_claims, *spec.get("claims", parent.get("claims", []))]
+            [*auto_claims, *supplied_claims]
         ):
             if not isinstance(claim, dict):
                 raise FoundryError("claims must contain objects")
@@ -1281,7 +1451,8 @@ class FinanceStore:
         provisional = with_input_gaps(self.analysis, provisional)
         appendix["body"] += input_gap_appendix(provisional) + evidence_basis_appendix(provisional)
         appendix_meta = evidence_appendix_metadata(
-            appendix["body"], base_body=appendix_base_body
+            appendix["body"], base_body=appendix_base_body,
+            **({"render_version": 4} if appendix["schema_version"] == 4 else {}),
         )
         if appendix["body"]:
             rendered = rendered.rstrip() + "\n\n" + appendix["body"].lstrip()
@@ -1329,7 +1500,8 @@ class FinanceStore:
         # The draft, its receipt and the draft returned are one read, and the caller's (AnalysisStore.save_draft).
         cache = {} if cache is None else cache
         draft = self.analysis.save_draft(save_spec, _recipe_report=recipe_report, _allowed=self.allowed,
-                                         _inherited=inherited, _cache=cache)
+                                         _inherited=inherited, _cache=cache,
+                                         _required_check_authorship=required_check_authorship)
 
         from foundry.finance_completion import record_completion
 
@@ -1361,6 +1533,9 @@ class FinanceStore:
     def prepare_explanation(self, spec):
         if not isinstance(spec, dict):
             raise FoundryError("prepare explanation spec must be an object")
+        from foundry.finance_explanation_views import explanation_fact_view, validate_fact_view
+
+        fact_view = validate_fact_view(spec.get("fact_view", "writing"))
         run_ids = spec.get("run_ids", [])
         if not isinstance(run_ids, list) or not run_ids:
             raise FoundryError("prepare explanation requires run_ids")
@@ -1375,6 +1550,7 @@ class FinanceStore:
             runs,
             backgrounds=backgrounds,
             materiality=spec.get("materiality") or {},
+            _allowed=self.allowed,
         )
         request_context = {
             "scope": spec.get("scope", {}),
@@ -1397,11 +1573,13 @@ class FinanceStore:
         from foundry.finance_locators import record_fact_index
 
         record_fact_index(self, payload.get("facts") or [])
-        return payload
+        return explanation_fact_view(payload, runs, fact_view)
 
     def validate_explanation(self, spec):
         if not isinstance(spec, dict):
             raise FoundryError("validate explanation spec must be an object")
+        if {"required_check_authorship", "_required_check_authorship"}.intersection(spec):
+            raise FoundryError("required check authorship is computed by the service, not draft spec")
         # A session names only a draft it may read; one it may not read is refused as an unknown id.
         draft = self._named_draft(spec["draft_id"]) if spec.get("draft_id") else {}
         if self.allowed is not None:
@@ -1434,10 +1612,12 @@ class FinanceStore:
         self._authorize_current(current)
         # A caller's evidence_report, or the one stored on the draft, is never evidence: the recipes are
         # evaluated again by validate_explanation and only that fresh report reaches coverage.
-        merged = {key: value for key, value in {**draft, **spec, "run_ids": run_ids}.items() if key != "evidence_report"}
+        merged = {key: value for key, value in {**draft, **spec, "run_ids": run_ids}.items()
+                  if key not in {"evidence_report", "required_check_authorship"}}
         if orphaned:
             merged["parent_id"] = None
-        quality = validate_explanation_payload(self.analysis, merged)
+        quality = validate_explanation_payload(self.analysis, merged, _allowed=self.allowed,
+                                               _required_check_authorship=draft.get("required_check_authorship"))
         checked = augment_quality(self.analysis, merged, quality, _recipe_report=quality["evidence_report"],
                                   _allowed=self.allowed)
         from foundry.analysis_data import json_value
@@ -1696,6 +1876,26 @@ class FinanceStore:
             })
         return {"schema_version": 1, "sources": sources}
 
+    def finance_transaction_review_prepare(self, spec):
+        from foundry.finance_transaction_reviews import prepare_review
+        return prepare_review(self, spec)
+
+    def finance_transaction_review_save(self, spec):
+        from foundry.finance_transaction_reviews import save_review
+        return save_review(self, spec)
+
+    def finance_transaction_review_revoke(self, spec):
+        from foundry.finance_transaction_reviews import revoke_review
+        return revoke_review(self, spec)
+
+    def finance_rule_epoch_advance(self, spec):
+        from foundry.finance_professional import advance_rule_epoch
+        return advance_rule_epoch(self, spec)
+
+    def finance_rule_epoch_list(self, spec):
+        from foundry.finance_professional import list_rule_epochs
+        return list_rule_epochs(self, spec)
+
     def finance_controls_preview(self, spec):
         """Sum both sides of one control the manager is drafting and say the difference. Nothing is saved."""
         from foundry.finance_controls import clean_control, dataset_ids, evaluate_control
@@ -1750,13 +1950,17 @@ class FinanceStore:
             if confirm:
                 self._assert_current_snapshots(ids)
             existing = lineages.get(control_key(control))
+            context_id = spec.get("context_id") or (existing or {}).get("context_id")
+            identity = self._control_rule_identity(control, context_id)
+            rules_changed = bool(existing and existing.get("professional_identity", {}).get("rule_fingerprint") != identity["rule_fingerprint"]
+                                 and identity["rule_dependencies"])
             state = "confirmed" if confirm else "proposed"
             if existing and existing.get("state") != "retired" and existing["control"] == control and (
                 not confirm or existing.get("state") == "confirmed"
-            ):
+            ) and not rules_changed:
                 saved.append(existing)
                 continue
-            if existing and existing.get("state") == "confirmed" and not confirm:
+            if existing and existing.get("state") == "confirmed" and not confirm and not rules_changed:
                 # Re-saving a confirmed check would take it out of the close until someone noticed.
                 if self.actor != MANAGER:
                     raise FoundryError("a confirmed control can only be changed by the manager")
@@ -1768,11 +1972,28 @@ class FinanceStore:
                 state=state,
                 bindings={f"source{index}": dataset_id for index, dataset_id in enumerate(ids)},
                 saved_by=self.actor,
+                professional_identity=identity,
+                **({"context_id": context_id} if context_id else {}),
+                **({"professional_reconfirmation_required": True} if rules_changed and not confirm else {}),
                 **({"parent_id": existing["id"]} if existing else {}),
             )
             lineages[control_key(control)] = record
             saved.append(record)
         return {"schema_version": 1, "controls": saved}
+
+    def _control_rule_identity(self, control, context_id=None):
+        from foundry.finance_professional import rule_identity, rule_ids_for
+        rule_ids = rule_ids_for(control=control)
+        if not rule_ids:
+            return rule_identity(self, {}, [])
+        try:
+            context = self._read("contexts", context_id) if context_id else {}
+        except FoundryError:
+            # A visible control may refer to a context with additional, hidden sources.
+            # Keep the control readable without granting that context's professional approval.
+            return {**rule_identity(self, {}, rule_ids), "rule_fingerprint": None,
+                    "professional_status": "professional_context_unavailable"}
+        return rule_identity(self, context, rule_ids)
 
     def _control_successor(self, spec, state, action):
         self._manager_only(action)
@@ -1781,7 +2002,10 @@ class FinanceStore:
         head = next((row for row in self._control_heads(include_retired=True) if row["id"] == spec["id"]), None)
         if head is None:
             raise FoundryError("control is not the latest version or does not exist")
-        if head.get("state") == state:
+        identity = self._control_rule_identity(head["control"], head.get("context_id"))
+        changed = bool(identity["rule_dependencies"] and
+                       head.get("professional_identity", {}).get("rule_fingerprint") != identity["rule_fingerprint"])
+        if head.get("state") == state and not changed:
             return head
         reason = _safe_text(spec.get("reason") or "", "control reason", maximum=2000)
         if state == "retired" and not reason:
@@ -1794,6 +2018,8 @@ class FinanceStore:
             bindings=head["bindings"],
             saved_by=self.actor,
             parent_id=head["id"],
+            professional_identity=identity,
+            **({"context_id": head["context_id"]} if head.get("context_id") else {}),
             **({"reason": reason} if reason else {}),
         )
 
@@ -1818,12 +2044,24 @@ class FinanceStore:
             if missing:
                 raise FoundryError("control is not the latest version or does not exist")
             heads = [row for row in heads if row["id"] in set(wanted)]
+        refreshed = []
+        for row in heads:
+            identity = self._control_rule_identity(row["control"], row.get("context_id"))
+            if identity["rule_dependencies"] and row.get("professional_identity", {}).get("rule_fingerprint") != identity["rule_fingerprint"]:
+                row = self._write("controls", control=row["control"], origin=row.get("origin", "declared"),
+                                  state="proposed", bindings=row["bindings"], saved_by=self.actor,
+                                  parent_id=row["id"], professional_identity=identity,
+                                  professional_reconfirmation_required=True,
+                                  **({"context_id": row["context_id"]} if row.get("context_id") else {}))
+            refreshed.append(row)
+        heads = refreshed
         cache: dict = {}
         results = [
             {
                 "control_id": row["id"],
                 "label": row["control"]["label"],
                 "state": row.get("state"),
+                "professional_identity": row.get("professional_identity"),
                 **evaluate_control(self.analysis, row["control"], cache=cache, allowed=self.allowed),
             }
             for row in heads
@@ -1857,12 +2095,19 @@ class FinanceStore:
         rows = []
         for head in heads:
             result = latest.get(head["id"])
+            identity = self._control_rule_identity(head["control"], head.get("context_id"))
+            changed = bool(identity["rule_dependencies"] and
+                           head.get("professional_identity", {}).get("rule_fingerprint") != identity["rule_fingerprint"])
+            if changed:
+                head = {**head, "professional_reconfirmation_required": True, "current_professional_identity": identity}
+                if result:
+                    result = {**result, "status": "stale", "reason": "相关财务规则已变化，需要重新确认并运行"}
             hashes = (result or {}).get("source_hashes") or {}
             if (self.allowed is not None and result and result.get("status") == STALE
                     and result.get("reason") == "资料已有更新的版本" and not set(hashes) & replaced):
                 # Judged stale by a newer file this session may not read: judge it by the files it may read, and read
                 # the result as a stored one reads (keys sorted as written, then the run it came with).
-                fresh = {**{key: result[key] for key in ("control_id", "label", "state") if key in result},
+                fresh = {**{key: result[key] for key in ("control_id", "label", "state", "professional_identity") if key in result},
                          **evaluate_control(self.analysis, head["control"], cache=cache, allowed=self.allowed)}
                 result = {**json.loads(json.dumps(json_value(fresh), sort_keys=True)),
                           **{key: result[key] for key in ("run_id", "run_at") if key in result}}
@@ -1934,6 +2179,7 @@ class FinanceStore:
             status=result.get("status"),
             difference=result.get("difference"),
             source_hashes=result.get("source_hashes"),
+            professional_identity=result.get("professional_identity"),
             bindings=row["bindings"],
             set_by=self.actor,
             **fields,
@@ -1977,6 +2223,7 @@ class FinanceStore:
             status=result.get("status"),
             difference=result.get("difference"),
             source_hashes=result.get("source_hashes"),
+            professional_identity=result.get("professional_identity"),
             bindings=row["bindings"],
             decided_by=self.actor,
             review_required=fields["decision"] == "waived" and review_required,
@@ -2058,7 +2305,7 @@ class FinanceStore:
             pending_structures=pending,
             controls=self.finance_controls_list({})["controls"],
             runs=runs,
-            draft=draft if draft is None or self.allowed is None else self._readable_draft(draft, cache=cache),
+            draft=self._readable_draft(draft, cache=cache) if draft is not None else None,
         )
 
     def finance_control_confirmation_sheet(self, spec):
@@ -3089,7 +3336,8 @@ class FinanceStore:
         # Every refusal of the requirement save must come before the child context is written, or each
         # refused click leaves a context no requirement references.
         self._authorize(context["bindings"])
-        prepare_requirements(self.analysis, {**req_spec, "bindings": context["bindings"]}, _allowed=self.allowed)
+        prepare_requirements(self.analysis, {**req_spec, "bindings": context["bindings"],
+                                            "context_id": context["id"]}, _allowed=self.allowed)
         child = self.save_context(
             {
                 "parent_id": context["id"],
@@ -3098,6 +3346,7 @@ class FinanceStore:
                 "scopes": context.get("scopes") or {},
                 "policies": context.get("policies") or {},
                 "account_map_id": context.get("account_map_id"),
+                **({"reporting_profile": context["reporting_profile"]} if context.get("reporting_profile") else {}),
             }
         )
         req_spec["context_id"] = child["id"]
@@ -3179,6 +3428,23 @@ def _dedupe_explanation_claims(claims):
             )
         if key is not None:
             if key in seen:
+                conflicting = False
+                for existing in result:
+                    if (isinstance(existing, dict) and existing.get("basis") == "calculation"
+                            and ("calculation", existing.get("fact_id"), existing.get("run_id"),
+                                 existing.get("row"), existing.get("column")) == key):
+                        try:
+                            matches = Decimal(str(existing.get("value"))) == Decimal(str(claim.get("value")))
+                        except ArithmeticError:
+                            matches = existing.get("value") == claim.get("value")
+                        if not matches:
+                            conflicting = True
+                        break
+                if conflicting:
+                    # Keep the caller's contradiction for the ordinary source
+                    # validator; an automatic citation cannot replace it.
+                    result.append(claim)
+                    continue
                 if isinstance(claim, dict) and "presentation" in claim:
                     for existing in result:
                         if (

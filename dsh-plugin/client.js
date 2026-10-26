@@ -494,6 +494,25 @@ window.__ModuleLoader__.load({
       return '已返回结果；展开查看原始输入和输出。';
     }
 
+    function terminalDeliveryText(toolName, block) {
+      const delivery = block?.meta?.final_delivery;
+      const bindings = delivery?.bindings;
+      if (toolName !== 'save_explanation_draft' || block?.isError !== false
+          || delivery?.schema_version !== 1 || delivery.status !== 'verified'
+          || delivery.channel !== 'tool/result' || typeof delivery.final_response !== 'string'
+          || !delivery.final_response.trim() || !/^[a-f0-9]{64}$/.test(delivery.final_response_sha256)
+          || !['complete', 'awaiting_input', 'needs_review', 'awaiting_manager',
+            'needs_requirements'].includes(bindings?.completion_status)
+          || !['session_id', 'request_key', 'call_id', 'task_id', 'draft_id',
+            'draft_content_hash', 'receipt_id', 'requirements_id'].every(
+            key => typeof bindings[key] === 'string' && bindings[key].length > 0)
+          || !Array.isArray(block.content) || block.content.length !== 1
+          || block.content[0]?.type !== 'text' || block.content[0].text !== delivery.final_response) return null;
+      // Authority comes from the server's live receipt verification. Render its
+      // exact persisted text; do not infer success from a generic tool payload.
+      return delivery.final_response;
+    }
+
     function FinanceStageRow(props) {
       const block = (props && props.block) || null;
       const toolName = (props && props.toolName) || 'finance';
@@ -501,7 +520,7 @@ window.__ModuleLoader__.load({
       const text = settled ? resultText(block) : '';
       const stage = stageOf(toolName);
       const raw = rawToolPayload(toolName, block, text);
-      return jsx.jsxs('details', {
+      const details = jsx.jsxs('details', {
         style: { fontSize: 13, lineHeight: 1.6 },
         open: block?.isError ? true : undefined,
         children: [
@@ -527,6 +546,17 @@ window.__ModuleLoader__.load({
               }),
             ],
           }) : null,
+        ],
+      });
+      const finalText = settled ? terminalDeliveryText(toolName, block) : null;
+      return finalText === null ? details : jsx.jsxs('div', {
+        children: [
+          jsx.jsx('div', {
+            'aria-label': '已保存的最终答复',
+            style: { fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', marginBottom: 8 },
+            children: finalText,
+          }),
+          details,
         ],
       });
     }

@@ -1,0 +1,44 @@
+{
+  "allowed_paths": [
+    "受限资金不可当可用；不承诺无来源融资"
+  ],
+  "author": "Codex development fixture author",
+  "case_id": "E22--restricted_cash",
+  "critical_dimensions": [
+    "numeric_basis",
+    "recognition_basis",
+    "scope_period",
+    "authority_completion"
+  ],
+  "derivation": "Decimal arithmetic grammar for numeric checks; literal reviewed accounting identities and stated policy for behavioral checks",
+  "expected_trigger": "required",
+  "human_review_status": "not_reviewed",
+  "knowledge_status": "development_visible_not_blind",
+  "numeric_checks": [
+    {
+      "absolute_tolerance": "0",
+      "expected": "70",
+      "expression": "100-30",
+      "metric": "available"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "-10",
+      "expression": "100-30+20-100",
+      "metric": "closing_available"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "10",
+      "expression": "100-(100-30+20)",
+      "metric": "shortfall"
+    }
+  ],
+  "paired_control_id": null,
+  "required_behaviors": [
+    "受限资金不可当可用；不承诺无来源融资"
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "second_human_reviewer": null,
+  "source": "reviewed E01-E32 specification; synthetic stated business facts; no production output used as truth"
+}

@@ -1,0 +1,25 @@
+{
+  "case_id": "E14--fx_rate_present",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "cash_CNY",
+      "value": "700"
+    },
+    {
+      "name": "cash_USD",
+      "value": "100"
+    },
+    {
+      "name": "approved_USD_CNY_rate",
+      "value": "7"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "将两笔现金合计为CNY。"
+}

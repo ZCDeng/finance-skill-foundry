@@ -38,6 +38,7 @@ ATTENTION = "attention"
 NOT_STARTED = "not_started"
 
 ISSUE_TEXT = {
+    "professional_reconfirmation_required": "财务规则变化，待重新确认并运行",
     "open": "差异待处理",
     "pending_external": "待外部确认",
     "awaiting_reimport": "待重新导入修正后的资料",
@@ -173,7 +174,7 @@ def _structure_block(datasets: list[dict[str, Any]], pending: list[str]) -> dict
 
 
 def _controls_block(controls: list[dict[str, Any]]) -> dict[str, Any]:
-    confirmed = [row for row in controls if row.get("state") == "confirmed"]
+    confirmed = [row for row in controls if row.get("state") == "confirmed" or row.get("professional_reconfirmation_required")]
     if not confirmed:
         return _block("controls", "控制", [_item("还没有确认的勾稽控制", blocking=True, target="controls")])
     items = []
@@ -220,7 +221,7 @@ def _conclusion(controls: list[dict[str, Any]], datasets: list[dict[str, Any]], 
     copy was made from, or a copy made for another month): one no confirmed control reads is not a
     book this pack waits on; one a control reads stays listed, so its result shows under its name.
     """
-    confirmed = [row for row in controls if row.get("state") == "confirmed"]
+    confirmed = [row for row in controls if row.get("state") == "confirmed" or row.get("professional_reconfirmation_required")]
     held = [_reason(item["text"], item.get("target")) for block in inputs for item in block["items"] if item["blocking"]]
     # Scope holds every workbook; a structure waiting on the manager holds only its own file.
     scope_held = [_reason(item["text"], item.get("target")) for item in inputs[0]["items"] if item["blocking"]]
@@ -264,6 +265,9 @@ def _level(confirmed: list[dict[str, Any]], held: list[dict[str, Any]], *, missi
     if stale:
         # Confirming the check again on the new file is not enough: the old one holds until it is retired.
         unknown.append(_reason(f"{stale} 条控制还读着旧版本资料：在新版本上确认对应控制后，把旧的停用", "controls"))
+    for row in confirmed:
+        if row.get("professional_reconfirmation_required"):
+            unknown.append(_reason(f"{row['control']['label']} 财务规则变化，待重新确认并运行", "controls"))
     for row in confirmed:
         if (row.get("result") or {}).get("status") == "error":
             unknown.append(_reason(f"{row['control']['label']} 读不出数", "controls"))
@@ -354,6 +358,8 @@ def _review_block(runs: list[dict[str, Any]], draft: dict[str, Any] | None, scop
     if draft is None:
         items.append(_item("还没有文稿", blocking=True, target="drafts"))
         return _block("review", "复核", items)
+    if draft.get("professional_reason"):
+        items.append(_item("文稿的专业口径或模型边界批准已变化，请复核并重新计算", blocking=True, target="drafts"))
     if draft.get("seq", 0) < last_run:
         items.append(_item("文稿早于最新一次计算，请按新结果更新", blocking=True, target="drafts"))
     else:

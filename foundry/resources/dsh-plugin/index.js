@@ -1,5 +1,6 @@
 import { execFile, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { modelRenderObservation } from "./model-result.js";
 
 const PACKAGE_URL = new URL("./package.json", import.meta.url);
 const DEFAULT_TIMEOUT_MS = 120000;
@@ -90,9 +91,23 @@ function foundry(args, exec, requireSession = false) {
   return result.stdout;
 }
 
-function cancelledFoundryError(cause) {
-  const message = cause instanceof Error ? cause.message : String(cause ?? "operation cancelled");
-  const error = new Error(message || "operation cancelled");
+function cancelledFoundryError(cause, args, exec) {
+  // Cancellation reasons are often harness objects, not Errors. Do not stringify
+  // arbitrary exception fields: they can contain arguments, paths or credentials.
+  const kind = cause?.name === "TimeoutError" ? "timeout"
+    : ["disposed", "hook", "user", "shutdown", "timeout"].includes(cause?.kind) ? cause.kind : "unknown";
+  const diagnostic = {
+    code: "FOUNDRY_CANCELLED", cause_kind: kind,
+    message: `Operation cancelled (${kind}); save completion is not confirmed.`,
+    command: String(args?.[0] ?? "foundry"),
+    call_id: String(exec?.callId ?? ""), session_id: sessionOf(exec),
+    next_action: "Inspect analysis-state and the persisted completion receipt before retrying; do not claim that cancellation proves a validation failure or a completed save.",
+  };
+  if (cause instanceof Error && ["already cancelled", "finance completion timed out", "completion deadline exceeded"].includes(cause.message)) {
+    diagnostic.reason = cause.message;
+  }
+  if (cause?.reason === "finance completion timeout") diagnostic.reason = cause.reason;
+  const error = new Error(JSON.stringify(diagnostic));
   error.name = "FoundryCancelled";
   error.cancelled = true;
   error.refused = false;
@@ -110,7 +125,7 @@ export function invokeFoundry(args, exec) {
   }
   const varRoot = process.env.FOUNDRY_VAR;
   if (!varRoot) return Promise.reject(new Error("FOUNDRY_VAR is required"));
-  if (exec?.signal?.aborted) return Promise.reject(cancelledFoundryError(exec.signal.reason));
+  if (exec?.signal?.aborted) return Promise.reject(cancelledFoundryError(exec.signal.reason, args, exec));
   return new Promise((resolve, reject) => {
     let settled = false;
     const abort = () => {
@@ -123,7 +138,7 @@ export function invokeFoundry(args, exec) {
     }, (failure, stdout, stderr) => {
       settled = true;
       exec?.signal?.removeEventListener?.("abort", abort);
-      if (exec?.signal?.aborted) return reject(cancelledFoundryError(exec.signal.reason));
+      if (exec?.signal?.aborted) return reject(cancelledFoundryError(exec.signal.reason, args, exec));
       if (!failure) return resolve(stdout);
       const error = new Error(stderr || stdout || failure.message);
       error.name = failure.code === REFUSED ? "FoundryRefusal" : "FoundryError";
@@ -405,10 +420,20 @@ const OUTPUT_SCHEMA = {
      * conversation and not for the model, which reads `stdout` only.
      */
     presented: { type: "object" },
+    // Only the trusted terminal-delivery post-policy supplies this field.
+    // It is persisted in the SDK's normal tool/result, never a model message.
+    final_delivery: { type: "object" },
   },
   required: ["tool", "stdout"],
   additionalProperties: false,
 };
+
+const deliveryGuards = new WeakMap();
+
+/** Recheck the selected delivery at the SDK's synchronous finalization boundary. */
+export function guardFinalDelivery(exec, check) {
+  deliveryGuards.set(exec, check);
+}
 
 /**
  * How a pending call is drawn before it runs.
@@ -445,15 +470,19 @@ const CALL_KINDS = {
 };
 
 export function toolDefinition(toolName, spec = specFor(toolName)) {
+  const rendered = new WeakMap();
   return {
     name: toolName,
     description: spec.description,
     parameters: spec.parameters,
     output: {
       schema: OUTPUT_SCHEMA,
-      render: (_args, value) => [
-        { type: "text", text: value?.stdout || `${value?.tool ?? toolName} 完成` },
-      ],
+      render: (_args, value) => {
+        const content = [{ type: "text", text: value?.final_delivery?.final_response
+          ?? ((spec.modelText ? spec.modelText(value?.stdout) : value?.stdout) || `${value?.tool ?? toolName} 完成`) }];
+        if (value && typeof value === "object") rendered.set(value, content);
+        return content;
+      },
       /*
        * The receipt, projected for the conversation and not for the model.
        *
@@ -477,8 +506,19 @@ export function toolDefinition(toolName, spec = specFor(toolName)) {
         const meta = { filed: Array.isArray(value?.filed) ? value.filed : [] };
         const presented = value?.presented;
         if (presented && typeof presented === "object" && !Array.isArray(presented)) meta.presented = presented;
+        if (value?.final_delivery) meta.final_delivery = value.final_delivery;
+        const observation = modelRenderObservation(toolName, value?.stdout, rendered.get(value));
+        if (observation) meta.model_result_render = observation;
         return meta;
       },
+    },
+    finalizeContent: (exec, result) => {
+      const check = deliveryGuards.get(exec);
+      deliveryGuards.delete(exec);
+      if (!result.isError && result.value?.final_delivery && !check) {
+        throw new Error("Financial terminal delivery lacks a live verification guard");
+      }
+      if (check && !result.isError) check(result);
     },
     presentCall: presentCall(toolName, spec.kind ?? CALL_KINDS[toolName] ?? "other"),
     execute: async (args, exec) => {

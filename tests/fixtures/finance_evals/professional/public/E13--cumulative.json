@@ -1,0 +1,25 @@
+{
+  "case_id": "E13--cumulative",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "january_month",
+      "value": "10"
+    },
+    {
+      "name": "february_month",
+      "value": "20"
+    },
+    {
+      "name": "february_ytd",
+      "value": "30"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "计算2月累计，并解释资料范围。"
+}

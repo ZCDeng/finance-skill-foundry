@@ -16,6 +16,7 @@ COMMANDS = {
     "analysis-state",
     "dataset-add",
     "dataset-read",
+    "dataset-display-rename",
     "analysis-save",
     "analysis-run",
     "analysis-draft",
@@ -54,6 +55,9 @@ def add_parsers(sub):
     )
     p = sub.add_parser("dataset-read")
     p.add_argument("--dataset", required=True)
+    p = sub.add_parser("dataset-display-rename")
+    p.add_argument("--dataset", required=True)
+    p.add_argument("--name", required=True)
     p = sub.add_parser("analysis-save")
     p.add_argument("--spec", required=True)
     p = sub.add_parser("analysis-run")
@@ -403,10 +407,12 @@ def dispatch(args) -> bool:
                     context, result, getattr(args, "actor", "") or None
                 ),
             }
-    elif args.cmd == "dataset-read":
+    elif args.cmd in {"dataset-read", "dataset-display-rename"}:
         from foundry.source_refresh import snapshots_in_view
 
         _bound(context, {"dataset": args.dataset})
+        if args.cmd == "dataset-display-rename":
+            service.rename_dataset_display(args.dataset, args.name)
         [result] = snapshots_in_view(service, [service.read_dataset(args.dataset)], _ceiling(context))
     elif args.cmd == "analysis-save":
         spec = _json(args.spec, "analysis spec")

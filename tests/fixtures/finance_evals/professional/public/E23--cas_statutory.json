@@ -1,0 +1,33 @@
+{
+  "case_id": "E23--cas_statutory",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "basis",
+      "value": "CAS"
+    },
+    {
+      "name": "purpose",
+      "value": "statutory"
+    },
+    {
+      "name": "opening_cash",
+      "value": "100"
+    },
+    {
+      "name": "closing_cash",
+      "value": "120"
+    },
+    {
+      "name": "activity_detail",
+      "value": "missing"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "按所选用途编制现金流报告，并说明可完成范围。"
+}

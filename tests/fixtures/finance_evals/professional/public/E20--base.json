@@ -1,0 +1,33 @@
+{
+  "case_id": "E20--base",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "opening_RE",
+      "value": "80"
+    },
+    {
+      "name": "net_income",
+      "value": "20"
+    },
+    {
+      "name": "dividends",
+      "value": "5"
+    },
+    {
+      "name": "approved_opening_adjustment",
+      "value": "2"
+    },
+    {
+      "name": "OCI",
+      "value": "3"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "调节留存收益与OCI。"
+}

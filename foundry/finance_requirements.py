@@ -36,7 +36,8 @@ RATIO_SCENARIOS = {
     'budget_phase_ratio',
     'ratio',
 }
-PRICE_QUANTITY_METHODS = {'quantity_then_price', 'base_weights_with_interaction'}
+PRICE_QUANTITY_METHODS = {'quantity_then_price', 'base_weights_with_interaction', 'volume_mix_price'}
+VOLUME_MIX_PRICE_COLUMNS = ('total_variance', 'volume_contribution', 'mix_contribution', 'price_contribution')
 PRICE_QUANTITY_REQUIRED_COLUMNS = (
     'total_variance', 'quantity_contribution', 'price_contribution', 'interaction'
 )
@@ -166,8 +167,13 @@ def save_requirements(analysis, spec, *, _context_scopes=None, _allowed=None):
     with exclusive(analysis.task.lock_path, timeout=10):
         parent, removed, reason = _version_change(analysis, spec, normalized)
         assessed_spec = {**spec, 'question': question, 'scope': scope, 'items': normalized, 'bindings': bindings}
+        from foundry.finance_professional import validate_requirement_identity, valid_rule_identity
+        identity = validate_requirement_identity(analysis, assessed_spec, allowed=_allowed)
         from foundry.finance_requirement_semantics import requirement_semantics
         semantics = requirement_semantics(analysis, {**assessed_spec, 'removed_item_ids': removed})
+        if identity and not valid_rule_identity((semantics.get('semantic_basis') or {}).get('professional_identity')):
+            raise FoundryError('professional_identity_invalid: source or context identity became unavailable; '
+                               'restore the complete required_bindings before registering requirements')
         record = _new(analysis.task, **semantics, question=question, scope=scope, bindings=bindings, context_id=spec.get("context_id"),
                       items=normalized, parent_id=(parent or {}).get('id'),
                       removed_item_ids=removed, change_reason=reason, selection=selection,
@@ -175,6 +181,25 @@ def save_requirements(analysis, spec, *, _context_scopes=None, _allowed=None):
                       **({'authoring_warnings': warnings} if warnings else {}),
                       content_hash=_hash({'question': question, 'scope': scope, 'items': normalized, 'bindings': bindings}))
         return analysis._write_locked(analysis._object_path('requirements', record['id']), record)
+
+
+def _validate_template_metric_identity(item_id, metric, dimensions):
+    from foundry.finance_driver_templates import OUTPUT_SEMANTICS, TEMPLATE_ID
+
+    # A closed template pin constrains its output identity; it cannot rename an
+    # obligation. Generic metric pins and unsupported obligations remain valid.
+    if (dimensions.get('template_id') != TEMPLATE_ID or 'metric_key' not in dimensions
+            or dimensions['metric_key'] == metric):
+        return
+    pin = dimensions['metric_key']
+    canonical = pin if isinstance(pin, str) and pin in OUTPUT_SEMANTICS else metric
+    hint = (f"if the intended output is {canonical!r}, set metric and dimensions.metric_key both to {canonical!r}; "
+            if canonical in OUTPUT_SEMANTICS else '')
+    raise FoundryError(
+        f"requirement {item_id!r}: template {TEMPLATE_ID!r} metric={metric!r} conflicts with "
+        f"dimensions.metric_key={pin!r}; {hint}canonical output identities: {', '.join(OUTPUT_SEMANTICS)}. "
+        "Use the same exact output identity in both fields; use label for descriptive wording."
+    )
 
 
 def prepare_requirements(analysis, spec, *, _context_scopes=None, _allowed=None):
@@ -192,6 +217,7 @@ def prepare_requirements(analysis, spec, *, _context_scopes=None, _allowed=None)
     selection = _selection(spec.get('selection'))
     if not isinstance(scope, dict) or not isinstance(bindings, dict):
         raise FoundryError('requirements scope and bindings must be objects')
+    _validate_purpose_scope(analysis, scope, bindings)
     if not isinstance(items, list) or len(items) > 100:
         raise FoundryError('requirements items must be an array of at most 100 items')
     normalized = []
@@ -209,6 +235,7 @@ def prepare_requirements(analysis, spec, *, _context_scopes=None, _allowed=None)
         scenarios = item.get('scenarios', [])
         if not isinstance(dimensions, dict) or not isinstance(item.get('requires_drilldown', False), bool):
             raise FoundryError('invalid requirement dimensions or drilldown flag')
+        _validate_template_metric_identity(item['id'], metric, dimensions)
         if isinstance(dimensions.get('period'), (list, tuple, set, frozenset, dict)):
             raise FoundryError('requirement dimensions.period must be a scalar; use periods for a set')
         if periods in (None, ''):
@@ -268,8 +295,37 @@ def prepare_requirements(analysis, spec, *, _context_scopes=None, _allowed=None)
         _reject_hierarchy_dimensions(normalized, hierarchy)
     scope, scope_dropped = _scope_hierarchy(analysis, spec.get('parent_id'), scope, _context_scopes, _allowed)
     _version_change(analysis, spec, normalized)
+    from foundry.finance_professional import validate_requirement_identity
+    validate_requirement_identity(analysis, {**spec, 'items': normalized, 'bindings': bindings}, allowed=_allowed)
     return {'question': question, 'scope': scope, 'items': normalized, 'bindings': bindings,
             'selection': selection, 'warnings': [*carried_over, *scope_dropped]}
+
+
+def _validate_purpose_scope(analysis, scope, bindings):
+    """A reporting use is question text; a real source ``purpose`` stays a filter.
+
+    Refusing the ambiguous registration is deliberate: removing a key here could
+    silently expand the requested population. Existing records are not rewritten.
+    """
+    def contains_purpose(value):
+        return isinstance(value, dict) and ('purpose' in value or any(
+            contains_purpose(child) for child in value.values() if isinstance(child, dict)))
+
+    if not contains_purpose(scope):
+        return
+    for dataset_id in bindings.values():
+        try:
+            dataset = analysis.read_dataset(dataset_id)
+            if any(isinstance(column, dict) and column.get('name') == 'purpose'
+                   for column in dataset.get('schema', [])):
+                return
+        except (FoundryError, OSError, ValueError, KeyError, TypeError):
+            continue
+    raise FoundryError(
+        'requirements scope.purpose has no verified bound source field; put reporting purpose in question, '
+        'or bind a source declaring the real purpose dimension. Keep all original requirements and sources; '
+        'save a valid requirements version before calculations or diagnostics.'
+    )
 
 
 def _version_change(analysis, spec, items):
@@ -1125,6 +1181,31 @@ def _matches(item, row, column, run=None):
     return _metric_matches(item, row, column)
 
 
+def _receivables_population_filtered(item, latest, run, row):
+    """An explicitly complete receivables obligation cannot be answered by a subset."""
+    if _canonical_metric_name(item.get('metric')) != 'open_amount' or run.get('engine') != 'finance':
+        return False
+    label = str(item.get('label') or '')
+    text = label if re.search(r'应收|receivable', label, re.I) else str(latest.get('question') or '')
+    full = re.search(r'(?:完整|全部|全量)应收|应收(?:账款)?总额|\b(?:all|full|total gross) receivables\b', text, re.I)
+    if not full or re.search(r'(?:无需|不要求|不需要)\s*$', text[:full.start()]):
+        return False
+    filtered = ((run.get('result') or {}).get('evidence') or {}).get('status_filter') or {}
+    keys = ('ledger', 'organization', 'currency', 'unit')
+    scope = tuple(row.get(key) for key in keys)
+    for excluded in filtered.get('excluded_open_amount_by_scope', []):
+        excluded_scope = excluded.get('scope') or excluded
+        if tuple(excluded_scope.get(key) for key in keys) != scope:
+            continue
+        try:
+            amount = Decimal(str(excluded.get('open_amount')))
+            if amount.is_finite() and amount != 0:
+                return True
+        except (InvalidOperation, ValueError, TypeError):
+            continue
+    return False
+
+
 def _metric_matches(item, row, column):
     """The metric half of _matches: does this cell state the item's metric, whatever its other fields."""
     metric = _canonical_metric_name(item['metric'])
@@ -1150,6 +1231,11 @@ def _metric_key_ratio_pin_matches(item, row, metric):
     dimensions = item.get('dimensions', {})
     if not isinstance(dimensions, dict) or dimensions.get('metric_key') in (None, ''):
         return False
+    # A pinned long-form ratio may state its measure by unit without inventing
+    # an achievement scenario. Money, points and unitless rows are not ratios.
+    from foundry.result_semantics import FRACTION_UNITS, PERCENT_UNITS
+    if str(row.get('unit') or row.get('单位') or '').strip().lower() in FRACTION_UNITS | PERCENT_UNITS:
+        return True
     scenario = row.get('scenario')
     return isinstance(scenario, str) and scenario.strip().lower() in RATIO_SCENARIOS
 
@@ -1184,13 +1270,48 @@ def _dimensions_match(item, row, run=None):
     for key, value in dimensions.items():
         if key in {'method', *INTENT_DIMENSION_KEYS}:
             continue
-        if row.get(key) != value:
+        if key == 'scenario_id' and (run or {}).get('engine') == 'finance':
+            if ((run or {}).get('result') or {}).get('scenario_id') != value:
+                return False
+            continue
+        if row.get(key) != value and not _verified_aging_label_matches(key, value, row, run or {}):
             return False
     if 'scenario_compare' in dimensions and not _scenario_compare_matches(dimensions['scenario_compare'], row, run or {}):
         return False
     if 'dimension' in dimensions and not _dimension_intent_matches(dimensions['dimension'], row, run or {}):
         return False
     return True
+
+
+def _verified_aging_label_matches(key, value, row, run):
+    """Only server-recomputed aging metadata may bridge a display label to its id."""
+    if key != 'bucket' or row.get('bucket_label') != value:
+        return False
+    from foundry.finance_native_drafts import verified_aging_audit_metadata
+
+    proof = run.get('_verified_aging_labels')
+    return bool(verified_aging_audit_metadata(proof)
+                and proof['run_id'] == run.get('id') and proof['output_hash'] == run.get('output_hash')
+                and row in proof['summary_rows'])
+
+
+def _with_verified_aging_labels(analysis, runs, latest, allowed):
+    labels = {item.get('dimensions', {}).get('bucket') for item in latest.get('items', [])
+              if isinstance(item.get('dimensions', {}).get('bucket'), str)}
+    if not labels:
+        return runs
+    from foundry.finance_native_drafts import prepare_aging_audit_metadata, verified_aging_audit_metadata
+
+    marked = dict(runs)
+    for run_id, run in runs.items():
+        rows = (run.get('result') or {}).get('rows') or []
+        if not any(row.get('bucket') != row.get('bucket_label') and row.get('bucket_label') in labels
+                   for row in rows if isinstance(row, dict)):
+            continue
+        proof = prepare_aging_audit_metadata(analysis, [run], allowed=allowed)
+        if verified_aging_audit_metadata(proof):
+            marked[run_id] = {**run, '_verified_aging_labels': proof}
+    return marked
 
 
 def _scenario_compare_matches(value, row, run):
@@ -1250,6 +1371,7 @@ def _run_finance_metric(analysis, run):
 
 def _prepared_evidence(analysis, runs):
     from foundry.finance_explanations import prepare_explanation
+    from foundry.finance_professional import cell_evidence_eligibility
 
     prepared = prepare_explanation(analysis, list(runs.values())) if runs else {'evidence_groups': []}
     member_map = {}
@@ -1276,6 +1398,11 @@ def _prepared_evidence(analysis, runs):
             fact_id = member.get('fact_id')
             if not fact_id:
                 continue
+            source_row = (run.get('result') or {}).get('rows', [])[member.get('row', 0)]
+            qualified = engine == 'finance' and cell_evidence_eligibility(
+                run, source_row, member.get('column'), analysis=analysis)['counts_as_amount_evidence']
+            professional = bool((run.get('result') or {}).get('source_binding_status') or
+                                (run.get('result') or {}).get('method') == 'volume_mix_price')
             aggregate = {}
             if engine == 'structured_aggregate':
                 # Which aggregation the cited measure column is (sum, count, min …), and for a min or max how many
@@ -1293,10 +1420,16 @@ def _prepared_evidence(analysis, runs):
                 'closure_status': closure_status,
                 # Only the finance engine's own closure is evidence; a script that builds a
                 # bridge-shaped table which adds up (999/-1/-1/997) is shown, never counted.
-                'engine_closed': engine == 'finance' and closure_status == 'passed' and not closure_reason,
+                'engine_closed': engine == 'finance' and closure_status == 'passed' and not closure_reason and (not professional or qualified),
                 # A finance closure over scaled lines or of a scenario with itself (_closure_not_counted_reason).
                 **({'closure_not_counted_reason': closure_reason} if closure_reason else {}),
                 'engine_output': engine == 'finance',
+                'engine_sources_verified': qualified,
+                'template_id': source_row.get('template_id'),
+                'template_metric': source_row.get('metric_key'),
+                'amount_basis': source_row.get('amount_basis'),
+                'collection_manual_inputs': (source_row.get('manual_inputs') or [])
+                    if engine == 'finance' and (run.get('result') or {}).get('scenario_kind') == 'collection_health' else [],
                 # A server-side declarative aggregate of a bound snapshot (no user code): not a script, and
                 # drilldown_fact verifies its rows. It answers amounts outside the four P&L lines.
                 'aggregate_output': engine == 'structured_aggregate',
@@ -1420,10 +1553,43 @@ def _price_quantity_requirement_matches(item, run, row, group):
         return False
     if group.get('status') != 'complete' or (group.get('closure') or {}).get('status') != 'passed':
         return False
-    if any(row.get(k) != value for k, value in item.get('dimensions', {}).items() if k != 'method'):
-        return False
+    for key, value in item.get('dimensions', {}).items():
+        if key == 'method':
+            continue
+        if run_method == 'volume_mix_price' and key in {'actual_scenario', 'baseline_scenario'}:
+            # Native basket rows retain each comparison side in its scope. A flat
+            # label cannot substitute for a missing scope or contradict that side.
+            scope = row.get(key.replace('_scenario', '_scope'))
+            if not isinstance(scope, dict) or scope.get('scenario') != value:
+                return False
+            if key in row and row[key] != value:
+                return False
+        elif key in {'actual_scenario', 'baseline_scenario'}:
+            # Standard native bridges persist their comparison identity once at
+            # result level. Any row-side identity must agree with that source.
+            comparison = run.get('result', {}).get('comparison')
+            if not isinstance(comparison, dict) or comparison.get(key) != value:
+                return False
+            if key in row and row[key] != value:
+                return False
+            side_scope = row.get(key.replace('_scenario', '_scope'))
+            if side_scope is not None and (not isinstance(side_scope, dict)
+                                          or side_scope.get('scenario') != value):
+                return False
+        elif row.get(key) != value:
+            return False
     members = _price_quantity_required_members(group)
-    return {member.get('column') for member in members} == set(PRICE_QUANTITY_REQUIRED_COLUMNS)
+    if run_method == 'volume_mix_price':
+        if row.get('applicability') != 'comparable' or any(not member.get('evidence_eligibility', {}).get('counts_as_amount_evidence') for member in members):
+            return False
+        # A q*p bridge answers its decomposition, not an independent P&L line.
+        if metric != 'price_quantity' and row.get('amount_basis') == 'quantity_times_price':
+            return False
+    return {member.get('column') for member in members} == set(_price_quantity_columns(group))
+
+
+def _price_quantity_columns(group):
+    return VOLUME_MIX_PRICE_COLUMNS if any(m.get('column') == 'mix_contribution' for m in group.get('members', [])) else PRICE_QUANTITY_REQUIRED_COLUMNS
 
 
 def _price_quantity_required_members(group):
@@ -1431,10 +1597,10 @@ def _price_quantity_required_members(group):
         return []
     members = [
         member for member in group.get('members', [])
-        if isinstance(member, dict) and member.get('column') in PRICE_QUANTITY_REQUIRED_COLUMNS
+        if isinstance(member, dict) and member.get('column') in _price_quantity_columns(group)
     ]
     complete = []
-    for column in PRICE_QUANTITY_REQUIRED_COLUMNS:
+    for column in _price_quantity_columns(group):
         matches = [member for member in members if member.get('column') == column]
         if len(matches) != 1 or matches[0].get('fact_id') is None:
             return []
@@ -1470,7 +1636,24 @@ def _native_account_item(item):
     (_ledger_account_item, _result_set_kind, _account_amount_claim_requires_native_total use this test). A
     ledger account named like a line (主营业务成本, 管理费用) is the ledger's own name and stays an account.
     """
+    from .finance_driver_templates import OUTPUT_SEMANTICS, TEMPLATE_ID
+
     metric = item.get('metric')
+    dimensions = item.get('dimensions')
+    # A method obligation is not an account identity, even when the source
+    # happens to use the same name. Grain lists do not change that obligation.
+    if _price_volume_name(str(metric or '')) or (isinstance(dimensions, dict) and dimensions.get('method')):
+        return False
+    # A registered template output uses cell matching, even with an explicit grain.
+    # This is dispatch only: the matching run still must prove its identity and eligibility.
+    if (
+        isinstance(metric, str) and metric in OUTPUT_SEMANTICS
+        and isinstance(dimensions, dict)
+        and dimensions.get('template_id') == TEMPLATE_ID
+        and isinstance(dimensions.get('scenario_id'), str) and dimensions['scenario_id'].strip()
+        and dimensions.get('metric_key', metric) == metric
+    ):
+        return False
     return _canonical_metric_name(metric) not in METRIC_LABELS and _named_metric(metric) not in CLOSED_EVIDENCE_METRICS
 
 
@@ -1489,8 +1672,8 @@ def _account_amount_claim_requires_native_total(item, row, column):
     )
 
 
-def _result_set_requirement_status(analysis, item, latest, runs, claimed, checks, evidence):
-    kind = _result_set_kind(item)
+def _result_set_requirement_status(analysis, item, latest, runs, claimed, checks, evidence, environment):
+    kind = _result_set_kind(item, environment)
     if not kind:
         return None
     bases, tried = [], []
@@ -1617,11 +1800,18 @@ def _run_row_value(run, row, key):
     return values.pop() if values else None
 
 
-def _result_set_kind(item):
+def _result_set_kind(item, environment=None):
+    """Classify the shape; public routing also requires a verified source account.
+
+    Without a source environment this is only a structural classification, used
+    for explicit control-total filter semantics. Guidance and matching both
+    supply the same environment before dispatching an inferred account total.
+    """
     metric = _canonical_metric_name(item.get('metric'))
     if metric in RESULT_SET_METRICS:
         return metric
-    if (item.get('periods') or item.get('organizations')) and metric not in RESULT_SET_METRICS and _native_account_item(item):
+    if ((item.get('periods') or item.get('organizations')) and _native_account_item(item)
+            and (environment is None or _ledger_account_item(item, environment))):
         return 'account_total'
     return None
 
@@ -2149,6 +2339,8 @@ def _location_evidence_status(item, location, member, recipe=None, *, native_tot
         **_recipe_metadata(recipe),
     }
     member = member or {}
+    if member.get('collection_manual_inputs'):
+        return 'pending', {**metadata, 'evidence_basis': None, 'not_counted_reason': 'unverified_manual_inputs'}
     if member.get('member_state') == 'missing':
         return 'missing_data', {**metadata, 'evidence_basis': None, 'not_counted_reason': 'evidence_incomplete'}
     if member.get('member_state') == 'not_applicable':
@@ -2158,6 +2350,15 @@ def _location_evidence_status(item, location, member, recipe=None, *, native_tot
         # against nothing. Whatever backs the cell, it is not a complete comparison.
         return 'missing_data', {**metadata, 'evidence_basis': None, 'not_counted_reason': 'comparison_partial'}
     amount = _closed_metric_key(item, scenario)
+    if member.get('template_id'):
+        # Registered forecasts answer only an explicitly requested model output.
+        # They never become historical ledger facts through their P&L shape.
+        if ((item.get('dimensions') or {}).get('template_id') != member['template_id']
+                or item.get('metric') != member.get('template_metric') or not member.get('engine_sources_verified')):
+            return 'not_applicable', {**metadata, 'evidence_basis': None, 'not_counted_reason': 'template_evidence_not_qualified'}
+        return 'answered', {**metadata, 'evidence_basis': 'source_calculation'}
+    if member.get('amount_basis') == 'quantity_times_price' and item.get('metric') != 'price_quantity':
+        return 'not_applicable', {**metadata, 'evidence_basis': None, 'not_counted_reason': 'derived_revenue_not_ledger_amount'}
     source_recipe = bool(
         recipe and recipe.get('counted') and recipe['evidence_class'] in SOURCE_EVIDENCE_BASES
         and recipe.get('kind') != 'ratio' and amount is not None
@@ -2186,7 +2387,7 @@ def _location_evidence_status(item, location, member, recipe=None, *, native_tot
         return 'answered', {**metadata, 'evidence_basis': recipe['evidence_class']}
     if engine_closed:
         return 'answered', {**metadata, 'evidence_basis': 'engine_closed'}
-    if native_total and member.get('engine_output'):
+    if native_total and member.get('engine_output') and member.get('engine_sources_verified'):
         # The finance engine's own total of exactly this account (not a script's copy of it).
         return 'answered', {**metadata, 'evidence_basis': 'engine_output'}
     if amount not in CLOSURE_OR_RECIPE_AMOUNTS and _server_output(member) and not estimate:
@@ -2319,7 +2520,7 @@ def _aggregate_statistic_of_money(item, member):
 
 
 def _server_output(member):
-    return bool(member.get('engine_output') or member.get('aggregate_output'))
+    return bool((member.get('engine_output') and member.get('engine_sources_verified')) or member.get('aggregate_output'))
 
 
 def _output_basis(member):
@@ -2471,8 +2672,8 @@ def _dedupe_fixups(fixups):
     return deduped
 
 
-def _result_set_candidate_fixups(analysis, item, latest, runs, checks, evidence, claimed):
-    kind = _result_set_kind(item)
+def _result_set_candidate_fixups(analysis, item, latest, runs, checks, evidence, claimed, environment):
+    kind = _result_set_kind(item, environment)
     if not kind:
         return []
     fixups = []
@@ -2646,14 +2847,49 @@ def _method_conflict_fixups(item, latest, runs, evidence):
     return fixups
 
 
-def _requirement_fixups(analysis, item, latest, runs, checks, evidence, claimed):
+def _requirement_fixups(analysis, item, latest, runs, checks, evidence, claimed, environment):
     return _dedupe_fixups([
-        *_result_set_candidate_fixups(analysis, item, latest, runs, checks, evidence, claimed),
+        *_result_set_candidate_fixups(analysis, item, latest, runs, checks, evidence, claimed, environment),
         *_price_quantity_candidate_fixups(item, latest, runs, checks, evidence, claimed),
         *_generic_candidate_fixups(item, latest, runs, checks, evidence, claimed),
         *_profit_bridge_candidate_fixups(analysis, item, latest, runs, checks, evidence, claimed),
         *_method_conflict_fixups(item, latest, runs, evidence),
     ])
+
+
+def _transaction_check_requirement(item, latest, runs, claimed, *, review_approved=False):
+    """Recognize a completed computation check, without qualifying its amounts.
+
+    Only the explicit, unpartitioned review requirement uses this path. The
+    transaction warning still prevents financial completion below.
+    """
+    if (item.get('metric') != 'transaction_review' or item.get('dimensions')
+            or any(item.get(key) for key in ('organizations', 'periods', 'scenarios'))):
+        return None
+    for run in runs.values():
+        result = run.get('result') or {}
+        if (run.get('engine') != 'finance' or result.get('rule_version') != 'transaction_recognition_v1'
+                or result.get('qualification') != 'source_bound_transaction_check_requires_professional_review'
+                or result.get('status') != 'pass' or result.get('diagnostics') or result.get('input_gaps')
+                or not result.get('source_binding_status', {}).get('all_sources_verified')
+                or not result.get('source_rows') or not result.get('rows')
+                or not _bindings_match(latest.get('bindings', {}), run.get('bindings', {}))
+                or not _run_inputs_match_requirement(run, latest)):
+            continue
+        # Preparation exposes each proposed actual as the referenceable fact;
+        # expected/difference stay server check fields, not amount facts.
+        cells = [(run['id'], index, 'actual') for index in range(len(result['rows']))]
+        if not all(cell in claimed for cell in cells) or any(row.get('status') != 'pass' for row in result['rows']):
+            continue
+        return {**item, 'status': 'answered' if review_approved else 'pending',
+                'check_qualification': 'reviewed_check' if review_approved else 'requires_professional_review',
+                **({} if review_approved else {'awaiting_manager': ['transaction_review_required']}),
+                'counts_as_amount_evidence': False, 'source_read_failure': None,
+                'provenance_status': 'verified', 'locations': [
+                    {'run_id': run_id, 'row': index, 'column': column, 'status': 'answered',
+                     'output_hash': run.get('output_hash'), 'evidence': {'evidence_basis': 'transaction_check'}}
+                    for run_id, index, column in cells]}
+    return None
 
 
 def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_report=None, _allowed=None):
@@ -2674,6 +2910,7 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
         analysis, {run_id: run for run_id, run in succeeded.items()
                    if run_id in cited or _within_files(files, run.get('bindings'))})
     evidence = _prepared_evidence(analysis, runs)
+    runs = _with_verified_aging_labels(analysis, runs, latest, _allowed)
     # Recipe results are computed by the server in this call (or handed over by an internal caller
     # that just computed them); spec['evidence_report'] is never read.
     evidence['recipes'] = _recipe_support(analysis, spec, latest, _recipe_report)
@@ -2697,14 +2934,23 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
     checks = analysis._list('evidence_checks')
     source_failures = _source_read_failures(spec.get('source_read_failures', []))
     environment = _evidence_environment(analysis, latest, runs)
+    from foundry.finance_professional import requirement_rule_identity
+    current_identity = requirement_rule_identity(analysis, latest, allowed=_allowed)
     acceptances = _estimate_acceptances(analysis, latest)
     dropped_hierarchy = _dropped_hierarchy(analysis, latest, _allowed)
+    from foundry.finance_transaction_reviews import decision_for_spec
+    review = decision_for_spec(analysis, spec, _allowed) if any(
+        item.get('metric') == 'transaction_review' for item in latest['items']) else {}
     items = []
     for item in latest['items']:
+        transaction_item = _transaction_check_requirement(item, latest, fixup_runs, claimed, review_approved=review.get('approved', False))
+        if transaction_item is not None and item['id'] not in source_failures:
+            items.append(transaction_item)
+            continue
         locations = []
         statuses = []
         processed_groups = set()
-        result_set = _result_set_requirement_status(analysis, item, latest, runs, claimed, checks, evidence)
+        result_set = _result_set_requirement_status(analysis, item, latest, runs, claimed, checks, evidence, environment)
         if result_set is not None:
             locations = result_set['locations']
             statuses = [result_set['status']]
@@ -2732,7 +2978,7 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
             if (
                 _price_quantity_requirement_matches(item, run, row, group)
                 and (run_id, index) not in processed_groups
-                and set(PRICE_QUANTITY_REQUIRED_COLUMNS).issubset(claimed_by_row.get((run_id, index), set()))
+                and set(_price_quantity_columns(group)).issubset(claimed_by_row.get((run_id, index), set()))
                 and _requirement_scope_matches(run, row, item, latest)
             ):
                 processed_groups.add((run_id, index))
@@ -2752,6 +2998,9 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
                 location = {'run_id': run_id, 'row': index, 'column': column, 'output_hash': run.get('output_hash')}
                 native_total = account_total_candidate and _native_account_item(item)
                 status, metadata = _cell_evidence_status(item, location, evidence, native_total=native_total, row=row)
+                if _receivables_population_filtered(item, latest, run, row):
+                    status, metadata = 'pending', {**metadata, 'evidence_basis': None,
+                                                   'not_counted_reason': 'receivables_population_filtered'}
                 if native_total and not _account_total_filters_cover(analysis, item, run, _row_scope(latest['scope'])):
                     # Cited, about this account, but a total over part of it: reported, never counted.
                     status, metadata = 'pending', {**metadata, 'evidence_basis': None,
@@ -2772,6 +3021,10 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
         if result_set is None:
             grains = grain_locations if grain_locations is not None else {(None, None, None): []}
             for location in locations:
+                if location.get('evidence', {}).get('not_counted_reason') == 'receivables_population_filtered':
+                    # Keep the rejected subset visible, but it is a different
+                    # population from a separately evidenced complete amount.
+                    continue
                 run = runs[location['run_id']]
                 row = run['result']['rows'][location['row']]
                 key = _row_grain(item, run, row) if grain_locations is not None else (None, None, None)
@@ -2812,7 +3065,7 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
                 else 'inputs_verified' if estimate_inputs
                 else 'pending'
             )
-        fixups = _requirement_fixups(analysis, item, latest, fixup_runs, checks, evidence, claimed)
+        fixups = _requirement_fixups(analysis, item, latest, fixup_runs, checks, evidence, claimed, environment)
         if item_status == 'answered':
             fixups = [fixup for fixup in fixups if fixup.get('code') in SOURCE_FIXUP_CODES]
         item_record = {**item, 'status': item_status, 'locations': locations,
@@ -2849,11 +3102,36 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
         and all(grain.get('accepted') for item in items for grain in item.get('estimated_grains', []))
         and any(item['status'] == 'estimated' for item in items)
     )
+    professional_problem = None
+    if current_identity:
+        from foundry.finance_professional import artifact_rules_match, valid_rule_identity
+        captured = (latest.get('semantic_basis') or {}).get('professional_identity') or {}
+        if current_identity['professional_status'] != 'supported':
+            professional_problem = current_identity['professional_status']
+        elif not valid_rule_identity(captured):
+            professional_problem = 'professional_identity_invalid'
+        elif captured.get('rule_fingerprint') != current_identity['rule_fingerprint']:
+            professional_problem = 'professional_rules_changed'
+        elif any(not artifact_rules_match(runs[run_id], current_identity) for run_id in cited if run_id in runs):
+            professional_problem = 'run_professional_rules_differ'
+    if professional_problem:
+        complete = accepted_estimates = False
+        for item in items:
+            item['status'] = 'pending'
+            item['professional_reason'] = professional_problem
+            item['fixups'] = [{'code': professional_problem, 'requirement_item_id': item['id']}]
+    from foundry.finance_explanations import transaction_review_issues
+    transaction_issues = transaction_review_issues([runs[run_id] for run_id in sorted(cited) if run_id in runs],
+                                                  analysis=analysis, spec=spec, allowed=_allowed)
+    if transaction_issues:
+        complete = accepted_estimates = False
     trace_complete = all(item['provenance_status'] in {'verified', 'not_requested'} for item in items)
     trace_with_estimates = accepted_estimates and all(
         item['provenance_status'] in {'verified', 'not_requested', 'inputs_verified'} for item in items)
     return {'requirements_id': latest['id'], 'draft_requirements_id': selected['id'],
             'items': items, 'scope_changed': scope_changed,
+            **({'transaction_review_issues': transaction_issues} if transaction_issues else {}),
+            **({'professional_identity': current_identity, 'professional_reason': professional_problem} if current_identity else {}),
             'coverage': {'status': 'pass' if complete else 'pass_with_accepted_estimates' if accepted_estimates
                          else 'needs_attention'},
             'provenance': {'status': 'pass' if trace_complete else 'pass_with_accepted_estimates' if trace_with_estimates
@@ -3170,16 +3448,19 @@ def _evidence_environment(analysis, latest, runs=None):
     # or context makes an engine path available.
     engine_runs = any(run.get('engine') == 'finance' and _bindings_match(bindings, run.get('bindings') or {})
                       for run in runs.values())
-    store, contexts = None, []
+    store, contexts, visible_contexts = None, [], []
     try:
         from foundry.finance_service import FinanceStore
 
         store = FinanceStore(analysis.task)
-        contexts = [context for context in store._list('contexts')
+        available_contexts = store._list('contexts')
+        visible_contexts = [context for context in available_contexts
+                            if _within_files(set(dataset_ids), context.get('bindings'))]
+        contexts = [context for context in available_contexts
                     if _bindings_match(bindings, context.get('bindings') or {})]
     except (FoundryError, OSError, ValueError, KeyError, TypeError):
         store = None
-    workbooks, tables, rowless, readable, accounts, amount_columns = [], [], [], [], set(), {}
+    workbooks, tables, rowless, readable, source_readable, accounts, amount_columns = [], [], [], [], [], set(), {}
     for alias, dataset_id in bindings.items():
         if not isinstance(dataset_id, str):
             continue
@@ -3196,7 +3477,10 @@ def _evidence_environment(analysis, latest, runs=None):
         # What the finance normaliser reads, not the raw row count: a workbook file, an empty table and a
         # table with no amount column (a confirmed regional sheet) all give the engine no rows, so a context
         # on them saves cleanly and every run on them is empty.
-        if _engine_reads_rows(dataset, _engine_readers(contexts, alias, dataset_id)):
+        readers = _engine_readers(contexts, alias, dataset_id)
+        if _engine_reads_source_rows(dataset, readers):
+            source_readable.append(dataset_id)
+        if _engine_reads_rows(dataset, readers):
             readable.append(dataset_id)
         else:
             rowless.append(dataset_id)
@@ -3206,24 +3490,66 @@ def _evidence_environment(analysis, latest, runs=None):
             if columns:
                 amount_columns[alias] = columns
         # Management accounts the finance engine can total on its own (run_metric account_total).
-        accounts.update(str(row['management_account']) for row in dataset.get('rows') or []
-                        if isinstance(row, dict) and row.get('management_account') not in (None, ''))
+        accounts.update(_source_ledger_accounts(dataset, dataset_id, contexts, store))
+    if not bindings:
+        # Older requirements can identify scope before binding a source. A real
+        # native run then supplies that source, but its output labels alone do
+        # not establish an account: re-read its hash-matched input snapshots.
+        for run in runs.values():
+            if not _run_finance_metric(analysis, run):
+                continue
+            for alias, dataset_id in (run.get('bindings') or {}).items():
+                try:
+                    dataset = analysis.read_dataset(dataset_id)
+                except (FoundryError, OSError, ValueError, KeyError, TypeError):
+                    continue
+                if not _run_alias_reads(run, alias, {**dataset, 'dataset_id': dataset_id}):
+                    continue
+                run_contexts = [context for context in contexts if context.get('id') == run.get('finance_context_id')]
+                accounts.update(_source_ledger_accounts(dataset, dataset_id, run_contexts, store))
     finance_context, pending = None, []
     try:
         from foundry.structure_records import PENDING_CONFIRMATION
 
         if store is None:
             raise FoundryError('finance store unavailable')
-        finance_context = bool(latest.get('context_id')) or engine_runs or bool(contexts)
+        # A remembered context id is not proof that its current bindings cover
+        # the obligation. Contexts above have been read and compared in full.
+        finance_context = engine_runs or bool(contexts)
         pending = [dataset_id for dataset_id in dataset_ids
                    if store.dataset_structure_state(dataset_id) == PENDING_CONFIRMATION]
     except (FoundryError, OSError, ValueError, KeyError, TypeError):
         finance_context = True if engine_runs else None
     return {'workbook_sources': workbooks, 'finance_context': finance_context, 'structure_pending': pending,
+            'context_binding_diagnostic': _context_binding_diagnostic(bindings, visible_contexts),
             'rowless_bindings': rowless, 'engine_bindings': readable, 'accounts': sorted(accounts),
+            'price_quantity_bindings': source_readable,
             'amount_columns': amount_columns,
             # structured_aggregate reads exactly one snapshot, so it can meet only a single-binding requirement.
             'aggregate_sources': tables if len(dataset_ids) == 1 else []}
+
+
+
+def _context_binding_diagnostic(bindings, contexts):
+    """Diagnose incomplete groups without exposing contexts on other snapshots.
+
+    Callers pass only contexts whose bound snapshots are within the requirement.
+    This is an actionable explanation, never a substitute for _bindings_match.
+    """
+    candidates = []
+    for context in contexts:
+        held = context.get('bindings') or {}
+        if _bindings_match(bindings, held):
+            continue
+        candidates.append({
+            'context_id': context['id'], 'bindings': held,
+            'missing_aliases': sorted(alias for alias in bindings if alias not in held),
+            'different_snapshots': {alias: {'required': dataset_id, 'available': held[alias]}
+                                    for alias, dataset_id in bindings.items()
+                                    if alias in held and held[alias] != dataset_id},
+        })
+    candidates.sort(key=lambda row: (len(row['missing_aliases']) + len(row['different_snapshots']), row['context_id']))
+    return {'required_bindings': bindings, 'available_contexts': candidates[:5]}
 
 
 def _engine_readers(contexts, alias, dataset_id):
@@ -3237,6 +3563,39 @@ def _engine_readers(contexts, alias, dataset_id):
                 policy = (context.get('policies') or {}).get(name)
                 readers.append((scope if isinstance(scope, dict) else {}, policy if isinstance(policy, dict) else {}))
     return readers
+
+
+def _source_ledger_accounts(dataset, dataset_id, contexts, store):
+    """Read account identities with the engine's field/mapping rules, not output labels.
+
+    This opens a route only. The native result set must still meet its amount,
+    source, scope and approval checks before it can answer the requirement.
+    """
+    from foundry.finance_model import _compile_account_map, _field_map, _management_account, _read, _text
+
+    readers = [(None, {})]
+    for context in contexts:
+        try:
+            account_map = (store._read('account_maps', context['account_map_id'])
+                           if store and context.get('account_map_id') else None)
+        except (FoundryError, OSError, ValueError, KeyError, TypeError):
+            continue
+        for alias, bound in (context.get('bindings') or {}).items():
+            if bound == dataset_id:
+                policy = (context.get('policies') or {}).get(alias)
+                readers.append((account_map, policy if isinstance(policy, dict) else {}))
+    accounts = set()
+    for account_map, policy in readers:
+        mapping, _version = _compile_account_map(account_map, policy, [])
+        fields = _field_map(policy)
+        for index, row in enumerate(dataset.get('rows') or [], 1):
+            if not isinstance(row, dict):
+                continue
+            account = _management_account(_text(_read(row, fields, 'account_code')),
+                                          _text(_read(row, fields, 'management_account')), mapping, [], index)
+            if account and account != UNMAPPED_ACCOUNT:
+                accounts.add(account)
+    return accounts
 
 
 ENGINE_READ_CHUNK = 500
@@ -3263,6 +3622,27 @@ def _engine_reads_rows(dataset, readers):
                 break
             if result.get('rows'):
                 return True
+    return False
+
+
+def _engine_reads_source_rows(dataset, readers):
+    """The price-quantity engine reads scoped source rows, without amount normalisation.
+
+    This only opens its execution path: missing drivers, invalid values and bridge closure still need
+    the independent support check and the actual calculation, just as they do for amount-bearing data.
+    """
+    from foundry.finance_model import scoped_source_rows
+
+    rows = dataset.get('rows')
+    if not isinstance(rows, list) or not rows:
+        return False
+    for scope, policy in readers:
+        for start in range(0, len(rows), ENGINE_READ_CHUNK):
+            try:
+                if scoped_source_rows({**dataset, 'rows': rows[start:start + ENGINE_READ_CHUNK]}, scope, policy):
+                    return True
+            except (FoundryError, ArithmeticError, ValueError, KeyError, TypeError):
+                break
     return False
 
 
@@ -3300,16 +3680,17 @@ def _numeric_cell(value):
         return False
 
 
-def _engine_blockers(environment):
+def _engine_blockers(environment, *, price_quantity=False):
     blockers = []
     if environment.get('structure_pending'):
         blockers.append('structure_pending_confirmation')
-    if environment.get('rowless_bindings') and not environment.get('engine_bindings'):
+    readable = environment.get('price_quantity_bindings') if price_quantity else environment.get('engine_bindings')
+    if environment.get('rowless_bindings') and not readable:
         # No bound snapshot gives the engine a row. One rowless binding beside a table the engine reads (a GL
         # table plus a budget workbook kept for recipes) blocks nothing, since a run on all the bindings reads
         # that table. A detail table whose amount column only needs a field_map is the assistant's to open
         # with finance_context_save; otherwise a finance context on these bindings would not help.
-        blockers.append('amount_column_unmapped' if environment.get('amount_columns') else 'bindings_without_engine_rows')
+        blockers.append('amount_column_unmapped' if not price_quantity and environment.get('amount_columns') else 'bindings_without_engine_rows')
     elif environment.get('finance_context') is False:
         blockers.append('no_finance_context')
     return blockers
@@ -3323,18 +3704,19 @@ def _evidence_paths(item, environment):
     where it cannot answer.
     """
     accepted, blocked = [], []
-    engine_blockers = _engine_blockers(environment)
-
     def engine(path):
+        engine_blockers = _engine_blockers(environment, price_quantity=path['path'] == 'price_quantity_bridge')
         if engine_blockers:
             blocked.append({**path, 'blockers': list(engine_blockers),
                             # The columns a field_map could map to amount, per binding alias.
                             **({'amount_columns': environment['amount_columns']}
-                               if 'amount_column_unmapped' in engine_blockers else {})})
+                               if 'amount_column_unmapped' in engine_blockers else {}),
+                            **({'context_binding_diagnostic': environment['context_binding_diagnostic']}
+                               if 'no_finance_context' in engine_blockers else {})})
         else:
             accepted.append(path)
 
-    kind = _result_set_kind(item)
+    kind = _result_set_kind(item, environment)
     route = _method_guidance(item)
     if kind:
         engine({'path': 'run_metric_result_set', 'tool': 'run_metric', 'metric_kind': kind})
@@ -3610,7 +3992,7 @@ def _method_guidance(item):
         isinstance(method, str) and method in PRICE_QUANTITY_METHODS
         and _canonical_metric_name(item.get('metric')) in {'amount', 'revenue', 'price_quantity'}
     ):
-        return {'required_method': method, 'cite_columns': list(PRICE_QUANTITY_REQUIRED_COLUMNS)}
+        return {'required_method': method, 'cite_columns': list(VOLUME_MIX_PRICE_COLUMNS if method == 'volume_mix_price' else PRICE_QUANTITY_REQUIRED_COLUMNS)}
     return {'required_method': method}
 
 
@@ -3812,9 +4194,15 @@ def _path_text(path, keys):
         return ('引用 explain_variance 按 revenue_minus_cost_minus_expense 生成的利润桥，'
                 '收入、成本、费用、利润四行的 contribution 都要引用')
     if name == 'price_quantity_bridge':
-        method = path.get('method') or ' 或 '.join(path.get('methods') or [])
-        return (f'引用 explain_variance 按 {method} 生成的同一行 total_variance、'
-                'quantity_contribution、price_contribution 和 interaction')
+        methods = [path['method']] if path.get('method') else path.get('methods') or []
+        choices = []
+        for columns in (PRICE_QUANTITY_REQUIRED_COLUMNS, VOLUME_MIX_PRICE_COLUMNS):
+            selected = [method for method in methods
+                        if (method == 'volume_mix_price') == (columns == VOLUME_MIX_PRICE_COLUMNS)]
+            if selected:
+                choices.append(f'引用 explain_variance 按 {" 或 ".join(selected)} 生成的同一行 '
+                               + '、'.join(columns))
+        return '；或'.join(choices)
     if name == 'method_run':
         return f'引用 method 为 {path["method"]} 的运行产出的含 {keys} 的结果行'
     if name == 'run_metric_result_set':
@@ -3931,7 +4319,21 @@ def _unanswered_message(item):
                         f'里把金额所在列映射为 amount（候选列 {named}，如 {{"field_map": {{"amount": "{example}"}}}}），'
                         '再按被阻塞的引擎路径计算。')
         elif not paths['accepted'] and 'no_finance_context' in blockers:
-            message += '可先用 finance_context_save 为绑定资料保存财务口径，再按被阻塞的引擎路径计算。'
+            diagnostic = next((path['context_binding_diagnostic'] for path in blocked
+                               if path.get('context_binding_diagnostic')), {})
+            required = diagnostic.get('required_bindings') or {}
+            if required:
+                named = '、'.join(f'{alias}={dataset_id}' for alias, dataset_id in required.items())
+                message += f'本要求必须由同一财务口径覆盖完整绑定（{named}）。'
+            for candidate in diagnostic.get('available_contexts', []):
+                missing = '、'.join(candidate.get('missing_aliases') or [])
+                different = '、'.join(candidate.get('different_snapshots') or {})
+                detail = '；'.join(text for text in
+                                  (f'缺少 {missing}' if missing else '',
+                                   f'{different} 的快照不同' if different else '') if text)
+                message += f'现有口径 {candidate["context_id"]}：{detail}。'
+            message += ('可先用 finance_context_save 为完整绑定保存财务口径，再按被阻塞的引擎路径计算；'
+                        '修复口径或结果后，必须对修订文稿重新保存并验证，旧保存结果不能证明新修复完成。')
     gaps = item.get('row_field_gaps') or {}
     if gaps:
         fields = '、'.join(f'{key}={value}' for key, value in gaps.items())
@@ -4110,6 +4512,11 @@ def augment_quality(analysis, spec, quality, *, _recipe_report=None, _allowed=No
     for item in requirements['items']:
         if item['status'] == 'estimated':
             issues.extend(_estimated_issues(item))
+        elif item.get('awaiting_manager') == ['transaction_review_required']:
+            if not any(issue.get('code') == 'transaction_review_requires_professional_review'
+                       and issue.get('requirement_item_id') == item['id'] for issue in issues):
+                issues.append({'code': 'transaction_review_requires_professional_review', 'severity': 'warning',
+                               'requirement_item_id': item['id'], 'message': '交易检查已通过，待经理记录专业复核决定。'})
         elif item['status'] != 'answered':
             issues.append({'code': 'requirement_unanswered', 'severity': 'warning', 'message': _unanswered_message(item), 'requirement_item_id': item['id'],
                            **({'fixups': item['fixups']} if item.get('fixups') else {})})

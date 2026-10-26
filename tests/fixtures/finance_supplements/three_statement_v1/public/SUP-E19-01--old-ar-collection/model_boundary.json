@@ -1,0 +1,110 @@
+{
+  "schema_version": "finance-independent-three-statement-v1",
+  "dataset_alias": "model_boundary",
+  "metadata": {
+    "organization": "Supplement Fixture Co",
+    "ledger": "supplement-ledger-01",
+    "scenario": "management-forecast",
+    "currency": "CNY",
+    "unit": "元"
+  },
+  "nature": "explicit synthetic zero assumptions; not real historical observations or manager approval",
+  "rows": [
+    {
+      "source_row": "1",
+      "boundary_name": "inventory_movement",
+      "amount": "0",
+      "period": "2026-10",
+      "organization": "Supplement Fixture Co",
+      "ledger": "supplement-ledger-01",
+      "scenario": "management-forecast",
+      "currency": "CNY",
+      "unit": "元",
+      "meaning": "无存货增减、生产加工存货成本或对应营运资本调整；未列存货期初期末余额明确为0。"
+    },
+    {
+      "source_row": "2",
+      "boundary_name": "tax_effect",
+      "amount": "0",
+      "period": "2026-10",
+      "organization": "Supplement Fixture Co",
+      "ledger": "supplement-ledger-01",
+      "scenario": "management-forecast",
+      "currency": "CNY",
+      "unit": "元",
+      "meaning": "无所得税费用、支付及当期或递延所得税资产负债影响；这是合成假设，不证明税率或免税资格。"
+    },
+    {
+      "source_row": "3",
+      "boundary_name": "interest_effect",
+      "amount": "0",
+      "period": "2026-10",
+      "organization": "Supplement Fixture Co",
+      "ledger": "supplement-ledger-01",
+      "scenario": "management-forecast",
+      "currency": "CNY",
+      "unit": "元",
+      "meaning": "无利息计提、支付或应计余额影响；债务流量均为本金，未主张现实借款免息。"
+    },
+    {
+      "source_row": "4",
+      "boundary_name": "vat_effect",
+      "amount": "0",
+      "period": "2026-10",
+      "organization": "Supplement Fixture Co",
+      "ledger": "supplement-ledger-01",
+      "scenario": "management-forecast",
+      "currency": "CNY",
+      "unit": "元",
+      "meaning": "无进销项、增值税支付或余额影响；所有金额在本模型统一排除VAT效应，不证明免税资格。"
+    },
+    {
+      "source_row": "5",
+      "boundary_name": "fx_effect",
+      "amount": "0",
+      "period": "2026-10",
+      "organization": "Supplement Fixture Co",
+      "ledger": "supplement-ledger-01",
+      "scenario": "management-forecast",
+      "currency": "CNY",
+      "unit": "元",
+      "meaning": "所有余额和流量均为CNY，无交易、结算或折算汇兑影响。"
+    },
+    {
+      "source_row": "6",
+      "boundary_name": "oci_effect",
+      "amount": "0",
+      "period": "2026-10",
+      "organization": "Supplement Fixture Co",
+      "ledger": "supplement-ledger-01",
+      "scenario": "management-forecast",
+      "currency": "CNY",
+      "unit": "元",
+      "meaning": "无其他综合收益或储备变动；权益仅随净利润和股利变动。"
+    },
+    {
+      "source_row": "7",
+      "boundary_name": "noncash_investing_financing",
+      "amount": "0",
+      "period": "2026-10",
+      "organization": "Supplement Fixture Co",
+      "ledger": "supplement-ledger-01",
+      "scenario": "management-forecast",
+      "currency": "CNY",
+      "unit": "元",
+      "meaning": "无非现金购置、处置、债转股等投融资变动；所列capex、借入及偿还本金均为假设现金变动。"
+    },
+    {
+      "source_row": "8",
+      "boundary_name": "other_balance_sheet_movements",
+      "amount": "0",
+      "period": "2026-10",
+      "organization": "Supplement Fixture Co",
+      "ledger": "supplement-ledger-01",
+      "scenario": "management-forecast",
+      "currency": "CNY",
+      "unit": "元",
+      "meaning": "无减值、核销、重分类、预付、合同资产负债、其他应计、所有者追加投入或其他余额变动；未列期初期末资产负债均为0。"
+    }
+  ]
+}

@@ -11,8 +11,8 @@ property management, where they were first worked out, and every one is a parame
 
 Every value is read from a named cell of a confirmed table snapshot, and a metric whose
 inputs are not all there is skipped and listed, never guessed. Results that rest on an
-estimate (trailing-twelve-month revenue rebuilt from year-to-date figures, the implied
-collection rate) say so on the row.
+estimate (the operating-expenditure collection screen, trailing-twelve-month revenue
+rebuilt from year-to-date figures, the implied collection rate) say so on the row.
 """
 
 from __future__ import annotations
@@ -20,10 +20,16 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
-from foundry.display_numbers import display_amount, display_percent
+from foundry.display_numbers import display_amount
 from foundry.errors import FoundryError
 
 DOMAIN = "foundry.finance.collection_health.v1"
+
+BREAK_EVEN_NOTE = (
+    "经营支出筛查估算：假设收缴分母与收入、税额及期间同口径，成本费用当期现金化；"
+    "未纳入期初现金、旧欠回收、营运资金、资本开支、债务本息、税款和受限资金；"
+    "不能证明现金安全，资金结论需另做现金预测"
+)
 
 DEFAULT_PARAMS: dict[str, str] = {
     # Cash received includes output VAT; revenue does not.
@@ -98,6 +104,10 @@ INPUT_LABELS: dict[str, str] = {
     "expense_ratio": "期间费用率（套表报数）",
     "collection_rate_current": "本年账单收缴率",
     "collection_rate_total": "综合收缴率（含清欠）",
+    "current_due": "本年应收账单",
+    "current_collection": "本年账单实收",
+    "opening_ar": "期初欠费",
+    "arrears_collection": "往年欠费收回",
     "revenue_py_full": "上年全年营业收入",
     "revenue_ttm": "近12个月营业收入",
     "ar_end": "应收账款期末",
@@ -121,6 +131,19 @@ COUNT_INPUTS = frozenset({"months_elapsed", "headcount"})
 AREA_INPUTS = frozenset({"area_begin", "area_end", "area_exit", "area_nonrenewal"})
 """Counts carry no money unit. months_elapsed has no prior-year form; a prior headcount is still a headcount."""
 RATE_INPUTS = frozenset({"collection_rate_current", "collection_rate_total", "gross_margin", "expense_ratio"})
+RATE_UNIT_SCALES = {"%": "percent", "％": "percent", "pct": "percent", "percent": "percent",
+                    "百分比": "percent", "百分率": "percent", "ratio": "fraction", "fraction": "fraction", "比率": "fraction"}
+COLLECTION_COMPONENTS = ("current_due", "current_collection", "opening_ar", "arrears_collection")
+
+
+def collection_undefined_disclosure(metric_keys) -> str:
+    """The bounded disclosure for these native undefined rate identities, without numeric substitutes."""
+    selected = [key for key in ("collection_rate_current", "collection_rate_total") if key in metric_keys]
+    if not selected:
+        raise FoundryError("undefined collection disclosure requires a native rate identity")
+    labels = [INPUT_LABELS[key].split("（", 1)[0] for key in selected]
+    return "和".join(labels) + "的分母" + ("均" if len(labels) > 1 else "") + "为零，结果未定义，不展示百分比。"
+
 
 LEVEL_LABELS = {"red": "红", "orange": "橙", "yellow": "黄", "green": "绿", "unknown": "无法判断"}
 
@@ -189,7 +212,8 @@ def _rate_limit(key: str) -> Decimal | None:
     return None
 
 
-def _parse_cell(value: Any, *, limit: Decimal | None, scale: str | None, where: str) -> Decimal:
+def _parse_cell(value: Any, *, limit: Decimal | None, scale: str | None, where: str,
+                amount: bool = False) -> Decimal:
     if value is None or (isinstance(value, str) and value.strip() in {"", "-", "—", "--"}):
         raise FoundryError(f"{where} is empty")
     percent = False
@@ -203,6 +227,8 @@ def _parse_cell(value: Any, *, limit: Decimal | None, scale: str | None, where: 
     number = _dec(value, where)
     if scale not in (None, "percent", "fraction"):
         raise FoundryError(f"{where} scale must be percent or fraction")
+    if amount and (percent or scale == "percent"):
+        raise FoundryError(f"{where} requires an amount, not a percentage")
     if percent or scale == "percent":
         return number / 100
     if limit is not None and scale is None and abs(number) > limit:
@@ -228,6 +254,7 @@ def resolve_entities(
     inputs: dict,
     rows_by_alias: dict[str, list[dict]],
     units_by_alias: dict[str, Any] | None = None,
+    scopes_by_alias: dict[str, dict] | None = None,
 ) -> list[dict]:
     """Read each entity's named values from the bound snapshots.
 
@@ -237,6 +264,7 @@ def resolve_entities(
     """
 
     units_by_alias = units_by_alias or {}
+    scopes_by_alias = scopes_by_alias or {}
     raw_entities = inputs.get("entities") or []
     if not isinstance(raw_entities, list):
         raise FoundryError("collection_health entities must be a list")
@@ -262,13 +290,15 @@ def resolve_entities(
         manual: set[str] = set()
         units: dict[str, str] = {}
         area_units: dict[str, str | None] = {}
+        component_scopes: dict[bool, dict[str, set[str]]] = {False: {}, True: {}}
         for key, ref in refs.items():
             key = _input_name(key)
             rate = key.removesuffix("_py") in RATE_INPUTS
+            component = key.removesuffix("_py") in COLLECTION_COMPONENTS
             limit = _rate_limit(key)
             where = f"{name}.{key}"
             if not isinstance(ref, dict):
-                values[key] = _parse_cell(ref, limit=limit, scale=None, where=where)
+                values[key] = _parse_cell(ref, limit=limit, scale=None, where=where, amount=component)
                 manual.add(key)
                 continue
             alias = ref.get("alias")
@@ -278,16 +308,25 @@ def resolve_entities(
             if not isinstance(column, str) or not column:
                 raise FoundryError(f"{where} requires a column")
             candidates = rows_by_alias[alias]
+            check_scope = None
+            if component or key.removesuffix("_py") in {"collection_rate_current", "collection_rate_total"}:
+                def check_scope(row):
+                    _check_component_scope(row, scopes_by_alias.get(alias) or {},
+                                           component_scopes[key.endswith("_py")], where)
             if "sum_where" in ref:
                 if "match" in ref or "source_row" in ref:
                     raise FoundryError(f"{where}: sum_where reads many rows; it cannot sit beside match, "
                                        "source_row or an entity_tables column")
                 if rate or key.removesuffix("_py") == "months_elapsed":
                     raise FoundryError(f"{where}: only an amount or a headcount is summed over rows")
-                total, cells, row_units = _sum_rows(candidates, ref, column, where)
+                total, cells, row_units = _sum_rows(candidates, ref, column, where, strict_amount=component,
+                                                   validate_row=check_scope)
                 values[key] = total
                 sources[key] = cells
                 stated = _unit(ref.get("unit"))
+                if component:
+                    units[key] = _component_unit(row_units, stated, units_by_alias.get(alias), where)
+                    continue
                 if len(row_units) > 1 and not stated:
                     raise FoundryError(f"{where} sums rows in {', '.join(sorted(row_units))}; one unit at a time")
                 row_unit = stated or (next(iter(row_units)) if row_units else None)
@@ -323,9 +362,16 @@ def resolve_entities(
             row = candidates[0]
             if column not in row:
                 raise FoundryError(f"{where} column {column} is not in {alias}")
-            values[key] = _parse_cell(row[column], limit=limit, scale=ref.get("scale"), where=where)
+            if check_scope is not None:
+                check_scope(row)
+            scale = (_rate_cell_scale(row.get("unit") or units_by_alias.get(alias), ref, where)
+                     if rate else ref.get("scale"))
+            values[key] = _parse_cell(row[column], limit=limit, scale=scale, where=where,
+                                      amount=component)
             sources[key] = [{**row["source"], "column": column}]
-            if key.removesuffix("_py") in AREA_INPUTS:
+            if component:
+                units[key] = _component_unit({row.get("unit")}, ref.get("unit"), units_by_alias.get(alias), where)
+            elif key.removesuffix("_py") in AREA_INPUTS:
                 area_units[key] = _unit(ref.get("unit") or row.get("unit"))
             elif not rate and key.removesuffix("_py") not in COUNT_INPUTS:
                 unit = ref.get("unit") or row.get("unit") or units_by_alias.get(alias)
@@ -358,6 +404,8 @@ def resolve_entities(
                 "values": values,
                 "sources": sources,
                 "manual": manual,
+                "component_scope": {field: next(iter(entries)) for field, entries in component_scopes[False].items()
+                                    if len(entries) == 1},
                 "unit": distinct[0] if distinct else None,
                 "area_unit": areas[0] if areas else None,
                 # A row of a detail table, or a unit named on its own (often the group total over those rows).
@@ -396,11 +444,54 @@ def _same_text(cell: Any, wanted: set[str]) -> bool:
     return False
 
 
-def _sum_rows(rows: list[dict], ref: dict, column: str, where: str) -> tuple[Decimal, list[dict], set[str]]:
+def _rate_cell_scale(source_unit, ref: dict, where: str) -> str | None:
+    source_scale = RATE_UNIT_SCALES.get(str(source_unit or "").strip().casefold())
+    stated = ref.get("unit")
+    stated_scale = RATE_UNIT_SCALES.get(str(stated or "").strip().casefold())
+    if source_scale and stated and stated_scale != source_scale:
+        raise FoundryError(f"{where} reference unit conflicts with the source rate unit")
+    inferred = source_scale or stated_scale
+    if inferred and ref.get("scale") not in (None, inferred):
+        raise FoundryError(f"{where} scale conflicts with the source rate unit")
+    return ref.get("scale") or inferred
+
+
+def _check_component_scope(row: dict, scope: dict, seen: dict[str, set[str]], where: str) -> None:
+    """Validate selected source rows without filtering them or replacing their actual scope."""
+    for field in ("ledger", "organization", "currency", "period"):
+        actual = str(row.get(field) or "").strip()
+        expected = scope.get(field)
+        expected = expected if isinstance(expected, (list, tuple, set, frozenset)) else [expected]
+        allowed = {str(value).strip() for value in expected if value is not None and str(value).strip()}
+        if actual and allowed and actual not in allowed:
+            raise FoundryError(f"{where} source {field} {actual} conflicts with the bound scope")
+        effective = actual or (next(iter(allowed)) if len(allowed) == 1 else None)
+        if effective:
+            values = seen.setdefault(field, set())
+            values.add(effective)
+            if len(values) > 1:
+                raise FoundryError(f"{where} mixes component {field}: {', '.join(sorted(values))}")
+
+
+def _component_unit(row_units, stated, scoped, where: str) -> str | None:
+    """A component's declared unit may fill a gap, but cannot relabel source amounts."""
+    known = {_unit(unit) for unit in [*row_units, stated, scoped] if _unit(unit)}
+    if {unit.casefold() for unit in known} & {*RATE_UNIT_SCALES, "百分点"}:
+        raise FoundryError(f"{where} requires an amount unit")
+    if len(known) > 1:
+        raise FoundryError(f"{where} has conflicting amount units {', '.join(sorted(known))}")
+    if known and any(not _unit(unit) for unit in row_units) and not (_unit(stated) or _unit(scoped)):
+        raise FoundryError(f"{where} reads an amount without a unit beside amounts with a unit")
+    return next(iter(known)) if known else None
+
+
+def _sum_rows(rows: list[dict], ref: dict, column: str, where: str, *,
+              strict_amount: bool = False,
+              validate_row: Callable[[dict], None] | None = None) -> tuple[Decimal, list[dict], set[str]]:
     """Σ column over the rows whose columns hold one of the listed texts (a contract ledger filtered by status).
 
     require_columns skips rows where any of those columns is blank, so a numerator and denominator summed apart
-    read the same rows.
+    read the same rows. Component rates use strict_amount: a selected blank makes the total unknown.
     """
     conditions = ref["sum_where"]
     if not isinstance(conditions, dict) or not conditions:
@@ -419,14 +510,20 @@ def _sum_rows(rows: list[dict], ref: dict, column: str, where: str) -> tuple[Dec
         if not all(_same_text(row.get(col), texts) for col, texts in wanted.items()):
             continue
         matched += 1
-        # A collection rate sums 实收 and 账单 apart: both sides must skip the rows where either is blank.
+        # Legacy paired sums can exclude incomplete rows; component totals must remain complete.
         if _blank(row.get(column)) or any(_blank(row.get(other)) for other in required):
+            if strict_amount:
+                raise FoundryError(f"{where} has a blank amount in a selected row; the component total is unknown")
             blank += 1
             continue
-        total += _parse_cell(row[column], limit=None, scale=ref.get("scale"), where=where)
+        if validate_row is not None:
+            validate_row(row)
+        total += _parse_cell(row[column], limit=None, scale=ref.get("scale"), where=where, amount=strict_amount)
         cells.append({**row["source"], "column": column})
         if _unit(row.get("unit")):
             units.add(_unit(row.get("unit")))
+        elif strict_amount:
+            units.add("")
     if not cells:
         raise FoundryError(f"{where} found no figure: {matched} rows matched {conditions}, {blank} of them blank")
     return total, cells, units
@@ -541,15 +638,31 @@ def _m_break_even(v, p) -> Computed:
     gm, er = _m_gross_margin(v, p), _m_expense_ratio(v, p)
     if gm is None or er is None:
         return None
-    return 1 - gm[0] + er[0], sorted({*gm[1], *er[1]}), False
+    # Exact arithmetic does not remove the cash-conversion assumptions of this screen.
+    return 1 - gm[0] + er[0], sorted({*gm[1], *er[1]}), True
+
+
+def _collection_rate(v: dict, key: str) -> Computed:
+    names = COLLECTION_COMPONENTS if key == "collection_rate_total" else COLLECTION_COMPONENTS[:2]
+    # A reported KPI remains usable on its own; partial components must not be hidden by it.
+    if not any(name in v for name in names):
+        return (v[key], [key], False) if key in v else None
+    if not _need(v, *names):
+        return None
+    numerator, denominator = v["current_collection"], v["current_due"]
+    if key == "collection_rate_total":
+        numerator += v["arrears_collection"]
+        denominator += v["opening_ar"]
+    value = _div(numerator, denominator)
+    return None if value is None else (value, list(names), False)
 
 
 def _with_rate(rate_key: str) -> Callable[[dict, dict], Computed]:
     def compute(v, p) -> Computed:
-        be = _m_break_even(v, p)
-        if be is None or rate_key not in v:
+        be, rate = _m_break_even(v, p), _collection_rate(v, rate_key)
+        if be is None or rate is None:
             return None
-        return v[rate_key] - be[0], sorted({*be[1], rate_key}), False
+        return rate[0] - be[0], sorted({*be[1], *rate[1]}), be[2]
 
     return compute
 
@@ -627,10 +740,10 @@ def _m_implied_collection(v, p) -> Computed:
 
 
 def _m_implied_vs_reported(v, p) -> Computed:
-    implied = _m_implied_collection(v, p)
-    if implied is None or "collection_rate_total" not in v:
+    implied, rate = _m_implied_collection(v, p), _collection_rate(v, "collection_rate_total")
+    if implied is None or rate is None:
         return None
-    return implied[0] - v["collection_rate_total"], sorted({*implied[1], "collection_rate_total"}), True
+    return implied[0] - rate[0], sorted({*implied[1], *rate[1]}), True
 
 
 def _m_rollforward_collection(v, p) -> Computed:
@@ -742,6 +855,12 @@ def _m_exiting_gap(v, p) -> Computed:
 
 
 METRICS: list[dict[str, Any]] = [
+    {"key": "collection_rate_current", "label": "本年账单收缴率", "kind": "fraction",
+     "fn": lambda v, p: _collection_rate(v, "collection_rate_current"),
+     "formula": "本年账单实收 ÷ 本年应收账单"},
+    {"key": "collection_rate_total", "label": "综合收缴率（含清欠）", "kind": "fraction",
+     "fn": lambda v, p: _collection_rate(v, "collection_rate_total"),
+     "formula": "（本年账单实收 + 往年欠费收回）÷（本年应收账单 + 期初欠费）"},
     {"key": "gross_margin", "label": "毛利率", "kind": "ratio", "fn": _m_gross_margin,
      "formula": "毛利 ÷ 营业收入"},
     {"key": "expense_ratio", "label": "期间费用率", "kind": "ratio", "fn": _m_expense_ratio,
@@ -750,7 +869,7 @@ METRICS: list[dict[str, Any]] = [
      "formula": "1 − 毛利率 + 期间费用率"},
     {"key": "collection_gap", "label": "距生死线（本年账单收缴率）", "kind": "pp",
      "fn": _with_rate("collection_rate_current"),
-     "formula": "本年账单收缴率 − 生死线收缴率，等于现金经营利润率"},
+     "formula": "本年账单收缴率 − 生死线收缴率（经营支出筛查近似差额）"},
     {"key": "collection_gap_total", "label": "距生死线（综合收缴率，含清欠）", "kind": "pp",
      "fn": _with_rate("collection_rate_total"),
      "formula": "综合收缴率 − 生死线收缴率"},
@@ -818,18 +937,21 @@ METRIC_KEYS = tuple(metric["key"] for metric in METRICS)
 
 # Which inputs a metric could read, for saying why it was skipped.
 _METRIC_INPUTS = {
+    "collection_rate_current": ("collection_rate_current|current_due+current_collection",),
+    "collection_rate_total": ("collection_rate_total|current_due+current_collection+opening_ar+arrears_collection",),
     "gross_margin": ("gross_margin|revenue+cost|revenue+gross_profit",),
     "expense_ratio": ("expense_ratio|period_expense+revenue",),
     "break_even_collection": ("gross_margin|revenue+cost|revenue+gross_profit", "expense_ratio|period_expense+revenue"),
     "collection_gap": ("gross_margin|revenue+cost|revenue+gross_profit", "expense_ratio|period_expense+revenue",
-                       "collection_rate_current"),
+                       "collection_rate_current|current_due+current_collection"),
     "collection_gap_total": ("gross_margin|revenue+cost|revenue+gross_profit", "expense_ratio|period_expense+revenue",
-                             "collection_rate_total"),
+                             "collection_rate_total|current_due+current_collection+opening_ar+arrears_collection"),
     "ttm_revenue": ("revenue_ttm|revenue_py_full+revenue_py+revenue",),
     "dso": ("ar_end", "revenue_ttm|revenue_py_full+revenue_py+revenue"),
     "ar_buildup": ("ar_end", "ar_begin", "revenue"),
     "implied_collection": ("ar_end", "ar_begin", "impairment", "revenue"),
-    "implied_vs_reported": ("ar_end", "ar_begin", "impairment", "revenue", "collection_rate_total"),
+    "implied_vs_reported": ("ar_end", "ar_begin", "impairment", "revenue",
+                            "collection_rate_total|current_due+current_collection+opening_ar+arrears_collection"),
     "rollforward_collection": ("ar_collected", "ar_gross_begin", "ar_new"),
     "cash_collection_ratio": ("cash_from_sales", "revenue"),
     "impairment_to_gross_profit": ("impairment", "gross_profit|revenue+cost"),
@@ -888,9 +1010,9 @@ def _level(key: str, value: Decimal, change: Decimal | None, p: dict) -> tuple[s
         return None, "线性外推只作对照，不进结论"
     if key in {"collection_gap", "collection_gap_total"}:
         if value < p["gap_severe_below"]:
-            return "red", "严重低于生死线，每收100元倒贴现金"
+            return "red", "严重低于生死线，经营支出筛查存在缺口"
         if value < 0:
-            return "red", "低于生死线，每收100元倒贴现金"
+            return "red", "低于生死线，经营支出筛查存在缺口"
         if value < p["gap_yellow_below"]:
             return "yellow", "贴近生死线"
         return "green", ""
@@ -927,16 +1049,18 @@ def _level(key: str, value: Decimal, change: Decimal | None, p: dict) -> tuple[s
 # ---------------------------------------------------------------- evaluation
 
 
-UNIT_BY_KIND = {"ratio": "%", "pp": "百分点", "days": "天"}
-CHANGE_UNIT_BY_KIND = {"ratio": "百分点", "pp": "百分点", "days": "天"}
+UNIT_BY_KIND = {"ratio": "%", "fraction": "ratio", "pp": "百分点", "days": "天"}
+CHANGE_UNIT_BY_KIND = {"ratio": "百分点", "fraction": "百分点", "pp": "百分点", "days": "天"}
 
 
 def _shown(kind: str, value: Decimal) -> Decimal:
-    """The value as its row states it: a ratio in percent, a gap in percentage points."""
-    return value * 100 if kind in {"ratio", "pp"} else value
+    """Scale a value only for rows whose stored unit is percent or percentage points."""
+    return value * 100 if kind in {"ratio", "fraction", "pp"} else value
 
 
 def _display(unit: str | None, value: Decimal, *, signed: bool = False) -> str:
+    if unit == "ratio":
+        return f"{display_amount(value * 100)}%"
     text = display_amount(value)
     if signed and not text.startswith("-") and text != "0.00":
         text = "+" + text
@@ -990,7 +1114,15 @@ def evaluate_entity(entity: dict, params: dict[str, Decimal]) -> tuple[list[dict
         key, kind = metric["key"], metric["kind"]
         result = metric["fn"](values, params)
         if result is None:
-            skipped.append({"metric_key": key, "needs": list(_METRIC_INPUTS[key])})
+            diagnostic = {"metric_key": key, "needs": list(_METRIC_INPUTS[key])}
+            if kind == "fraction":
+                names = COLLECTION_COMPONENTS if key == "collection_rate_total" else COLLECTION_COMPONENTS[:2]
+                missing = [name for name in names if name not in values]
+                diagnostic.update(
+                    reason="missing_inputs" if missing else "zero_denominator",
+                    message=("缺少输入：" + "、".join(missing)) if missing else "分母为零，收缴率未定义，未计算",
+                )
+            skipped.append(diagnostic)
             continue
         value, used, estimate = result
         computed[key] = value
@@ -1023,12 +1155,23 @@ def evaluate_entity(entity: dict, params: dict[str, Decimal]) -> tuple[list[dict
             notes.append("含手填数：" + "、".join(_input_label(name) for name in manual))
         if estimate:
             notes.append("估算")
+        if key in {"break_even_collection", "collection_gap", "collection_gap_total"}:
+            notes.append(BREAK_EVEN_NOTE)
         own = metric["unit"](entity) if "unit" in metric else entity.get("unit")
         unit = UNIT_BY_KIND.get(kind, own)
         change_unit = CHANGE_UNIT_BY_KIND.get(kind, own)
 
         def row(scenario, number, row_unit, read, is_estimate, *, signed=False, judged=False):
             shown = _shown(kind, number) if row_unit in {"%", "百分点"} else number
+            row_note = "；".join(notes) if judged else ("估算" if is_estimate else "")
+            formula = metric["formula"]
+            if kind == "fraction":
+                if read in ([key], [f"{key}_py"]):
+                    formula = "套表报数：" + metric["label"]
+                if not judged:
+                    manual_read = [name for name in read if name in entity["manual"]]
+                    if manual_read:
+                        row_note = "含手填数：" + "、".join(_input_label(name) for name in manual_read)
             return {
                 "entity": entity["name"],
                 "entity_origin": entity.get("origin", "declared"),
@@ -1041,9 +1184,10 @@ def evaluate_entity(entity: dict, params: dict[str, Decimal]) -> tuple[list[dict
                 "level": level if judged else None,
                 "level_label": LEVEL_LABELS.get(level or "") if judged else None,
                 "estimate": is_estimate,
-                "formula": metric["formula"],
-                "note": "；".join(notes) if judged else ("估算" if is_estimate else ""),
+                "formula": formula,
+                "note": row_note,
                 "inputs": {name: format(values[name], "f") for name in read},
+                "manual_inputs": sorted(name for name in read if name in entity["manual"]),
                 "source_rows": [ref for name in read for ref in entity["sources"].get(name, [])],
             }
 
@@ -1080,8 +1224,10 @@ def _risk_signals(values: dict, computed: dict, p: dict) -> list[tuple[str, int,
         add("应收天数长", 2 if dso > p["dso_red_above"] else 1 if dso > p["dso_yellow_above"] else 0)
     gap = computed.get("collection_gap")
     add("收缴率低于生死线", None if gap is None else 2 if gap < p["gap_severe_below"] else 1 if gap < 0 else 0)
-    if _need(values, "collection_rate_current", "collection_rate_current_py"):
-        drop = values["collection_rate_current_py"] - values["collection_rate_current"]
+    current_rate = _collection_rate(values, "collection_rate_current")
+    prior_rate = _collection_rate(_prior(values), "collection_rate_current")
+    if current_rate is not None and prior_rate is not None:
+        drop = prior_rate[0] - current_rate[0]
         add("收缴率同比下降", 1 if drop > p["risk_collection_drop"] else 0)
     else:
         add("收缴率同比下降", None)
@@ -1105,7 +1251,8 @@ def _risk_signals(values: dict, computed: dict, p: dict) -> list[tuple[str, int,
 
 RISK_INPUTS = ("operating_profit", "impairment", "revenue", "cost", "gross_profit", "ar_end", "contract_assets_end",
                "revenue_ttm", "revenue_py_full", "revenue_py", "period_expense", "gross_margin", "expense_ratio",
-               "collection_rate_current", "collection_rate_current_py", "revenue_budget_full", "months_elapsed")
+               "collection_rate_current", "collection_rate_current_py", "revenue_budget_full", "months_elapsed",
+               "current_due", "current_collection", "current_due_py", "current_collection_py")
 
 
 def _pct(value: Decimal) -> str:
@@ -1151,13 +1298,17 @@ def _risk_row(entity: dict, values: dict, computed: dict, p: dict) -> dict | Non
     if unknown:
         notes.append("无法判断：" + "、".join(unknown))
     read = [name for name in RISK_INPUTS if name in values]
-    estimate = "dso" in computed and "revenue_ttm" not in values and any(
+    dso_estimate = "dso" in computed and "revenue_ttm" not in values and any(
         label == "应收天数长" and status != "unknown" for label, _, status in signals)
+    collection_estimate = "collection_gap" in computed
+    estimate = dso_estimate or collection_estimate
     manual = sorted(name for name in read if name in entity["manual"])
     if manual:
         notes.append("含手填数：" + "、".join(_input_label(name) for name in manual))
-    if estimate:
+    if dso_estimate:
         notes.append("应收天数用估算的近12个月收入")
+    if collection_estimate:
+        notes.append("收支筛查信号依赖估算阈值，不能证明现金安全")
     notes.append("筛查提示，不是评级，不计入月结")
     return {
         "entity": entity["name"],
@@ -1174,6 +1325,7 @@ def _risk_row(entity: dict, values: dict, computed: dict, p: dict) -> dict | Non
         "formula": _risk_formula(p),
         "note": "；".join(notes),
         "inputs": {name: format(values[name], "f") for name in read},
+        "manual_inputs": manual,
         "source_rows": [ref for name in read for ref in entity["sources"].get(name, [])],
     }
 
@@ -1204,12 +1356,13 @@ def _frange(start: Decimal, stop: Decimal, step: Decimal) -> list[Decimal]:
 
 
 def break_even_matrix(entity: dict, params: dict[str, Decimal]) -> dict | None:
-    """Cash operating margin over a grid of gross margins and collection rates, at the entity's expense ratio."""
+    """Estimated operating-expenditure screen at the entity's expense ratio."""
     values = entity["values"]
     er = _m_expense_ratio(values, params)
     if er is None:
         return None
     gm = _m_gross_margin(values, params)
+    current_rate = _collection_rate(values, "collection_rate_current")
     margins = _frange(params["matrix_margin_from"], params["matrix_margin_to"], params["matrix_margin_step"])
     rates = _frange(
         params["matrix_collection_from"], params["matrix_collection_to"], params["matrix_collection_step"]
@@ -1224,25 +1377,53 @@ def break_even_matrix(entity: dict, params: dict[str, Decimal]) -> dict | None:
         "edge_below": format(params["gap_yellow_below"], "f"),
         "current": {
             "gross_margin": None if gm is None else format(gm[0], "f"),
-            "collection_rate": None
-            if "collection_rate_current" not in values
-            else format(values["collection_rate_current"], "f"),
+            "collection_rate": None if current_rate is None else format(current_rate[0], "f"),
         },
-        "formula": "现金经营利润率 = 收缴率 − （1 − 毛利率）− 期间费用率",
+        "formula": "经营支出筛查近似差额 = 收缴率 − （1 − 毛利率）− 期间费用率",
+        "estimate": True,
+        "note": BREAK_EVEN_NOTE,
     }
 
 
 def evaluate_collection_health(entities: list[dict], params: dict[str, Decimal]) -> dict:
-    rows, diagnostics, matrices = [], [], []
+    rows, diagnostics, matrices, non_numeric, disclosures = [], [], [], [], []
     for entity in entities:
         entity_rows, skipped = evaluate_entity(entity, params)
         rows.extend(entity_rows)
+        for item in skipped:
+            if item.get("reason") != "zero_denominator":
+                continue
+            key = item["metric_key"]
+            names = COLLECTION_COMPONENTS if key == "collection_rate_total" else COLLECTION_COMPONENTS[:2]
+            values = entity["values"]
+            numerator, denominator = values["current_collection"], values["current_due"]
+            if key == "collection_rate_total":
+                numerator += values["arrears_collection"]
+                denominator += values["opening_ar"]
+            non_numeric.append({
+                "kind": "NONNUMERIC", "outcome": "undefined", "reason": "zero_denominator",
+                "message": "输入构成已提供，但分母为零，收缴率结果未定义；不生成数值或百分比。",
+                "metric_key": key, "entity": entity["name"], "scenario": "本期", "unit": "ratio",
+                "canonical_body": collection_undefined_disclosure([key]),
+                "source_scope": entity.get("component_scope", {}),
+                "value": None, "numerator": format(numerator.normalize(), "f") if numerator else "0",
+                "denominator": format(denominator.normalize(), "f") if denominator else "0",
+                "inputs": {name: format(values[name], "f") for name in names},
+                "manual_inputs": sorted(name for name in names if name in entity["manual"]),
+                "component_sources": {name: entity["sources"].get(name, []) for name in names},
+                "source_rows": [ref for name in names for ref in entity["sources"].get(name, [])],
+                "counts_as_amount_evidence": False,
+            })
+        undefined_keys = [item["metric_key"] for item in skipped if item.get("reason") == "zero_denominator"]
+        if undefined_keys:
+            disclosures.append({"entity": entity["name"], "metric_keys": undefined_keys,
+                                "canonical_body": collection_undefined_disclosure(undefined_keys)})
         if skipped:
             diagnostics.append(
                 {
                     "severity": "info",
                     "code": "collection_metric_skipped",
-                    "message": f"{entity['name']} 有 {len(skipped)} 项指标缺输入，未计算",
+                    "message": f"{entity['name']} 有 {len(skipped)} 项指标未计算，原因见明细",
                     "entity": entity["name"],
                     "skipped": skipped,
                 }
@@ -1265,7 +1446,7 @@ def evaluate_collection_health(entities: list[dict], params: dict[str, Decimal])
             {
                 "severity": "error",
                 "code": "empty_result",
-                "message": "collection_health produced no metric; every metric lacked an input",
+                "message": "collection_health produced no metric; see skipped diagnostics for input or denominator issues",
             }
         )
     return {
@@ -1274,6 +1455,9 @@ def evaluate_collection_health(entities: list[dict], params: dict[str, Decimal])
         "scenario_kind": "collection_health",
         "columns": COLUMNS,
         "rows": rows,
+        **({"non_numeric_outcomes": non_numeric} if non_numeric else {}),
+        **({"non_numeric_disclosures": disclosures} if disclosures else {}),
+        **({"canonical_body": disclosures[0]["canonical_body"]} if len(disclosures) == 1 else {}),
         "diagnostics": diagnostics,
         "sensitivity": matrices,
         "params": {key: format(value, "f") for key, value in params.items()},

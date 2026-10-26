@@ -1,0 +1,25 @@
+{
+  "case_id": "E02--priced_product",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "budget",
+      "value": "A:10@10;B:0@12"
+    },
+    {
+      "name": "actual",
+      "value": "A:10@11;B:5@12"
+    },
+    {
+      "name": "B_base_price",
+      "value": "12"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "分解各产品量价差异。"
+}

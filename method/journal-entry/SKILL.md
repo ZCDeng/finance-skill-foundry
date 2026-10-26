@@ -91,6 +91,31 @@ Based on the JE type:
 - Debit: Deferred revenue (or accounts receivable)
 - Credit: Revenue accounts (by stream/category)
 
+### Source-bound transaction checks
+
+For a supported transaction, use `finance_scenario_save` with
+`kind=transaction_review`, then `finance_scenario_run`. The inputs contain
+`scope`, `source_bindings`, and `proposed_entries`. Bind each original fact with
+`{alias, column, selector, aggregation: "single", scope, period, currency, unit}`;
+the transaction must link its original policy record by `policy_id`. Policy
+applicability and effective dates must come from sources. Proposed entries are
+the artifact being checked, never evidence for their own correctness.
+
+The registered cases cover uniform service advances, consumed service expenses,
+qualifying initial asset acquisitions, collection of existing receivables,
+fulfilled cash sales, and dated releases of restricted cash. Read the returned
+input gaps and itemized expected/actual differences. Do not replace missing
+source facts, policy references or dates with assumptions to make a check pass.
+Uniform service allocation is cumulative since contract start; it does not by
+itself establish the current-period adjusting journal without opening balances.
+An effective release requires a separate source identifying the restriction,
+release amount, status and date.
+
+Successful checks retain `source_bound_transaction_check_requires_professional_review`.
+They do not qualify arbitrary SQL output as financial evidence, approve a policy,
+complete a statutory report, or authorize posting. Report remaining review needs
+alongside the candidate journal or statements.
+
 ### 3. Generate the Journal Entry
 
 Present the entry in standard format:
@@ -113,18 +138,45 @@ Supporting Detail:
 Reversal: [Yes/No — if yes, specify reversal date]
 ```
 
+### Accrual settlement and reversal policy
+
+Read [accounting-basis.md](../accounting-basis.md) with
+`method-resource {skill: "journal-entry", resource: "accounting-basis.md"}` and
+[close-checklist.md](../close-checklist.md) with
+`method-resource {skill: "journal-entry", resource: "close-checklist.md"}` before
+policy-sensitive calculations. For F03/K11 coverage read [model-checks.md](../model-checks.md)
+with `method-resource {skill: "journal-entry", resource: "model-checks.md"}`.
+
+Use the confirmed policy, service period, existing entries and subsequent invoice
+treatment to choose one complete path. An obligation does not disappear at a month
+boundary. For services of 100 received in December and billed/paid at 100 in January,
+the December draft is debit expense 100 / credit accrued liability 100. With no tax
+or estimate change, either of these is valid:
+
+- **Reverse then book:** January reversal debits accrued liability 100 and credits
+  expense 100; the January invoice draft debits expense 100 and credits payable 100.
+  Settlement debits payable 100 and credits cash 100. January net expense is zero.
+- **Settle the accrual:** no reversal; the January invoice draft debits accrued
+  liability 100 and credits payable 100. Settlement debits payable 100 and credits
+  cash 100. January net expense is zero.
+
+Do not mix the two paths or record the original expense twice. Link the original
+accrual, any reversal, invoice and settlement; investigate differences between the
+estimate and invoice. These are drafts for authorized review outside Foundry, not
+evidence that entries have been posted.
+
 ### 4. Review Checklist
 
 Before finalizing, verify:
 
-- [ ] Debits equal credits
+- [ ] Debits equal credits in the functional currency using the confirmed exchange rates and translation policy; retain original amounts/currencies and FX differences. A normal currency exchange need not balance separately in each original currency. If this workflow cannot validate translation, state that exact gap.
 - [ ] Correct accounting period
 - [ ] Account codes are valid and map to the right GL accounts
 - [ ] Amounts are calculated correctly with supporting detail
 - [ ] Memo/description is clear and specific enough for audit
 - [ ] Department/cost center coding is correct
 - [ ] Entry is consistent with prior period treatment
-- [ ] Reversal flag is set appropriately (accruals should auto-reverse)
+- [ ] Reversal flag follows the confirmed policy and invoice treatment; the complete chosen path avoids duplicate expense
 - [ ] Supporting documentation is referenced or attached
 - [ ] Entry is within the user's approval authority
 - [ ] No unusual or out-of-pattern amounts that need investigation

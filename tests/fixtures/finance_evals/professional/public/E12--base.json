@@ -1,0 +1,33 @@
+{
+  "case_id": "E12--base",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "service_period",
+      "value": "2026-12"
+    },
+    {
+      "name": "service_completed",
+      "value": "yes"
+    },
+    {
+      "name": "subledger",
+      "value": "100"
+    },
+    {
+      "name": "gl",
+      "value": "0"
+    },
+    {
+      "name": "approval",
+      "value": "pending"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "处理月结子账与总账差异。"
+}

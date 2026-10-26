@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -13,6 +14,111 @@ ALLOWED_BASIS = {"user_assumption", "professional_judgment", "source_fact"}
 IGNORE_NOT_CONFIRMED = "not_confirmed"
 IGNORE_SUPERSEDED = "superseded"
 IGNORE_PERIOD = "period_not_in_run"
+APPROVAL_SUPERSEDED = "adjustment_approval_superseded"
+DEPENDENCY_UNAVAILABLE = "adjustment_dependency_unavailable"
+
+
+def current_cell_problem(analysis, run, row, column, *, allowed=None):
+    """Current approval of this cell; the immutable calculation remains historical.
+
+    Only adjusted_total consumes approvals, and only those applied to this row.
+    Neither a pending replacement nor a different scope changes book amounts.
+    """
+    if (column != "adjusted_total" or run.get("engine") != "finance"
+            or (run.get("result") or {}).get("metric_id") != "management_pnl"):
+        return None
+    applied = row.get("applied_adjustment_ids") or []
+    if not applied:
+        return None
+    from foundry.finance_service import FinanceStore
+
+    service = FinanceStore(analysis.task, snapshot_ids=allowed)
+    try:
+        service._authorize(run.get("bindings") or {})
+        originals = [service._read("adjustments", key) for key in applied]
+        for original in originals:
+            if (original.get("context_id") != run.get("finance_context_id")
+                    or original.get("bindings") != run.get("bindings")
+                    or original.get("include_in_management_pnl") is not True
+                    or not _matches_period(row, original.get("effective_period"))):
+                return DEPENDENCY_UNAVAILABLE
+        # Metadata only discovers potentially related records. It never grants
+        # evidence: each approval and every traversed parent is integrity-checked.
+        # An unrelated damaged record must not invalidate this cell.
+        root = analysis._inside(analysis.root / service._folder("adjustments"))
+        candidates = []
+        for path in root.glob("*.json"):
+            try:
+                candidate = json.loads(path.read_text(encoding="utf8"))
+            except (OSError, ValueError):
+                continue
+            if (isinstance(candidate, dict) and candidate.get("context_id") == run.get("finance_context_id")
+                    and candidate.get("bindings") == run.get("bindings")
+                    and candidate.get("include_in_management_pnl") is True):
+                candidates.append(candidate)
+        for original in originals:
+            for candidate in candidates:
+                if (candidate.get("effective_period") != original.get("effective_period")
+                        or not set(candidate.get("accounts") or []) & set(original.get("accounts") or [])
+                        or candidate.get("seq", 0) <= original.get("seq", 0)):
+                    continue
+                current = service._read("adjustments", candidate["id"])
+                seen = set()
+                while current.get("parent_id"):
+                    parent_id = current["parent_id"]
+                    if parent_id in seen:
+                        return DEPENDENCY_UNAVAILABLE
+                    seen.add(parent_id)
+                    if parent_id == original["id"]:
+                        return APPROVAL_SUPERSEDED
+                    current = service._read("adjustments", parent_id)
+        return None
+    except (FoundryError, OSError, KeyError, TypeError, ValueError):
+        return DEPENDENCY_UNAVAILABLE
+
+
+def current_reference_issues(analysis, spec, *, allowed=None, facts=None):
+    """Check actual cell references, including recipe claims, without run-wide staleness."""
+    locations = set()
+    for claim in [*(spec.get("claims") or []),
+                  *((recipe.get("claim") or {}) for recipe in spec.get("evidence_recipes") or []
+                    if isinstance(recipe, dict))]:
+        if (isinstance(claim, dict) and claim.get("column") == "adjusted_total"
+                and isinstance(claim.get("run_id"), str) and type(claim.get("row")) is int):
+            locations.add((claim.get("run_id"), claim.get("row"), "adjusted_total"))
+    selected = {key for key in spec.get("fact_ids") or [] if isinstance(key, str)}
+    try:
+        if facts is None and selected:
+            from foundry.finance_explanations import _facts_for_run, _materiality
+
+            facts = []
+            for key in dict.fromkeys(spec.get("run_ids") or []):
+                run = analysis.get_run(key)
+                if (run.get("engine") != "finance" or (run.get("result") or {}).get("metric_id") != "management_pnl"
+                        or not any(row.get("applied_adjustment_ids") for row in (run.get("result") or {}).get("rows") or []
+                                   if isinstance(row, dict))):
+                    continue
+                if allowed is not None and not set((run.get("bindings") or {}).values()) <= set(allowed):
+                    raise FoundryError("adjustment dependency unavailable")
+                facts.extend(_facts_for_run(run, _materiality(spec.get("materiality") or {}), analysis=analysis))
+        locations.update((fact["run_id"], fact["row"], fact["column"]) for fact in facts or []
+                         if fact.get("id") in selected and fact.get("column") == "adjusted_total")
+        reasons = set()
+        for run_id, row_index, column in locations:
+            run = analysis.get_run(run_id)
+            if type(row_index) is not int or row_index < 0:
+                raise FoundryError("adjustment dependency unavailable")
+            row = run["result"]["rows"][row_index]
+            problem = current_cell_problem(analysis, run, row, column, allowed=allowed)
+            if problem:
+                reasons.add(problem)
+    except (FoundryError, OSError, KeyError, TypeError, ValueError, IndexError):
+        reasons = {DEPENDENCY_UNAVAILABLE}
+    messages = {
+        APPROVAL_SUPERSEDED: "引用的调整后金额所依赖的批准已被同范围的新批准替代；请按当前批准重新计算，历史结果保留。",
+        DEPENDENCY_UNAVAILABLE: "引用的调整后金额所依赖的批准无法核验；请恢复获授权的依赖后重新验证。",
+    }
+    return [{"code": reason, "severity": "error", "message": messages[reason]} for reason in sorted(reasons)]
 
 
 def normalize_adjustment(spec: dict, *, context: dict, bindings: dict) -> dict:

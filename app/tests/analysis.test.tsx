@@ -1672,7 +1672,8 @@ ${canonicalAppendix} 已改写`;
       return success({});
     });
     mountBridge({ analysisState: async () => success({ ...initial, analyses: [], runs: [], drafts: [] }), financeCall });
-    render(<Analysis {...props} embedded section="results" />);
+    // Settle the resolved bootstrap reads before timing the run interaction.
+    await act(async () => { render(<Analysis {...props} embedded section="results" />); });
     fireEvent.click(await screen.findByRole('button', { name: '按已保存范围重算损益表' }));
     await screen.findByText('正在计算损益表…');
     await act(async () => gate.resolve(success({ ...run, engine: 'finance', finance_context_id: context.id })));

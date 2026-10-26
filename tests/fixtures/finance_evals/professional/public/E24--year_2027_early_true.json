@@ -1,0 +1,25 @@
+{
+  "case_id": "E24--year_2027_early_true",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "basis",
+      "value": "IFRS"
+    },
+    {
+      "name": "annual_start",
+      "value": "2027-01-01"
+    },
+    {
+      "name": "early_adoption_confirmed",
+      "value": "true"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "说明年度财务报表的列报规则适用情况。"
+}

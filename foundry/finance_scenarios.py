@@ -168,6 +168,48 @@ def _issue_date(invoice: dict) -> date | None:
     return _date(raw, "invoice issue_date") if raw is not None else None
 
 
+def _aging_bucket_id(bucket: dict) -> str:
+    """Resolve display-only localization without changing declared boundaries.
+
+    Other names remain custom identifiers, including names resembling a standard
+    interval whose declared bounds differ. Never infer a bound from a label.
+    """
+    standard = {(0, 30): "0-30", (31, 60): "31-60", (61, 90): "61-90", (91, None): "90+"}
+    canonical = standard.get((bucket["min"], bucket.get("max")))
+    return canonical if canonical and bucket["name"] == canonical + "天" else bucket["name"]
+
+
+def validate_aging_buckets(buckets: Any) -> None:
+    """Validate the canonical inclusive-day bucket contract without rewriting it."""
+    if buckets is None:
+        return
+    if not isinstance(buckets, list) or not buckets:
+        raise FoundryError("buckets must be a nonempty list of {name, min, max} objects")
+    names = set()
+    identities = set()
+    next_min = 0
+    for index, bucket in enumerate(buckets):
+        if (not isinstance(bucket, dict) or set(bucket) - {"name", "min", "max"}
+                or not {"name", "min"} <= set(bucket)):
+            raise FoundryError("buckets use canonical keys name, min, max; label/min_days/max_days are unsupported")
+        name, lower, upper = bucket["name"], bucket["min"], bucket.get("max")
+        if not isinstance(name, str) or not name.strip() or name != name.strip() or name == "not_due" or name in names:
+            raise FoundryError("buckets names must be unique nonblank text and cannot use reserved not_due")
+        if (isinstance(lower, bool) or not isinstance(lower, int) or lower < 0
+                or upper is not None and (isinstance(upper, bool) or not isinstance(upper, int) or upper < lower)):
+            raise FoundryError("buckets min/max must be nonnegative integer days; max may be null and cannot be below min")
+        if lower != next_min:
+            raise FoundryError("buckets must start at min 0 and have contiguous inclusive bounds without gaps or overlaps")
+        if upper is None and index != len(buckets) - 1:
+            raise FoundryError("buckets with max null must be last")
+        identity = _aging_bucket_id(bucket)
+        if identity in identities:
+            raise FoundryError("buckets must resolve to unique machine identities")
+        names.add(name)
+        identities.add(identity)
+        next_min = upper + 1 if upper is not None else None
+
+
 def _bucket_name(days: int | None, buckets: list[dict] | None = None) -> str:
     if days is None:
         return "not_due"
@@ -180,7 +222,7 @@ def _bucket_name(days: int | None, buckets: list[dict] | None = None) -> str:
         lower = bucket["min"]
         upper = bucket.get("max")
         if days >= lower and (upper is None or days <= upper):
-            return bucket["name"]
+            return _aging_bucket_id(bucket)
     raise FoundryError(f"no aging bucket covers {days} overdue days")
 
 
@@ -323,6 +365,16 @@ def compute_receivables_aging(
 
     scope = _require_scope(scope, "receivables aging")
     cutoff = _date(as_of, "as_of")
+    validate_aging_buckets(buckets)
+    bucket_labels = {"not_due": "not_due"}
+    if buckets:
+        bucket_labels.update({_aging_bucket_id(bucket): bucket["name"] for bucket in buckets})
+    if "period" in scope:
+        other_scope = {key: value for key, value in scope.items() if key != "period"}
+        if any(_matches_scope(invoice, other_scope) and invoice.get("period") in (None, "")
+               for invoice in invoices):
+            raise FoundryError("scope.period cannot filter invoices whose source period is missing; as_of is the aging cutoff, "
+                               "not a source period. Omit scope.period for unperiodized invoices or bind an explicit source period")
     normalized_status_filter = _normalize_status_filter(status_filter)
     scoped_invoices = []
     future_invoices = []
@@ -464,6 +516,7 @@ def compute_receivables_aging(
             "open_amount": _money(open_amount),
             "overdue_days": overdue_days,
             "bucket": bucket,
+            "bucket_label": bucket_labels.get(bucket, bucket),
             "raw_status": status["raw_status"],
             "status": status["status"],
         }
@@ -479,7 +532,7 @@ def compute_receivables_aging(
 
     ordered_buckets = ["not_due", "0-30", "31-60", "61-90", "90+"]
     if buckets:
-        ordered_buckets = ["not_due", *[bucket["name"] for bucket in buckets]]
+        ordered_buckets = ["not_due", *[_aging_bucket_id(bucket) for bucket in buckets]]
     groups = sorted({identity[1:5] for identity, _invoice in scoped_invoices})
     rows = [
         {
@@ -493,6 +546,7 @@ def compute_receivables_aging(
             "unit": unit,
             "as_of": cutoff.isoformat(),
             "bucket": name,
+            "bucket_label": bucket_labels.get(name, name),
             "open_amount": _money(
                 summary[(ledger, organization, currency, unit, name)]
             ),
@@ -527,6 +581,7 @@ def compute_receivables_aging(
             {"name": "unit", "type": "string"},
             {"name": "as_of", "type": "date"},
             {"name": "bucket", "type": "string"},
+            {"name": "bucket_label", "type": "string"},
             {"name": "open_amount", "type": "decimal"},
         ],
         "rows": rows,
@@ -543,6 +598,7 @@ def compute_receivables_aging(
             {"name": "open_amount", "type": "decimal"},
             {"name": "overdue_days", "type": "integer"},
             {"name": "bucket", "type": "string"},
+            {"name": "bucket_label", "type": "string"},
             {"name": "raw_status", "type": "string"},
             {"name": "status", "type": "string"},
         ],
@@ -560,6 +616,7 @@ def compute_receivables_aging(
             {"name": "open_amount", "type": "decimal"},
             {"name": "overdue_days", "type": "integer"},
             {"name": "bucket", "type": "string"},
+            {"name": "bucket_label", "type": "string"},
             {"name": "raw_status", "type": "string"},
             {"name": "status", "type": "string"},
             {"name": "exclusion_reason", "type": "string"},

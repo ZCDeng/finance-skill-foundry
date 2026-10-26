@@ -1,0 +1,352 @@
+{
+  "schema_version": "finance-independent-three-statement-v1",
+  "suite_id": "professional_supplement_v2",
+  "scope": {
+    "organization": "Supplement Fixture Co",
+    "ledger": "supplement-ledger-01",
+    "scenario": "management-forecast",
+    "currency": "CNY",
+    "unit": "元",
+    "period": "2026-10",
+    "opening_period": "2026-09"
+  },
+  "template_id": "linked_three_statement_management_v1",
+  "period": "2026-10",
+  "opening_period": "2026-09",
+  "scope_identity": {
+    "organization": "Supplement Fixture Co",
+    "ledger": "supplement-ledger-01",
+    "scenario": "management-forecast",
+    "currency": "CNY",
+    "unit": "元"
+  },
+  "case_ids": [
+    "SUP-E18-01--management-closed",
+    "SUP-E19-01--old-ar-collection",
+    "SUP-E19-02--fulfilled-cash-sale"
+  ],
+  "required_metrics": [
+    "net_income",
+    "cash_flow_operating",
+    "cash_flow_investing",
+    "cash_flow_financing",
+    "closing_cash",
+    "closing_receivables",
+    "closing_ppe",
+    "closing_payables",
+    "closing_debt",
+    "closing_equity",
+    "total_assets",
+    "total_liabilities_equity",
+    "available_cash"
+  ],
+  "required_model_checks": [
+    "opening_balance_sheet",
+    "revenue_receivables_cash",
+    "ppe_rollforward",
+    "payables_rollforward",
+    "debt_financing",
+    "equity_rollforward",
+    "cash_reconciliation",
+    "cash_flow_indirect_bridge",
+    "closing_balance_sheet",
+    "nonnegative_operating_balances",
+    "restricted_cash_bounds",
+    "cash_sufficiency"
+  ],
+  "numeric_tolerance": "0",
+  "input_count_exact": 16,
+  "source_binding_count_exact": 24,
+  "boundary_count_exact": 8,
+  "model_check_count_exact": 12,
+  "requirement_count_exact": 13,
+  "acceptance": {
+    "all_13_numeric_values_exact": true,
+    "all_12_model_checks_pass": true,
+    "all_13_requirements_answered": true,
+    "all_13_metrics_have_valid_source_bound_claims": true,
+    "current_persisted_completion_status": "complete",
+    "reporting_profile_and_all_eight_boundaries_confirmed": true,
+    "all_24_inputs_source_verified": true,
+    "skill_first": true,
+    "provider_completion_alone_insufficient": true
+  },
+  "preconditions": {
+    "controller_may_create": [
+      "datasets_from_public_sources",
+      "context",
+      "reporting_profile",
+      "scenario",
+      "trusted_manager_profile_confirmation",
+      "trusted_manager_all_eight_boundary_confirmation"
+    ],
+    "controller_must_not_precreate": [
+      "requirements",
+      "calculation_run",
+      "draft",
+      "completion_receipt"
+    ],
+    "profile_fields": [
+      "purpose",
+      "effective_period.start",
+      "effective_period.end",
+      "functional_currency",
+      "presentation_currency",
+      "presentation_unit",
+      "entity_scope"
+    ],
+    "boundary_names": [
+      "boundary.inventory_movement",
+      "boundary.tax_effect",
+      "boundary.interest_effect",
+      "boundary.vat_effect",
+      "boundary.fx_effect",
+      "boundary.oci_effect",
+      "boundary.noncash_investing_financing",
+      "boundary.other_balance_sheet_movements"
+    ],
+    "authorization": "Synthetic scoped engineering setup only; no asserted professional qualification or real business signoff"
+  },
+  "model_protocol": {
+    "repeats_each": 3,
+    "planned_slots": 9,
+    "timeout_seconds": 420,
+    "max_tool_turns": 80,
+    "automatic_retries": 0,
+    "fresh_task_and_session_each": true,
+    "per_case_gate": "all_three_repetitions_pass",
+    "suite_gate": "all_nine_slots_pass",
+    "preserve_all_attempts": true,
+    "candidate_identity": "all nine slots must bind the same final immutable candidate, suite and scorer hashes",
+    "controller_attempt_retries": 0,
+    "provider_transport_retries": {
+      "count_as_new_independent_slot": false,
+      "allowed_only_within_original_420_second_elapsed_limit": true,
+      "record_all_attempts_and_retry_counts": true,
+      "must_not_hide_or_reset_elapsed": true
+    }
+  },
+  "planned_slots": [
+    {
+      "case_id": "SUP-E18-01--management-closed",
+      "repeat_index": 1,
+      "slot_id": "SUP-E18-01--management-closed--r1"
+    },
+    {
+      "case_id": "SUP-E18-01--management-closed",
+      "repeat_index": 2,
+      "slot_id": "SUP-E18-01--management-closed--r2"
+    },
+    {
+      "case_id": "SUP-E18-01--management-closed",
+      "repeat_index": 3,
+      "slot_id": "SUP-E18-01--management-closed--r3"
+    },
+    {
+      "case_id": "SUP-E19-01--old-ar-collection",
+      "repeat_index": 1,
+      "slot_id": "SUP-E19-01--old-ar-collection--r1"
+    },
+    {
+      "case_id": "SUP-E19-01--old-ar-collection",
+      "repeat_index": 2,
+      "slot_id": "SUP-E19-01--old-ar-collection--r2"
+    },
+    {
+      "case_id": "SUP-E19-01--old-ar-collection",
+      "repeat_index": 3,
+      "slot_id": "SUP-E19-01--old-ar-collection--r3"
+    },
+    {
+      "case_id": "SUP-E19-02--fulfilled-cash-sale",
+      "repeat_index": 1,
+      "slot_id": "SUP-E19-02--fulfilled-cash-sale--r1"
+    },
+    {
+      "case_id": "SUP-E19-02--fulfilled-cash-sale",
+      "repeat_index": 2,
+      "slot_id": "SUP-E19-02--fulfilled-cash-sale--r2"
+    },
+    {
+      "case_id": "SUP-E19-02--fulfilled-cash-sale",
+      "repeat_index": 3,
+      "slot_id": "SUP-E19-02--fulfilled-cash-sale--r3"
+    }
+  ],
+  "negative_cases": [
+    {
+      "case_id": "SUP-N01--profile-unconfirmed",
+      "mutation": {
+        "stage": "pre_run",
+        "action": "omit_profile_confirmation"
+      },
+      "expected": {
+        "professional_status": "awaiting_profile_confirmation",
+        "current_completion_must_not_equal": "complete",
+        "qualified_evidence": false
+      },
+      "base_case_id": "SUP-E18-01--management-closed",
+      "engineering_only": true,
+      "original_slots_credit": 0
+    },
+    {
+      "case_id": "SUP-N02--one-boundary-unconfirmed",
+      "mutation": {
+        "stage": "pre_run",
+        "action": "omit_confirmed_boundary",
+        "boundary": "boundary.other_balance_sheet_movements"
+      },
+      "expected": {
+        "must_reject_partial_confirmation": true,
+        "professional_status": "awaiting_model_boundary_confirmation",
+        "current_completion_must_not_equal": "complete",
+        "qualified_evidence": false
+      },
+      "base_case_id": "SUP-E18-01--management-closed",
+      "engineering_only": true,
+      "original_slots_credit": 0
+    },
+    {
+      "case_id": "SUP-N03--profile-revoked",
+      "mutation": {
+        "stage": "after_completed_control",
+        "action": "revoke_profile_confirmation"
+      },
+      "expected": {
+        "historical_complete_retained": true,
+        "current_completion_must_not_equal": "complete",
+        "qualified_evidence": false
+      },
+      "base_case_id": "SUP-E18-01--management-closed",
+      "engineering_only": true,
+      "original_slots_credit": 0
+    },
+    {
+      "case_id": "SUP-N04--source-replaced",
+      "mutation": {
+        "stage": "after_completed_control",
+        "action": "replace_source_and_rebind_current_context",
+        "dataset_alias": "template_inputs",
+        "row_selector": {
+          "input_name": "revenue"
+        },
+        "replacement_amount": "211",
+        "no_reconfirmation": true
+      },
+      "expected": {
+        "historical_complete_retained": true,
+        "old_approval_must_not_authorize_changed_source": true,
+        "current_completion_must_not_equal": "complete",
+        "qualified_evidence": false
+      },
+      "base_case_id": "SUP-E18-01--management-closed",
+      "engineering_only": true,
+      "original_slots_credit": 0
+    },
+    {
+      "case_id": "SUP-N05--opening-equity-plus-one",
+      "mutation": {
+        "stage": "before_source_registration",
+        "action": "replace_public_row",
+        "dataset_alias": "template_inputs",
+        "row_selector": {
+          "input_name": "opening_equity"
+        },
+        "replacement_amount": "301"
+      },
+      "expected": {
+        "model_check_fail": "opening_balance_sheet",
+        "current_completion_must_not_equal": "complete",
+        "qualified_evidence": false
+      },
+      "base_case_id": "SUP-E18-01--management-closed",
+      "engineering_only": true,
+      "original_slots_credit": 0
+    },
+    {
+      "case_id": "SUP-N06--nonzero-boundary",
+      "mutation": {
+        "stage": "before_source_registration",
+        "action": "replace_public_row",
+        "dataset_alias": "model_boundary",
+        "row_selector": {
+          "boundary_name": "tax_effect"
+        },
+        "replacement_amount": "1"
+      },
+      "expected": {
+        "must_reject_template_execution": true,
+        "error_contains": "registered template does not support nonzero boundary effects",
+        "current_completion_must_not_equal": "complete",
+        "qualified_evidence": false
+      },
+      "base_case_id": "SUP-E18-01--management-closed",
+      "engineering_only": true,
+      "original_slots_credit": 0
+    },
+    {
+      "case_id": "SUP-N07--direct-values-without-sources",
+      "mutation": {
+        "stage": "scenario_inputs",
+        "action": "replace_numeric_source_bindings_with_direct_values",
+        "preserve_boundary_source_bindings": true,
+        "values_from_public_inputs_only": true
+      },
+      "expected": {
+        "must_not_qualify_source_free_run": true,
+        "current_completion_must_not_equal": "complete",
+        "qualified_evidence": false
+      },
+      "base_case_id": "SUP-E18-01--management-closed",
+      "engineering_only": true,
+      "original_slots_credit": 0
+    },
+    {
+      "case_id": "SUP-N08--wrong-opening-period",
+      "mutation": {
+        "stage": "before_source_registration",
+        "action": "replace_public_row",
+        "dataset_alias": "template_inputs",
+        "row_selector": {
+          "input_name": "opening_cash"
+        },
+        "replacement_period": "2026-10",
+        "binding_period": "2026-10"
+      },
+      "expected": {
+        "must_reject_template_execution": true,
+        "error_contains": "registered template source period does not match opening or current period",
+        "current_completion_must_not_equal": "complete",
+        "qualified_evidence": false
+      },
+      "base_case_id": "SUP-E18-01--management-closed",
+      "engineering_only": true,
+      "original_slots_credit": 0
+    }
+  ],
+  "negative_acceptance": "All eight predicates must be demonstrated against actual product state; arbitrary crash/timeout or unrelated rejection does not count. No current complete receipt may survive an invalidating mutation. Historical failure and prior success records remain unchanged.",
+  "original_release": {
+    "planned_slots": 283,
+    "credit": 0,
+    "supplement_cases_added_to_original": 0,
+    "original_manifest_sha256": "54f91a277c669e33329d2aaa48728a7db551ed80810e750bb5856f7c91d4ad4d",
+    "original_runtime_v1_edited": false
+  },
+  "visibility": {
+    "model_allowed": "only selected case public files and actual runtime precondition IDs/status",
+    "model_forbidden": [
+      "private/**",
+      "manifest.json",
+      "freeze.sha256",
+      "contract.json",
+      "other case public files",
+      "expected values or hidden oracle references"
+    ]
+  },
+  "failure_policy": "append-only evidence; no automatic retry, removal of failed attempts or rewriting frozen expected values to match implementation",
+  "model_scope": "synthetic_single_entity_management_forecast",
+  "limits": {
+    "timeout_seconds": 420,
+    "max_tool_turns": 80
+  }
+}

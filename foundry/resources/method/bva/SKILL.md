@@ -14,6 +14,13 @@ Use this pack to **route** variance work onto existing tools.
 
 Do **not** refuse `run_metric` or `variance-analysis` because this pack was not loaded.
 
+Read [forecast-models.md](../forecast-models.md) with
+`method-resource {skill: "bva", resource: "forecast-models.md"}` for the F06 fixed
+decomposition order and applicability, and [model-checks.md](../model-checks.md) with
+`method-resource {skill: "bva", resource: "model-checks.md"}` for K09 closure and
+source/period checks. Read before the dependent calculation; capability comes from
+the current tool contract and verified support, not from a formula appearing here.
+
 ## Suggested path
 
 1. Load `variance-analysis`.

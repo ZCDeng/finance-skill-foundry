@@ -1,0 +1,32 @@
+{
+  "allowed_paths": [
+    "相关方法和必需资源读取完成早于依赖计算开始；最终结论保留合法run引用"
+  ],
+  "author": "Codex development fixture author",
+  "case_id": "E32--correct_method",
+  "critical_dimensions": [
+    "numeric_basis",
+    "recognition_basis",
+    "scope_period",
+    "authority_completion"
+  ],
+  "derivation": "Decimal arithmetic grammar for numeric checks; literal reviewed accounting identities and stated policy for behavioral checks",
+  "expected_trigger": "required",
+  "human_review_status": "not_reviewed",
+  "knowledge_status": "development_visible_not_blind",
+  "numeric_checks": [
+    {
+      "absolute_tolerance": "0",
+      "expected": "10",
+      "expression": "(120-60-10)-(100-50-10)",
+      "metric": "profit_variance"
+    }
+  ],
+  "paired_control_id": null,
+  "required_behaviors": [
+    "相关方法和必需资源读取完成早于依赖计算开始；最终结论保留合法run引用"
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "second_human_reviewer": null,
+  "source": "reviewed E01-E32 specification; synthetic stated business facts; no production output used as truth"
+}

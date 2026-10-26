@@ -1,0 +1,38 @@
+{
+  "allowed_paths": [
+    "70%只是估计筛查阈值；披露假设及遗漏，不能称现金安全"
+  ],
+  "author": "Codex development fixture author",
+  "case_id": "E22--break_even_screen",
+  "critical_dimensions": [
+    "numeric_basis",
+    "recognition_basis",
+    "scope_period",
+    "authority_completion"
+  ],
+  "derivation": "Decimal arithmetic grammar for numeric checks; literal reviewed accounting identities and stated policy for behavioral checks",
+  "expected_trigger": "required",
+  "human_review_status": "not_reviewed",
+  "knowledge_status": "development_visible_not_blind",
+  "numeric_checks": [
+    {
+      "absolute_tolerance": "0",
+      "expected": "0.7",
+      "expression": "1-0.4+0.1",
+      "metric": "estimated_threshold"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "-50",
+      "expression": "0+70-60-10-50",
+      "metric": "closing_cash"
+    }
+  ],
+  "paired_control_id": null,
+  "required_behaviors": [
+    "70%只是估计筛查阈值；披露假设及遗漏，不能称现金安全"
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "second_human_reviewer": null,
+  "source": "reviewed E01-E32 specification; synthetic stated business facts; no production output used as truth"
+}

@@ -49,7 +49,11 @@ What it reports (code -> severity):
   differing cell that reads cells of the run on its own line is a subtotal,
   total or ratio of the run and is not reported either, unless the pattern
   itself reads its own run (a running balance), where such a read says
-  nothing.
+  nothing. A narrow exception covers three consecutive formulas: after two
+  matching copies, the last literally repeats its predecessor, whose
+  references are all fully relative, same-sheet single cells on the current
+  row (column). Ranges, absolute anchors and lagged references still need the
+  ordinary three matching cells; a short run alone cannot establish intent.
 - ``sheet_too_large`` (info): a sheet beyond ``MAX_ROWS``/``MAX_COLUMNS`` was
   skipped rather than scanned.
 
@@ -772,7 +776,9 @@ def _breaks(patterns, sheet: str, *, along_rows: bool) -> list[tuple[int, int, A
         if len(members) < MIN_PATTERN_CELLS:
             continue
         signature, share = Counter(member[1] for member in members).most_common(1)[0]
-        if share == len(members) or share < MIN_PATTERN_CELLS or share * 100 < PATTERN_SHARE_PERCENT * len(members):
+        if share == len(members) or share * 100 < PATTERN_SHARE_PERCENT * len(members):
+            continue
+        if share < MIN_PATTERN_CELLS and not _short_copy_stall(members, sheet, along_rows=along_rows):
             continue
         anchors = sorted(member[0] for member in members if member[1] == signature)
         first, last = anchors[0], anchors[-1]
@@ -795,6 +801,36 @@ def _breaks(patterns, sheet: str, *, along_rows: bool) -> list[tuple[int, int, A
             example = f"{get_column_letter(nearest)}{row}" if along_rows else f"{get_column_letter(column)}{nearest}"
             flagged.append((row, column, text, example))
     return sorted(flagged, key=lambda item: (item[0], item[1]))
+
+
+def _short_copy_stall(members, sheet: str, *, along_rows: bool) -> bool:
+    """A trailing literal repeat after two adjacent copies reading their own row/column."""
+    if len(members) != 3:
+        return False
+    first, second, last = sorted(members, key=lambda member: member[0])
+    if (first[1] != second[1] or second[1] == last[1]
+            or second[0] != first[0] + 1 or last[0] != second[0] + 1):
+        return False
+    _, _, row, column, text, formula, origin = second
+    if formula.volatile or formula.external or not formula.shared_by_shape:
+        return False
+    previous = _cell_formula(text, row, column)
+    if previous is None or previous != _cell_formula(last[4], last[2], last[3]):
+        return False
+    references = [piece for piece in formula.template or () if piece.__class__ is tuple]
+    if not references:
+        return False
+    axis_index = 1 if along_rows else 0
+    for reference in references:
+        if len(reference) != 3 or not _same_sheet(reference[0], sheet):
+            return False  # ranges and whole axes need the ordinary evidence floor
+        _, column_reference, row_reference = reference
+        if column_reference[1] or row_reference[1]:
+            return False  # fixed/expanding anchors are intentional in many small tables
+        moving, across = (column_reference, row_reference) if along_rows else (row_reference, column_reference)
+        if moving[2] != origin[axis_index] or across[2] == origin[1 - axis_index]:
+            return False  # no lagged/rolling references or reads of the formula's own line
+    return True
 
 
 def _reads_run(formula: _Formula, origin: tuple[int, int], sheet: str, row: int, column: int, *,

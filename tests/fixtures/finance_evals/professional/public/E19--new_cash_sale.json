@@ -1,0 +1,77 @@
+{
+  "case_id": "E19--new_cash_sale",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "opening_cash",
+      "value": "100"
+    },
+    {
+      "name": "opening_ar",
+      "value": "50"
+    },
+    {
+      "name": "opening_ppe",
+      "value": "200"
+    },
+    {
+      "name": "opening_debt",
+      "value": "100"
+    },
+    {
+      "name": "opening_ap",
+      "value": "50"
+    },
+    {
+      "name": "opening_equity",
+      "value": "200"
+    },
+    {
+      "name": "revenue",
+      "value": "120"
+    },
+    {
+      "name": "collections",
+      "value": "100"
+    },
+    {
+      "name": "cash_expense_incurred",
+      "value": "60"
+    },
+    {
+      "name": "expense_paid",
+      "value": "50"
+    },
+    {
+      "name": "depreciation",
+      "value": "10"
+    },
+    {
+      "name": "cash_capex",
+      "value": "40"
+    },
+    {
+      "name": "principal_paid",
+      "value": "20"
+    },
+    {
+      "name": "tax_interest_dividends_fx",
+      "value": "excluded"
+    },
+    {
+      "name": "additional_completed_cash_sale",
+      "value": "10"
+    },
+    {
+      "name": "additional_cost_tax",
+      "value": "0"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "在基准三表上新增已履约现金销售10，无新增成本税，重新计算。"
+}

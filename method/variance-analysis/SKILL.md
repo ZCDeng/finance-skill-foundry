@@ -12,7 +12,7 @@ argument-hint: "<line> vs <base>"
 >
 > When this skill runs inside finance-skill-foundry, also read [FOUNDRY.md](../FOUNDRY.md).
 >
-> Foundry runtime note: load this skill through the native skill tool, then read the companion notes with `method-resource {skill: "variance-analysis", resource: "FOUNDRY.md"}` and `method-resource {skill: "variance-analysis", resource: "CONNECTORS.md"}` when the trusted preset or session needs those rules. In analysis mode, use the current task datasets, multi-table SQL/Python, run records, and editable drafts; materiality, currency, accounting policy, and narrative judgment are manager-controlled and ordinary calculations do not require per-tool approval.
+> Foundry runtime note: the trusted preset or session selects the runtime fence. Before the first variance calculation or missing-input diagnostic, load this skill through the native skill tool, then successfully read `method-resource {skill: "variance-analysis", resource: "FOUNDRY.md"}` and `method-resource {skill: "variance-analysis", resource: "model-checks.md"}` in this session. Wait for the reads to finish before calculation; do not issue them concurrently or count a late read as an earlier one. CONNECTORS.md is optional connection guidance, not a substitute. In analysis mode, use current task datasets, multi-table SQL/Python, run records, and editable drafts; materiality, currency, accounting policy, and narrative judgment are manager-controlled and ordinary calculations do not require per-tool approval.
 
 **Important**: This skill assists with variance analysis workflows but does not provide financial advice. All analyses should be reviewed by qualified financial professionals before use in reporting.
 
@@ -22,7 +22,7 @@ Techniques for decomposing variances, materiality thresholds, narrative generati
 
 Start with `list_finance_context` to see the current source snapshots, scenario bindings, account maps, metric definitions, and available capabilities. For unregistered uploaded budget, actual, forecast, or operational-driver files, use `finance_source_refresh` only as a file snapshot refresh: ordinary files without real document-line identifiers should use `file_identity_policy: "snapshot_only"`, while `"business_key"` is reserved for files with genuine source keys. Bind the published source and scope with `finance_context_save` before running comparisons.
 
-Save the variance requirements before calculation, including the target metric, comparison scope, required bridge components, and requested drilldowns. Use `run_metric` to establish actual, baseline, and control totals before explaining the bridge. Use `explain_variance` when the question fits a supported profit bridge or price/quantity decomposition and the current scenario/source versions are explicit. Use `drilldown_fact` to inspect source-backed cells from that run, and `save_explanation_draft` for commentary with calculation claims linked to real `run_id`, `row`, `column`, and `value` fields. Keep using SQL/Python for custom joins, unsupported decompositions, cohort analysis, and data-quality checks; do not force every variance into the specialized tools. Materiality, missing-group treatment, negative budget policy, and narrative judgment remain manager-controlled.
+After those method reads, create or select a real context with every original source binding, then save the variance requirements using its returned context ID before calculation, including the target metric, comparison scope, required bridge components, and requested drilldowns. Check the returned professional identity and support preflight; a nonempty semantic fingerprint alone is insufficient, and background bindings must not be dropped. Resolve registration errors before any diagnostic run. Use `run_metric` to establish actual, baseline, and control totals before explaining the bridge. Use `explain_variance` when the question fits a supported profit bridge or price/quantity decomposition and the current scenario/source versions are explicit. Use `drilldown_fact` to inspect source-backed cells from that run, and `save_explanation_draft` for commentary with calculation claims linked to real `run_id`, `row`, `column`, and `value` fields. Keep using SQL/Python for custom joins, unsupported decompositions, cohort analysis, and data-quality checks; do not force every variance into the specialized tools. Materiality, missing-group treatment, negative budget policy, and narrative judgment remain manager-controlled.
 
 For explanation quality, follow the analysis-mode explanation contract in `FOUNDRY.md`: prepare facts and automatic supporting tables from successful runs with `prepare_explanation`, draft with stable `fact_ids` and `{{fact:FACT_ID}}` value placeholders, then check the current text with `validate_explanation`. Use the returned `quality` and `completion` state for bounded repair: at most two targeted repair-and-check rounds, stopping on `no_progress`. Reuse only applicable scoped business context. Separate financial contributions from supported operational causes and manager judgment; preserve an editable draft when evidence is incomplete.
 
@@ -39,6 +39,17 @@ For explanation quality, follow the analysis-mode explanation contract in `FOUND
 
 ## Variance Decomposition Techniques
 
+The preceding model-checks.md read provides K09 closure and coverage for the
+variance calculation. When defining forecast drivers or a forecast model, also
+read [forecast-models.md](../forecast-models.md) with
+`method-resource {skill: "variance-analysis", resource: "forecast-models.md"}` for
+F06 applicability. When the question requires accounting recognition, estimates
+or professional evidence boundaries, also read
+[accounting-basis.md](../accounting-basis.md) with
+`method-resource {skill: "variance-analysis", resource: "accounting-basis.md"}`
+before the dependent calculation. Do not reload an unchanged resource already
+successfully read in this session or load unrelated resources by default.
+
 ### Price / Volume Decomposition
 
 The most fundamental variance decomposition. Used for revenue, cost of goods, and any metric that can be expressed as Price x Volume.
@@ -49,18 +60,37 @@ Total Variance = Actual - Budget (or Prior)
 
 Volume Effect  = (Actual Volume - Budget Volume) x Budget Price
 Price Effect   = (Actual Price - Budget Price) x Actual Volume
-Mix Effect     = Residual (interaction term), or allocated proportionally
-
 Verification:  Volume Effect + Price Effect = Total Variance
                (when mix is embedded in the price/volume terms)
 ```
 
-**Three-way decomposition (separating mix):**
+An interaction or unexplained residual is not automatically a product mix effect.
+
+**Three-way decomposition: volume → mix → price (fixed order):**
+
+Let Va/Vb be actual/budget total volume, ma_i/mb_i each product's share of that
+total, and pa_i/pb_i its actual/budget price. Shares sum to one within the same
+comparable basket; quantities must use an additive common unit.
+
 ```
-Volume Effect = (Actual Volume - Budget Volume) x Budget Price x Budget Mix
-Price Effect  = (Actual Price - Budget Price) x Budget Volume x Actual Mix
-Mix Effect    = Budget Price x Budget Volume x (Actual Mix - Budget Mix)
+Volume Effect = (Va - Vb) * sum(mb_i * pb_i)
+Mix Effect    = Va * sum((ma_i - mb_i) * pb_i)
+Price Effect  = Va * sum(ma_i * (pa_i - pb_i))
+Total Variance = Va * sum(ma_i * pa_i) - Vb * sum(mb_i * pb_i)
+Verification: Volume Effect + Mix Effect + Price Effect = Total Variance
 ```
+
+Frozen check: budget volume 100, prices 10/20, mix .5/.5; actual volume 120,
+prices 12/18, mix .6/.4 produces **300 - 120 + 48 = 228**. Another ordering can
+allocate interaction differently and must be named; do not mix formulas from
+different orderings. Mathematical contributions do not prove business causes.
+
+Missing baseline prices, new/discontinued products, zero total volume, negative
+return quantities, or incompatible quantity units need an explicit comparable
+basket or an unsupported/input-gap result. Never invent a zero price or a share.
+This is a method definition, not a capability claim: use a native three-factor
+mode only when the current tool advertises and validates that mode. Existing
+two-factor modes do not become three-factor modes by renaming their outputs.
 
 **Example — Revenue variance:**
 - Budget: 10,000 units at $50 = $500,000

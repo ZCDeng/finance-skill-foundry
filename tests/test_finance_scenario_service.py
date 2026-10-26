@@ -1,8 +1,100 @@
 import json
 
+import pytest
+
 from foundry.analysis import AnalysisStore
 from foundry.finance_service import FinanceStore
 from foundry.task import TaskStore
+
+
+@pytest.mark.parametrize("kind,policy,source_values,proposed,expected_status,expected", [
+    ("uniform_service_advance", "uniform_monthly_service_v1",
+     {"cash_received": "120", "service_months": "12", "earned_months": "1",
+      "performance_pattern": "uniform_monthly", "fulfilment_basis": "cumulative_since_contract_start"},
+     {"recognized_revenue": "10", "contract_liability": "110"}, "pass",
+     {"recognized_revenue": "10", "contract_liability": "110"}),
+    ("uniform_service_advance", "uniform_monthly_service_v1",
+     {"cash_received": "120", "service_months": "12", "earned_months": "1",
+      "performance_pattern": "uniform_monthly", "fulfilment_basis": "cumulative_since_contract_start"},
+     {"recognized_revenue": "120", "contract_liability": "0"}, "fail",
+     {"recognized_revenue": "10", "contract_liability": "110"}),
+    ("ordinary_service_consumed", "expense_consumed_service_v1",
+     {"amount": "100", "service_consumed_in_period": True, "future_economic_benefit": False},
+     {"expense": "0", "capitalized_asset": "100"}, "fail", {"expense": "100", "capitalized_asset": "0"}),
+    ("capitalizable_acquisition", "capitalize_qualifying_acquisition_v1",
+     {"amount": "100", "future_economic_benefit": True, "asset_controlled": True, "reliable_measurement": True,
+      "useful_life_months": "60"},
+     {"expense": "0", "capitalized_asset": "100"}, "pass", {"expense": "0", "capitalized_asset": "100"}),
+    ("old_ar_collection", "settle_existing_receivable_v1",
+     {"amount": "10", "opening_receivable": "100", "receivable_origin_period": "2026-08"},
+     {"cash_delta": "10", "receivables_delta": "0", "revenue_delta": "10", "profit_delta": "10"}, "fail",
+     {"cash_delta": "10", "receivables_delta": "-10", "revenue_delta": "0", "profit_delta": "0"}),
+])
+def test_transaction_review_uses_archived_typed_sources_without_granting_amount_authority(
+    tmp_path, kind, policy, source_values, proposed, expected_status, expected,
+):
+    from foundry.errors import FoundryError
+
+    service = FinanceStore(TaskStore(tmp_path / "var").create(title="交易会计处理复核"))
+    scope = {"organization": "O1", "period": "2026-09", "currency": "CNY", "unit": "元"}
+    records = {
+        "transactions": {**scope, "transaction_id": "T1", "transaction_type": kind,
+                         "recognition_date": "2026-09-30", "policy_id": policy, **source_values},
+        "policies": {**scope, "policy_id": policy, "policy_reference": "fixture-policy-approved-scope",
+                     "policy_effective_from": "2026-01-01", "policy_effective_to": "2026-12-31",
+                     "policy_transaction_type": kind},
+    }
+    bindings = {}
+    for alias, row in records.items():
+        path = tmp_path / f"{alias}.json"
+        path.write_text(json.dumps([row]))
+        bindings[alias] = service.analysis.add_dataset(path, name=alias)["id"]
+    context = service.save_context({"bindings": bindings, "scopes": {alias: scope for alias in bindings}})
+    requirement = service.analysis_requirements_save({"context_id": context["id"],
+        "question": "核查候选交易处理，保留专业复核边界",
+        "items": [{"id": "transaction", "metric": "transaction_review", "requires_drilldown": False}]})
+    source_bindings = {}
+    for name in ["transaction_id", "transaction_type", "recognition_date", *source_values,
+                 "policy_id", "policy_reference", "policy_effective_from", "policy_effective_to", "policy_transaction_type"]:
+        alias = "policies" if name.startswith("policy_") else "transactions"
+        source_bindings[name] = {"alias": alias, "column": name, "aggregation": "single", "scope": scope,
+            "period": scope["period"], "currency": scope["currency"], "unit": scope["unit"],
+            "selector": {"policy_id": policy} if alias == "policies" else {"transaction_id": "T1"}}
+    scenario = service.save_scenario({"context_id": context["id"], "kind": "transaction_review",
+        "label": "候选分录检查", "inputs": {"scope": scope, "source_bindings": source_bindings,
+                                         "proposed_entries": proposed}})
+    run = service.run_scenario({"scenario_id": scenario["id"]})
+    assert run["execution_status"] == "succeeded", run.get("error")
+    assert run["result"]["status"] == expected_status, run["result"]["input_gaps"]
+    assert run["result"]["expected_entries"] == expected
+    assert run["result"]["evidence_eligible"] is False
+    assert run["result"]["scenario_id"] == scenario["id"]
+    facts = service.prepare_explanation({"run_ids": [run["id"]]})["facts"]
+    assert not any(fact["evidence_eligibility"]["counts_as_amount_evidence"] for fact in facts)
+    draft = service.save_explanation_draft({"requirements_id": requirement["id"], "run_ids": [run["id"]],
+        "body": "\n".join("{{fact:" + fact["id"] + "}}" for fact in facts)})
+    assert draft["completion"]["status"] != "complete"
+    checked = service.validate_explanation({"draft_id": draft["id"]})
+    assert checked["status"] == "needs_attention"
+    checked_requirement = checked["requirements"]["items"][0]
+    if expected_status == "pass":
+        assert checked_requirement["status"] == "pending"
+        assert checked_requirement["awaiting_manager"] == ["transaction_review_required"]
+        assert draft["completion"]["status"] == "awaiting_manager"
+        assert checked_requirement["counts_as_amount_evidence"] is False
+        assert {issue["code"] for issue in checked["issues"]} == {"transaction_review_requires_professional_review"}
+        assert not checked["requirements"]["original_requirements_completed"]
+        incomplete = service.validate_explanation({"draft_id": draft["id"], "claims": []})
+        assert incomplete["requirements"]["items"][0]["status"] != "answered"
+    else:
+        assert checked_requirement["status"] != "answered"
+    if expected_status == "fail":
+        assert any(item["severity"] == "error" for item in run["result"]["diagnostics"])
+        checked = service.validate_explanation({"run_ids": [run["id"]], "body": "核查候选处理。"})
+        assert checked["status"] == "needs_attention"
+    denied = FinanceStore(service.task, snapshot_ids=[])
+    with pytest.raises(FoundryError, match="outside"):
+        denied.run_scenario({"scenario_id": scenario["id"]})
 
 
 def test_cash_child_is_persistent_reproducible_and_drillable(tmp_path):

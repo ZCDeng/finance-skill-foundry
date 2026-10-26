@@ -1,0 +1,21 @@
+{
+  "case_id": "E02--zero_actual_volume",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "budget",
+      "value": "A:5@10;B:5@20"
+    },
+    {
+      "name": "actual",
+      "value": "A:0@12;B:0@18"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "在实际销量为零时分解量结构价。"
+}

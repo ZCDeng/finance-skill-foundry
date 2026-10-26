@@ -185,6 +185,167 @@ def test_parent_auto_claims_do_not_duplicate_on_edit(service):
     ) == 1
 
 
+def test_replacing_run_rebuilds_inherited_calculation_claims_and_source_checks(service, monkeypatch):
+    store, context = service
+    requirement = store.analysis_requirements_save({
+        "context_id": context["id"], "question": "实际与预算利润差异桥并下钻",
+        "items": [{"id": "profit_bridge", "metric": "profit", "requires_drilldown": True,
+                   "dimensions": {"method": "profit_bridge", "actual_scenario": "actual",
+                                  "baseline_scenario": "budget"}}],
+    })
+    first = store.explain_variance({"context_id": context["id"]})
+    draft = store.save_explanation_draft({
+        "title": "利润桥", "body": "收入贡献 20 万元，成本贡献 -10 万元，费用贡献 -5 万元，利润差异 5 万元。",
+        "run_ids": [first["id"]], "requirements_id": requirement["id"],
+    })
+    second = store.explain_variance({"context_id": context["id"]})
+    source_reads = []
+    read_dataset = store.analysis.read_dataset
+    def record_read(dataset_id):
+        dataset = read_dataset(dataset_id)
+        source_reads.append((dataset_id, dataset["source_hash"], dataset["rows"]))
+        return dataset
+    monkeypatch.setattr(store.analysis, "read_dataset", record_read)
+    revised = store.save_explanation_draft({
+        "parent_id": draft["id"], "run_ids": [second["id"]],
+        "body": "收入贡献 20 万元，成本贡献 -10 万元，费用贡献 -5 万元，利润差异 5 万元。",
+    })
+    assert {claim["run_id"] for claim in revised["claims"] if claim["basis"] == "calculation"} == {second["id"]}
+    assert revised["explanation_check"]["requirements"]["coverage"]["status"] == "pass"
+    assert revised["explanation_check"]["requirements"]["provenance"]["status"] == "pass"
+    checks = store.analysis._list("evidence_checks")
+    checked = next(check for check in checks if check["location"]["run_id"] == second["id"] and check["status"] == "verified")
+    assert checked["read_count"] == 6
+    assert checked["source_hashes"] == {dataset_id: source_hash for dataset_id, source_hash, _ in source_reads}
+    assert {dataset_id for dataset_id, _, _ in source_reads} == set(context["bindings"].values())
+    assert {str(row["amount"]) for _, _, rows in source_reads for row in rows} == {"120", "70", "20", "100", "60", "15"}
+    parent_only = store.save_explanation_draft({"parent_id": revised["id"], "title": "仅修改标题"})
+    assert parent_only["run_ids"] == revised["run_ids"]
+    assert parent_only["claims"] == revised["claims"]
+    with pytest.raises(FoundryError, match="referenced successful run"):
+        store.save_explanation_draft({
+            "parent_id": draft["id"], "run_ids": [second["id"]], "claims": draft["claims"],
+        })
+
+
+def test_auto_drilldown_rejects_changed_source_snapshot(service):
+    store, context = service
+    store.analysis_requirements_save({
+        "context_id": context["id"], "question": "利润下钻核验",
+        "items": [{"id": "profit", "metric": "profit", "requires_drilldown": True}],
+    })
+    run = store.explain_variance({"context_id": context["id"]})
+    dataset_id = context["bindings"]["actual"]
+    metadata = store.analysis.read_dataset(dataset_id)
+    source = store.analysis.root / "datasets" / dataset_id / metadata["source_file"]
+    source.write_text("tampered source", encoding="utf-8")
+    draft = store.save_explanation_draft({"body": "利润贡献见计算依据。", "run_ids": [run["id"]]})
+    assert draft["completion"]["status"] != "complete"
+    assert any("integrity check failed" in failure["message"] for failure in draft["source_read_failures"])
+    assert not any(check["status"] == "verified" for check in store.analysis._list("evidence_checks"))
+
+
+def test_runtime_can_repair_with_a_replacement_run_within_existing_budget(service):
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    store, context = service
+    store.analysis_requirements_save({
+        "context_id": context["id"], "question": "实际与预算利润差异并下钻",
+        "items": [{"id": "profit", "metric": "profit", "requires_drilldown": True,
+                   "dimensions": {"method": "profit_bridge", "actual_scenario": "actual",
+                                  "baseline_scenario": "budget"}}],
+    })
+    store.session_id = "bounded-runtime-regression"
+    operations = CompletionOperationStore(store.task, store.session_id)
+    operation = operations.begin("replace-run-request")
+    first_run = store.explain_variance({"context_id": context["id"]})
+    first = store.save_completion_draft(operation["id"], "first-save", {
+        "run_ids": [first_run["id"]], "body": "利润差异 999 万元。",
+        "claims": [{"basis": "professional_judgment", "reason": "经理判断仍待复核"}],
+    })
+    assert first["completion"]["status"] == "repair_available"
+    second_run = store.explain_variance({"context_id": context["id"]})
+    revised = store.save_completion_draft(operation["id"], "corrected-save", {
+        "parent_id": first["id"], "run_ids": [second_run["id"]],
+        "body": "收入贡献 20 万元，成本贡献 -10 万元，费用贡献 -5 万元，利润差异 5 万元。",
+    })
+    assert revised["completion"]["status"] == "complete"
+    assert revised["completion_operation"]["status"] == "complete"
+    assert revised["completion_operation"]["current_revision"] == 2
+    assert any(claim["basis"] == "professional_judgment" for claim in revised["claims"])
+    assert {claim["run_id"] for claim in revised["claims"] if claim["basis"] == "calculation"} == {second_run["id"]}
+
+
+@pytest.mark.parametrize("wrong_cash_type", [True, False])
+def test_historical_cash_claim_is_rechecked_without_rewriting_records(tmp_path, monkeypatch, wrong_cash_type):
+    import test_finance_three_statement as template_tests
+    from test_finance_professional_protocol import _template_case
+    from foundry import finance_claim_semantics
+
+    template_parts = template_tests.template_parts
+    def restricted_parts():
+        scenario, context, datasets = template_parts()
+        for row in datasets["template_inputs"]["rows"]:
+            if row["input_name"] in {"customer_receipts", "closing_restricted_cash"}:
+                row["amount"] = {"customer_receipts": "110", "closing_restricted_cash": "30"}[row["input_name"]]
+        return scenario, context, datasets
+    monkeypatch.setattr(template_tests, "template_parts", restricted_parts)
+    store, _, requirement, run = _template_case(tmp_path)
+    facts = store.prepare_explanation({"run_ids": [run["id"]]})["facts"]
+    facts = [fact for fact in facts if fact["column"] == "value"]
+    cash = next(fact for fact in facts if fact["semantics"]["metric"] == (
+        "closing_cash" if wrong_cash_type else "available_cash"))
+    body = "可用资金为{{fact:%s}}。\n" % cash["id"] + "\n".join("{{fact:%s}}" % fact["id"] for fact in facts)
+    # Simulate a genuinely stored verdict from the preceding validator version.
+    with monkeypatch.context() as previous:
+        previous.setattr(finance_claim_semantics, "check_claim_semantics", lambda *args, **kwargs: [])
+        previous.setattr(finance_claim_semantics, "CLAIM_SEMANTICS_VERSION", 0, raising=False)
+        saved = store.save_explanation_draft({"body": body, "run_ids": [run["id"]], "requirements_id": requirement["id"]})
+        assert saved["explanation_check"]["status"] == "pass"
+        assert saved["completion"]["status"] == "complete"
+    paths = [store.analysis._object_path("drafts", saved["id"]),
+             store.analysis._object_path("completions", saved["completion"]["id"])]
+    before = [path.read_bytes() for path in paths]
+    for allowed in (None, set(run["bindings"].values())):
+        draft = store.analysis.draft_in_view(store.analysis.get_draft(saved["id"]), allowed)
+        receipt = store.analysis.completion_in_view(saved["completion"], allowed)
+        assert draft["quality"]["status"] == ("needs_attention" if wrong_cash_type else "pass")
+        assert (receipt["status"] == "complete") is not wrong_cash_type
+    assert [path.read_bytes() for path in paths] == before
+
+
+@pytest.mark.parametrize("unit_columns,expected_numerator,expected_denominator", [
+    ("", "元", "元"),
+    (", '万元' AS amount_unit", "万元", "万元"),
+    (", '万元' AS amount_unit, '元' AS numerator_unit", "元", "万元"),
+    (", '万元' AS amount_unit, '元' AS numerator_unit, '亿元' AS denominator_unit", "元", "亿元"),
+])
+def test_long_form_collection_ratio_preserves_amount_components_and_rate_units(
+    service, unit_columns, expected_numerator, expected_denominator,
+):
+    store, context = service
+    revision = store.analysis.save_analysis({
+        "question": "收缴率", "bindings": context["bindings"],
+        "scope": {"currency": "CNY", "unit": "元"},
+        "sql": "SELECT 'collection_rate_current' AS metric_key, 0.9 AS value, '比率' AS unit, "
+               f"90 AS numerator, 100 AS denominator{unit_columns} FROM actual LIMIT 1",
+    })
+    run = store.analysis.run_analysis(revision["id"])
+    facts = store.prepare_explanation({"run_ids": [run["id"]]})["facts"]
+    by_column = {fact["column"]: fact for fact in facts}
+    assert by_column["numerator"]["unit"] == expected_numerator
+    assert by_column["denominator"]["unit"] == expected_denominator
+    assert by_column["value"]["unit"] == "比率"
+    check = store.validate_explanation({
+        "body": f"已收 90 {expected_numerator}，应收 100 {expected_denominator}，收缴率 90%。",
+        "run_ids": [run["id"]], "fact_ids": [fact["id"] for fact in facts],
+        "claims": [{"basis": "calculation", "run_id": run["id"], "row": 0, "column": "value",
+                    "value": "0.9", "fact_id": by_column["value"]["id"],
+                    "presentation": {"scale": "percent", "decimal_places": 0, "rounding": "half_up"}}],
+    })
+    assert not any(issue["code"] == "fact_unit_mismatch" for issue in check["issues"])
+
+
 def test_explanation_rejects_failed_or_out_of_scope_runs(service):
     store, context = service
     failed = store.explain_variance(
@@ -322,6 +483,119 @@ def test_validate_explanation_flags_label_unit_and_direction_mismatch(service):
     assert mismatch["expected_metric"] == "cost"
     assert any("profit" in label for label in mismatch["matched_fact_labels"])
     assert "profit" in mismatch["matched_fact_metrics"]
+
+
+@pytest.mark.parametrize(
+    ("body", "wrong_metric"),
+    [
+        (
+            "利润差异 = 收入利润影响 20 万元 + 成本利润影响 -10 万元 + "
+            "费用利润影响 -5 万元 = 5 万元，闭合一致。",
+            None,
+        ),
+        (
+            "利润差异 = 收入利润影响 20 万元 + 成本利润影响 -10 万元 + "
+            "费用利润影响 5 万元 = 5 万元，闭合一致。",
+            "expense",
+        ),
+        (
+            "利润差异 = 收入利润影响 20 万元 + 成本利润影响 -10 万元 + "
+            "费用利润影响 -5 万元 = -5 万元，闭合一致。",
+            "profit",
+        ),
+        ("费用利润影响增加 5 万元。", "expense"),
+        ("收入利润影响 20 万元、成本利润影响 -10 万元、费用利润影响 -5 万元 三者之和等于利润差异 5 万元。", None),
+        ("收入利润影响 20 万元、成本利润影响 -10 万元、费用利润影响 -5 万元 三者之和等于利润差异 -5 万元。", "profit"),
+    ],
+)
+def test_labelled_profit_equation_checks_result_against_target_metric(service, body, wrong_metric):
+    # The correct sentence is copied from the first live F01 draft: its final
+    # +5 is the profit result, not a second assertion about expense's -5.
+    store, context = service
+    run = store.explain_variance({"context_id": context["id"]})
+    facts = store.prepare_explanation({"run_ids": [run["id"]]})["facts"]
+    contributions = [fact for fact in facts if fact["column"] == "contribution"]
+    check = store.validate_explanation(
+        {
+            "body": body,
+            "run_ids": [run["id"]],
+            "fact_ids": [fact["id"] for fact in contributions],
+        }
+    )
+    if wrong_metric is None:
+        assert check["status"] == "pass", check["issues"]
+    else:
+        wrong_fact = next(fact for fact in contributions if fact["semantics"]["metric"] == wrong_metric)
+        assert check["status"] == "needs_attention"
+        assert any(
+            issue["code"] == "fact_direction_mismatch" and issue["fact_id"] == wrong_fact["id"]
+            for issue in check["issues"]
+        )
+
+
+@pytest.mark.parametrize(
+    ("body", "wrong_metric"),
+    [
+        (
+            "- 收入贡献 20 万元（有利，推高利润），是利润上升的唯一正向来源。\n"
+            "- 成本贡献 -10 万元（不利，压低利润）。\n"
+            "- 费用贡献 -5 万元（不利，压低利润）。",
+            None,
+        ),
+        ("成本贡献 10 万元（不利，压低利润）。", "cost"),
+        ("费用贡献 5 万元（不利，压低利润）。", "expense"),
+        ("成本贡献增加 10 万元。", "cost"),
+        ("费用贡献增加 5 万元。", "expense"),
+        ("成本增加 10 万元，费用增加 5 万元。", None),
+        ("成本减少 10 万元。", "cost"),
+        ("费用减少 5 万元。", "expense"),
+    ],
+)
+def test_cost_and_expense_contributions_keep_profit_impact_direction(service, body, wrong_metric):
+    # The first case preserves the exact driver text of the final live F01
+    # draft. Contribution signs differ from the underlying expense changes.
+    store, context = service
+    run = store.explain_variance({"context_id": context["id"]})
+    facts = store.prepare_explanation({"run_ids": [run["id"]]})["facts"]
+    contributions = [fact for fact in facts if fact["column"] == "contribution"]
+    check = store.validate_explanation(
+        {
+            "body": body,
+            "run_ids": [run["id"]],
+            "fact_ids": [fact["id"] for fact in contributions],
+        }
+    )
+    if wrong_metric is None:
+        assert check["status"] == "pass", check["issues"]
+    else:
+        wrong_fact = next(fact for fact in contributions if fact["semantics"]["metric"] == wrong_metric)
+        assert check["status"] == "needs_attention"
+        assert any(
+            issue["code"] == "fact_direction_mismatch" and issue["fact_id"] == wrong_fact["id"]
+            for issue in check["issues"]
+        )
+
+
+@pytest.mark.parametrize("body,valid", [
+    ("闭合关系：+20 − 10 − 5 = +5。", True),
+    ("闭合关系：+20 - 10 - 5 = +5。", True),
+    ("闭合关系：+20 − 10 − 5 = -5。", False),
+    ("闭合关系：+20 − 10 + 5 = +15。", False),
+])
+def test_unlabelled_closure_requires_the_complete_referenced_group(service, body, valid):
+    store, context = service
+    run = store.explain_variance({"context_id": context["id"]})
+    prepared = store.prepare_explanation({"run_ids": [run["id"]]})
+    facts = [fact for fact in prepared["facts"] if fact["column"] == "contribution"]
+    checked = store.validate_explanation({"run_ids": [run["id"]], "body": body,
+        "fact_ids": [fact["id"] for fact in facts]})
+    if valid:
+        assert checked["status"] == "pass", checked["issues"]
+    else:
+        assert any(issue["code"] == "body_closure_mismatch" for issue in checked["issues"])
+    missing = store.validate_explanation({"run_ids": [run["id"]], "body": body,
+        "fact_ids": [fact["id"] for fact in facts[:-1]]})
+    assert missing["status"] == "needs_attention"
 
 
 def test_background_versions_match_scope_and_effective_period(service, tmp_path):
@@ -812,6 +1086,117 @@ def test_evidence_appendix_does_not_cite_unbacked_members(service):
     assert {claim["fact_id"] for claim in appendix["claims"]} == set(appendix["fact_ids"])
 
 
+def _e01_volume_mix_price_service(tmp_path, alias):
+    """Public E01 result shape: one arbitrary alias, no period, both side currencies."""
+    task = TaskStore(tmp_path / "e01-var").create(title="E01附录结果行身份")
+    store = FinanceStore(task)
+    rows = [
+        {"scenario": scenario, "product": product, "quantity": quantity, "price": price,
+         "amount": amount, "quantity_unit": "件", "currency": "CNY", "unit": "元"}
+        for scenario, product, quantity, price, amount in (
+            ("budget", "A", "50.0", "10", "500.0"),
+            ("budget", "B", "50.0", "20", "1000.0"),
+            ("actual", "A", "72.0", "10", "720.0"),
+            ("actual", "B", "48.0", "21", "1008.0"),
+        )
+    ]
+    path = tmp_path / "e01-price-quantity.json"
+    path.write_text(json.dumps(rows), encoding="utf-8")
+    dataset = store.analysis.add_dataset(path, name="price_quantity")
+    context = store.save_context({
+        "bindings": {alias: dataset["id"]},
+        "scopes": {alias: {"currency": "CNY", "unit": "元"}},
+    })
+    run = store.explain_variance({"context_id": context["id"], "kind": "price_quantity",
+                                  "method": "volume_mix_price"})
+    assert run["execution_status"] == "succeeded"
+    for column in ("actual", "baseline", "total_variance", "volume_contribution", "mix_contribution",
+                   "price_contribution", "residual"):
+        store.drilldown_fact({"run_id": run["id"], "row": 0, "column": column})
+    return store, run
+
+
+@pytest.mark.parametrize("alias", ["pq", "price_quantity"])
+def test_e01_appendix_uses_server_result_scope_for_arbitrary_binding_alias(tmp_path, alias):
+    from foundry.finance_explanations import render_evidence_appendix
+
+    store, run = _e01_volume_mix_price_service(tmp_path, alias)
+    prepared = store.prepare_explanation({"run_ids": [run["id"]]})
+    expected_scope = {"currency": "CNY", "actual_scope.currency": "CNY", "baseline_scope.currency": "CNY"}
+    assert len(prepared["facts"]) == 7
+    assert {fact["scope"][alias]["currency"] for fact in prepared["facts"]} == {"CNY"}
+    assert all(member["scope"] == expected_scope for member in prepared["evidence_groups"][0]["members"])
+    assert all(fact["result_scope"] == expected_scope for fact in prepared["facts"])
+    assert all(fact["evidence_eligibility"]["counts_as_amount_evidence"] for fact in prepared["facts"])
+
+    appendix = render_evidence_appendix(prepared)
+    assert set(appendix["fact_ids"]) == {fact["id"] for fact in prepared["facts"]}
+    assert "非可引用" not in appendix["body"]
+    draft = store.save_explanation_draft({"body": "量价贡献见计算依据；业务因果仍需专业判断。", "run_ids": [run["id"]]})
+    assert draft["explanation_check"]["status"] == "pass", draft["explanation_check"]["issues"]
+    assert store.validate_explanation({"draft_id": draft["id"]})["status"] == "pass"
+
+
+@pytest.mark.parametrize("render_version", [1, 2])
+def test_e01_historical_appendix_reconstruction_remains_byte_exact(tmp_path, render_version):
+    import hashlib
+    from foundry.finance_explanations import _render_evidence_appendix
+
+    store, run = _e01_volume_mix_price_service(tmp_path, "price_quantity")
+    prepared = store.prepare_explanation({"run_ids": [run["id"]]})
+    appendix = _render_evidence_appendix(prepared, render_version=render_version)
+    # Public state-9a717913c63387d53998.json: keep even this historical failed appendix unchanged.
+    assert hashlib.sha256(appendix["body"].encode()).hexdigest() == "055a6e08722a748812e62432d6cfe5dd57aec2c0d577df4faf45b0eccbcb3885"
+    assert appendix["fact_ids"] == []
+
+
+@pytest.mark.parametrize("conflict", ["member_scope", "context_scope", "value", "unit"])
+def test_e01_result_scope_does_not_override_explicit_conflicts(tmp_path, conflict):
+    import copy
+    from foundry.finance_explanations import render_evidence_appendix
+
+    store, run = _e01_volume_mix_price_service(tmp_path, "pq")
+    prepared = copy.deepcopy(store.prepare_explanation({"run_ids": [run["id"]]}))
+    member = prepared["evidence_groups"][0]["members"][0]
+    fact = next(fact for fact in prepared["facts"] if fact["id"] == member["fact_id"])
+    if conflict == "member_scope":
+        member["scope"]["actual_scope.currency"] = "USD"
+    elif conflict == "context_scope":
+        fact["scope"]["pq"]["currency"] = "USD"
+    elif conflict == "value":
+        member["value"] = "999"
+    else:
+        member["unit"] = "万元"
+    appendix = render_evidence_appendix(prepared)
+    assert fact["id"] not in appendix["fact_ids"]
+    assert f'- {member["label"]}（非可引用：未生成可核验事实）' in appendix["body"]
+
+
+@pytest.mark.parametrize("qualified", [True, False])
+@pytest.mark.parametrize("mutation", ["template_id", "metric_key", "semantic_metric", "model_scope"])
+def test_result_scope_cannot_restore_a_native_fact_with_broken_metric_identity(tmp_path, qualified, mutation):
+    import copy
+    from test_finance_professional_protocol import _template_case
+    from foundry.finance_explanations import render_evidence_appendix
+
+    store, _, _, run = _template_case(tmp_path)
+    prepared = store.prepare_explanation({"run_ids": [run["id"]], "fact_view": "inspection"})
+    original_ids = {fact["id"] for fact in prepared["facts"]
+                    if fact["evidence_eligibility"]["counts_as_amount_evidence"]}
+    changed = copy.deepcopy(prepared)
+    fact = next(fact for fact in changed["facts"]
+                if fact["evidence_eligibility"]["counts_as_amount_evidence"] is qualified)
+    if mutation in {"template_id", "metric_key"}:
+        fact["metric_identity"][mutation] = "untrusted"
+    else:
+        fact["semantics"]["metric" if mutation == "semantic_metric" else "model_scope"] = "untrusted"
+    assert fact["result_scope"]
+    appendix = render_evidence_appendix(changed)
+    assert fact["id"] not in appendix["fact_ids"]
+    assert set(appendix["fact_ids"]) == original_ids - {fact["id"]}
+    assert set(claim["fact_id"] for claim in appendix["claims"]) == set(appendix["fact_ids"])
+
+
 def test_evidence_groups_distinguish_missing_from_not_applicable(service):
     from foundry.finance_explanations import prepare_explanation
 
@@ -1140,20 +1525,22 @@ def test_a_points_fact_followed_by_its_unit_in_prose_is_not_written_twice(servic
     assert draft["body"].startswith(f"收缴率缺口 3.30 {prose}，")
 
 
-def test_an_appendix_saved_before_points_had_their_own_display_stays_trusted(service, monkeypatch):
+@pytest.mark.parametrize("render_version", [1, 2])
+def test_an_appendix_saved_before_points_had_their_own_display_stays_trusted(service, monkeypatch, render_version):
     from foundry import finance_explanations
 
     store, _ = service
     run = _points_run(store)
     # The display before 百分点 had its own: the exact value and the unit as written.
     monkeypatch.setattr(finance_explanations, "_points_display", lambda exact: f"{exact} 百分点")
+    monkeypatch.setattr(finance_explanations, "EVIDENCE_APPENDIX_RENDER_VERSION", render_version)
     old = store.save_explanation_draft({"body": "收缴率缺口见计算依据。", "run_ids": [run["id"]]})
     assert "3.3000 百分点" in old["body"] and old["explanation_check"]["status"] == "pass"
     monkeypatch.undo()
 
     checked = store.validate_explanation({"draft_id": old["id"]})
     assert checked["status"] == "pass", checked["issues"]
-    assert finance_explanations.EVIDENCE_APPENDIX_RENDER_VERSION == 1
+    assert finance_explanations.EVIDENCE_APPENDIX_RENDER_VERSION == 3
     # Only the old display is accepted beside the new one: without it the appendix is the manager's, and its row
     # heading counts as an uncited number.
     monkeypatch.setattr(finance_explanations, "_legacy_points_prepared", lambda prepared: None)
@@ -2752,7 +3139,8 @@ def test_a_context_without_ledger_keys_cannot_reach_a_named_ledger(tmp_path):
     note = store.finance_background_save({"context_id": keyless["id"], "basis": "user_assumption",
                                           "text": "币种人民币", "effective_from": "2026-08"})
     assert (note["scope"]["ledger"], note["scope"]["organization"]) == ("", "")
-    listed = lambda c: [r["id"] for r in store.finance_background_list({"context_id": c["id"]})["business_contexts"]]
+    def listed(context):
+        return [r["id"] for r in store.finance_background_list({"context_id": context["id"]})["business_contexts"]]
     assert listed(keyless) == [note["id"]]
     assert listed(named) == []
 

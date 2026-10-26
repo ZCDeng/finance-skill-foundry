@@ -1,0 +1,33 @@
+{
+  "case_id": "E14--functional_balance",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "functional_currency",
+      "value": "CNY"
+    },
+    {
+      "name": "debit_USD_cash",
+      "value": "100"
+    },
+    {
+      "name": "credit_CNY_cash",
+      "value": "700"
+    },
+    {
+      "name": "rate",
+      "value": "7"
+    },
+    {
+      "name": "fees_fx_gain",
+      "value": "excluded"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "检查换汇分录草稿是否借贷平衡。"
+}

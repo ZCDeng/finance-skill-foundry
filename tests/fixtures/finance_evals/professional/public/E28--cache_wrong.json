@@ -1,0 +1,17 @@
+{
+  "case_id": "E28--cache_wrong",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "workbook_case",
+      "value": "formula = A1+A2; A1=1,A2=2; cache=999; engine unavailable"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "检查公式完整性与重算可靠性。"
+}

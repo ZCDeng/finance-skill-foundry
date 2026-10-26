@@ -37,7 +37,7 @@ ALIAS = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 # estimate_acceptances holds a manager's acceptance of a specific estimate recipe (phase 2 adds the
 # manager-only command); requirement checks only read it and never create one.
 KINDS = {"revisions", "runs", "drafts", "methods", "requirements", "evidence_checks", "completions",
-         "estimate_acceptances"}
+         "estimate_acceptances", "dataset_display_names"}
 REPORT_EXPORT_FORMATS = {"md", "xlsx", "docx", "pdf", "html"}
 RESULT_ROLES = {"business", "activity", "probe", "preanalysis", "calculation", "draft_support", "audit_check"}
 # What a script stands in for, when an engine path could not run yet: 回款健康 drawn by a script while the workbook's
@@ -64,6 +64,41 @@ INHERITED_FIELDS = ("title", "body", "claims", "fact_ids", "materiality", "limit
                     "evidence_appendix", "evidence_appendix_meta", "evidence_recipes", "consistency_rules",
                     "consistency_sources")
 DEFAULT_DRAFT_TITLE = "分析报告"
+
+
+def _draft_required_check_authorship(prepared, runs, *, claims=(), fact_ids=(), template_fact_ids=(), inherited=None):
+    """Keep explicit calculation declarations separate from a generated evidence appendix.
+
+    The appendix remains readable and fully cited. A supplied calculation claim
+    or fact selection must still acknowledge its mandatory residual checks; repeating other
+    claims or inheriting the appendix cannot supply that acknowledgement.
+    """
+    declared = [claim for claim in claims if isinstance(claim, dict) and claim.get("basis") == "calculation"]
+    if not declared and not fact_ids and not template_fact_ids and inherited is None:
+        return None
+    facts = {fact["id"]: fact for fact in prepared.get("facts", [])}
+    required = sorted(fact_id for fact_id in prepared.get("required_fact_ids", [])
+                      if fact_id in facts and facts[fact_id].get("column") == "residual")
+    if not required:
+        return None
+    hashes = {run["id"]: run["output_hash"] for run in runs}
+    authored = set(inherited.get("authored_fact_ids", [])) if inherited and inherited.get("run_output_hashes") == hashes else set()
+    authored.update(fact_id for fact_id in [*fact_ids, *template_fact_ids] if isinstance(fact_id, str) and fact_id in facts)
+    locations = {(fact["run_id"], fact["row"], fact["column"]): fact for fact in facts.values()}
+    for claim in declared:
+        fact = facts.get(claim.get("fact_id")) if isinstance(claim.get("fact_id"), str) else None
+        if not claim.get("fact_id"):
+            fact = next((fact for location, fact in locations.items()
+                         if location == (claim.get("run_id"), claim.get("row"), claim.get("column"))), None)
+        if fact and all(claim.get(key) == fact[key] for key in ("run_id", "row", "column")):
+            try:
+                matches = Decimal(str(claim.get("value"))) == Decimal(str(fact["value"]))
+            except ArithmeticError:
+                matches = False
+            if matches:
+                authored.add(fact["id"])
+    return {"schema_version": 1, "run_output_hashes": hashes,
+            "required_fact_ids": required, "authored_fact_ids": sorted(authored & facts.keys())}
 # What a session reads of a completion receipt whose messages or fixups name a run outside it: the verdict.
 COMPLETION_VERDICT = (
     "id", "task_id", "schema_version", "created_at", "seq", "draft_id", "draft_content_hash",
@@ -631,7 +666,7 @@ class AnalysisStore:
         return {
             "schema_version": 1,
             "task_id": self.task.id,
-            "datasets": datasets,
+            "datasets": [self.dataset_display_view(row) for row in datasets],
             # Snapshots a newer file or a published source refresh has replaced: a result that read one is out of
             # date until it is calculated again. The rule the controls and the close status use.
             "superseded_datasets": sorted(superseded_snapshots(
@@ -826,11 +861,30 @@ class AnalysisStore:
                 or _hash_bytes(source) != metadata["source_hash"]
             ):
                 raise FoundryError("dataset integrity check failed")
-            return {**metadata, **json.loads(data)}
+            return self.dataset_display_view({**metadata, **json.loads(data)})
         except (OSError, ValueError) as exc:
             raise FoundryError(
                 "dataset integrity check failed: missing or invalid snapshot"
             ) from exc
+
+    def dataset_display_view(self, dataset: dict) -> dict:
+        """Display labels never replace the source name used by financial lineage."""
+        records = self._list("dataset_display_names")
+        latest = next((row for row in reversed(records) if row["dataset_id"] == dataset["id"]), None)
+        if latest is None:
+            return dataset
+        return {**dataset, "display_name": latest["display_name"], "display_name_revision": latest["id"]}
+
+    def rename_dataset_display(self, dataset_id: str, name: str) -> dict:
+        name = _safe_text(name, "display name", required=True, maximum=200)
+        dataset = self.read_dataset(dataset_id)
+        with exclusive(self.task.lock_path, timeout=10):
+            previous = self.dataset_display_view(dataset)
+            record = _new(self.task, dataset_id=dataset_id, display_name=name,
+                          parent_id=previous.get("display_name_revision"),
+                          source_hash=dataset["source_hash"], data_hash=dataset["data_hash"])
+            self._write_locked(self._object_path("dataset_display_names", record["id"]), record)
+        return self.read_dataset(dataset_id)
 
     def _dataset_published(self, metadata: dict) -> bool:
         batch_id = metadata.get("metadata", {}).get("source_refresh", {}).get("source_batch_id")
@@ -1553,10 +1607,13 @@ class AnalysisStore:
         requirements versions a listing has read (finance_requirements._version_record); ``cache`` as for run_in_view.
         """
         from foundry.evidence_labels import EVIDENCE_FIELDS, evidence_in_view
+        from foundry.finance_professional import draft_professional_view
+
+        cache = {} if cache is None else cache
+        draft = draft_professional_view(self, draft, allowed, cache=cache)
 
         views: dict[str, dict] = {}
         loaded: dict[str, dict] = {}
-        cache = {} if cache is None else cache
         # A revision is compared with its parent's runs: a reader that may not read the parent reads the draft as
         # it would have saved it, with no parent, and the labels read again from that check.
         orphaned = (allowed is not None and bool(draft.get("parent_id"))
@@ -1867,8 +1924,9 @@ class AnalysisStore:
         this reader reads its version with, whoever filed it, reads as filed under that one, and so does its chain
         (_chain_in_view). A stall is judged on the receipt before, as the reader reads it, and the budget counts the
         earlier receipts of the chain the reader may read."""
+        from foundry.finance_professional import receipt_professional_view
         if allowed is None:
-            return list(receipts)
+            return [receipt_professional_view(self, receipt, allowed, cache=cache) for receipt in receipts]
         from foundry.finance_completion import receipt_lineage_in_view
         from foundry.finance_requirements import OWN_FILES_POLICY
 
@@ -1956,7 +2014,7 @@ class AnalysisStore:
             views.append({**{key: shown[0][key] for key in COMPLETION_VERDICT if key in shown[0]},
                           "actions": [{key: action[key] for key in ("code", "requirement_item_id") if key in action}
                                       for action in shown[0].get("actions") or [] if isinstance(action, dict)]})
-        return views
+        return [receipt_professional_view(self, receipt, allowed, cache=cache) for receipt in views]
 
     def _receipt_verdict_in_view(self, receipt: dict, draft: dict, allowed: set[str], kept: list[dict], *,
                                  versions: dict, cache: dict) -> dict | None:
@@ -2037,7 +2095,8 @@ class AnalysisStore:
         return sources
 
     def save_draft(self, spec: dict, *, _recipe_report: dict | None = None, _allowed: set[str] | None = None,
-                   _inherited: set[str] | frozenset[str] = frozenset(), _cache: dict | None = None) -> dict:
+                   _inherited: set[str] | frozenset[str] = frozenset(), _cache: dict | None = None,
+                   _required_check_authorship: dict | None = None) -> dict:
         """Save an immutable draft version.
 
         `_recipe_report` is for internal callers that already evaluated this draft's evidence_recipes
@@ -2050,6 +2109,8 @@ class AnalysisStore:
         """
         if not isinstance(spec, dict):
             raise FoundryError("draft spec must be an object")
+        if {"required_check_authorship", "_required_check_authorship"}.intersection(spec):
+            raise FoundryError("required check authorship is computed by the service, not draft spec")
         if _allowed is not None:
             from foundry.finance_requirements import latest_requirements, requirements_readable
 
@@ -2225,11 +2286,28 @@ class AnalysisStore:
         evidence_report = (
             _recipe_report if _recipe_report is not None else evaluate_evidence_recipes(self, evidence_recipes)
         )
+        required_check_authorship = _required_check_authorship
+        if required_check_authorship is None and parent.get("required_check_authorship"):
+            from foundry.finance_explanations import FACT_TOKEN, prepare_explanation
+
+            explicit_claims = spec.get("claims", [])
+            template_fact_ids = FACT_TOKEN.findall(body_template or "")
+            required_check_authorship = _draft_required_check_authorship(
+                prepare_explanation(self, list(runs.values()), materiality=materiality, _allowed=_allowed),
+                list(runs.values()), claims=explicit_claims,
+                fact_ids=fact_ids if "fact_ids" in spec else [],
+                template_fact_ids=template_fact_ids,
+                inherited=(None if (any(isinstance(claim, dict) and claim.get("basis") == "calculation"
+                                        for claim in explicit_claims)
+                                    or spec.get("fact_ids") or template_fact_ids)
+                           else parent["required_check_authorship"]),
+            )
         explanation_check = validate_explanation(
             self,
             {
                 "requirements_id": requirements_id,
                 "body": body,
+                "body_template": body_template,
                 "run_ids": list(runs),
                 "fact_ids": fact_ids,
                 "claims": claims,
@@ -2240,6 +2318,8 @@ class AnalysisStore:
             # Recipe issues are added below from the same report; validate only needs it to rebuild
             # the generated appendix exactly as the requirement check sees it.
             _requirement_recipe_report=evidence_report,
+            _allowed=_allowed,
+            _required_check_authorship=required_check_authorship,
         )
         explanation_check = augment_quality(self, {
             "body": body, "run_ids": list(runs), "claims": claims,
@@ -2308,6 +2388,7 @@ class AnalysisStore:
             source_read_failures=source_read_failures,
             evidence_appendix=evidence_appendix,
             evidence_appendix_meta=evidence_appendix_meta,
+            **({"required_check_authorship": required_check_authorship} if required_check_authorship is not None else {}),
             evidence_recipes=evidence_recipes,
             evidence_report=evidence_report,
             consistency_rules=consistency_rules,
@@ -2349,6 +2430,7 @@ class AnalysisStore:
                     "fact_ids": fact_ids,
                     "claims": claims,
                     "limitations": limitations,
+                    **({"required_check_authorship": required_check_authorship} if required_check_authorship is not None else {}),
                 }
             ),
         )

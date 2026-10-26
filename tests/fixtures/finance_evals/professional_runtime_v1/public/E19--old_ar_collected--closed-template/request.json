@@ -1,0 +1,20 @@
+{
+  "case_id": "E19--old_ar_collected--closed-template",
+  "context": {
+    "currency": "CNY",
+    "organization": "Synthetic Fixture Co",
+    "period": "2026-09",
+    "purpose": "management",
+    "template_id": "linked_three_statement_management_v1",
+    "unit": "元"
+  },
+  "schema_version": "professional-runtime-augmentation-v1-20261023",
+  "synthetic_scenario_declarations": [
+    "2026-08行是2026-09期初余额的来源；2026-09行是当期流量或期末受限资金。",
+    "本场景无新增借款、无股利、期末无受限资金。",
+    "库存、税、利息、VAT、FX、OCI、非现金投融资、其他资产负债变动均明确设为0；这是新增合成场景约束，不是从原资料遗漏推导。",
+    "经营费用不含折旧，支付对应经营应付；capex为已入账且现金支付的固定资产；收入已履约。",
+    "模型边界是场景假设，不是假经理确认或真实历史事实。"
+  ],
+  "task": "用附件明确列出的封闭范围计算2026-09管理三表，并保存可复算说明；实际工具不支持或缺有效确认时如实说明。"
+}

@@ -1,0 +1,29 @@
+{
+  "case_id": "E25--table_incomplete",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "narrative",
+      "value": "全公司收缴率改善"
+    },
+    {
+      "name": "table_prior_ratio",
+      "value": "0.9"
+    },
+    {
+      "name": "table_current_ratio",
+      "value": "0.8"
+    },
+    {
+      "name": "table_coverage",
+      "value": "仅项目A，其他项目缺失"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "比较叙述与台账，说明收缴趋势。"
+}

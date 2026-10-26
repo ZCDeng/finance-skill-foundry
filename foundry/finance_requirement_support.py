@@ -83,7 +83,7 @@ def _offered_evidence(text, paths):
     if not paths:
         return text
     parts = [part for part in text.split(" / ") if _offers(paths, part.split(" (")[0])]
-    return " / ".join(parts) or text
+    return " / ".join(parts) or _paths_evidence(paths)
 
 
 def _paths_evidence(paths):
@@ -102,6 +102,28 @@ def _amount_next_action(item, paths):
     return ("按金额类要求作答（比率、数量、人数等以外的指标都按金额核验）" + (f"：{accepted}" if accepted else "") + "。"
             + (f"当前走不通的路径：{blocked}。" if blocked else "")
             + "只有脚本或 SQL 输出的数不计为已回答；保留原问题。")
+
+
+def _native_execution_specs(item, paths, bindings):
+    """Executable native metric identities, never a proposed change of obligation."""
+    executions = []
+    for status, entries in (("available", paths.get("accepted", [])), ("blocked", paths.get("blocked", []))):
+        for path in entries:
+            if path["path"] not in {"run_metric_result_set", "run_metric_account_total"}:
+                continue
+            kind = path.get("metric_kind")
+            if kind not in {"account_total", "control_totals"}:
+                continue
+            metric = {"kind": kind}
+            if kind == "account_total":
+                metric["accounts"] = [item["metric"]]
+            executions.append({
+                "tool": "run_metric", "spec": {"metric": metric}, "requires_context_id": True,
+                "required_bindings": dict(bindings), "status": status,
+                "blockers": list(path.get("blockers", [])),
+                "after": ["cite_all_amount_rows", "drilldown_fact_each"],
+            })
+    return executions
 
 
 def assess_requirement_support(analysis, spec):
@@ -136,6 +158,9 @@ def assess_requirement_support(analysis, spec):
         environment = _evidence_environment(analysis, spec)
     except (FoundryError, OSError, ValueError, KeyError, TypeError):
         environment = {"workbook_sources": [], "finance_context": None, "structure_pending": []}
+    # The dispatch environment resolves source field aliases and saved account
+    # maps with the finance engine's rules; these are real accounts too.
+    accounts.update(environment.get("accounts") or [])
     for item in spec.get("items", []):
         metric = canonical_metric(item.get("metric"))
         report = {"requirement_item_id": item.get("id"), "canonical_metric": metric,
@@ -166,31 +191,70 @@ def assess_requirement_support(analysis, spec):
             report["evidence"] = _offered_evidence(NATIVE_METRICS[metric], paths)
         if paths is not None:
             report["accepted_evidence"] = [path["path"] for path in paths["accepted"]]
+            executions = _native_execution_specs(item, paths, spec.get("bindings") or {})
+            if executions:
+                report["execution_specs"] = executions
             if paths["blocked"]:
                 report["blocked_evidence"] = paths["blocked"]
+        if metric == "account_total" and metric not in accounts:
+            report["metric_identity_diagnostic"] = {
+                "code": "account_total_requires_account_identity",
+                "next_action": (
+                    "account_total 是运行工具的 kind，不是任意金额行的指标身份。核对全部控制数时登记 control_totals；"
+                    "核对指定科目时以实际科目名称登记 metric，并用 run_metric 的 accounts 原样指定该名称。"
+                    "先确认原要求的指标身份，不能只改金额列名或删除原要求。"
+                ),
+            }
         if failures:
             report.update(status="unverified", failures=failures,
                           next_action="先恢复并核验绑定快照，不能将读取失败当成数据不存在。")
         elif metric == "price_quantity" or (
             metric in {"revenue", "amount"}
             and canonical_method(item.get("dimensions", {}).get("method")) in {
-                "quantity_then_price", "base_weights_with_interaction"
+                "quantity_then_price", "base_weights_with_interaction", "volume_mix_price"
             }
         ):
             report.update(evidence=_offered_evidence(NATIVE_METRICS["price_quantity"], paths), status="requires_execution")
             if not sources:
                 report.update(status="unverified", next_action="先绑定已授权资料，再检查量价字段。")
             else:
+                # Background facts without any native amount/quantity/price are
+                # still bound and disclosed, but do not become a calculation input.
+                calculation_sources = [source for source in sources
+                                       if {"amount", "quantity", "price"} & set(source["columns"])] or sources
                 missing = [{"dataset_id": source["dataset_id"], "alias": source["alias"],
                             "columns": [key for key in ("quantity", "price") if key not in source["columns"]]}
-                           for source in sources]
+                           for source in calculation_sources]
                 missing = [item for item in missing if item["columns"]]
                 if missing:
                     report.update(status="requires_input", gap_code="native_price_quantity_fields_unavailable",
                                   missing_inputs=missing, input_basis="native_default_field_names",
                                   next_action="当前绑定缺少原生quantity/price字段；补充数量与单价资料，或明确字段映射后重新计算。可继续使用SQL/Python探索。")
         reports.append(report)
-    return {"version": 1, "supported_metrics": metric_catalog(), "items": reports}
+    context_status = environment.get("finance_context")
+    from foundry.finance_professional import requirement_rule_identity, valid_rule_identity
+    identity = requirement_rule_identity(analysis, spec)
+    identity_status = identity.get("professional_status") if identity else "not_required"
+    identity_valid = valid_rule_identity(identity) if identity else None
+    if identity and spec.get("seq"):
+        from foundry.finance_requirement_semantics import verified_requirement_fingerprint
+        captured = (spec.get("semantic_basis") or {}).get("professional_identity") or {}
+        if not valid_rule_identity(captured) or not verified_requirement_fingerprint(analysis, spec):
+            identity_valid = False
+            identity_status = "professional_identity_invalid"
+        elif captured.get("rule_fingerprint") != identity.get("rule_fingerprint"):
+            identity_status = "professional_rules_changed"
+    return {"version": 1, "supported_metrics": metric_catalog(), "items": reports,
+            "preflight": {
+                "requirements_before_execution": True,
+                "required_bindings": dict(spec.get("bindings") or {}),
+                "finance_context_status": "ready" if context_status is True else "missing" if context_status is False else "unverified",
+                "context_binding_diagnostic": environment.get("context_binding_diagnostic", {}),
+                "professional_context_id": spec.get("context_id"),
+                "professional_identity_status": identity_status,
+                "professional_identity_valid": identity_valid,
+                "professional_rule_fingerprint": identity.get("rule_fingerprint") if identity else None,
+            }}
 
 
 def with_input_gaps(analysis, requirements, supports=None):
@@ -213,7 +277,7 @@ def with_input_gaps(analysis, requirements, supports=None):
     items = []
     for item in requirements.get("items", []):
         gap = gaps.get(item["id"])
-        if gap and item["status"] != "answered":
+        if gap and item["status"] != "answered" and not item.get("professional_reason"):
             item = {**item, "status": "missing_data", "input_gap": gap}
         items.append(item)
     return {**requirements, "items": items, "support": support}

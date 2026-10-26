@@ -129,7 +129,7 @@ export function MaterialsFileList({ taskId, datasets, readiness, busy, preview, 
   }
 
   function row(id: string, dataset: DatasetSnapshot | null) {
-    const name = dataset?.name ?? nameOf(id);
+    const name = dataset?.display_name ?? dataset?.name ?? nameOf(id);
     const todo = structure.byDataset[id];
     const structureNow = structureState(id, name, todo);
     const healthNow = dataset ? healthState(dataset) : null;

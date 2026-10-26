@@ -1,0 +1,21 @@
+{
+  "case_id": "E32--correct_method",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "actual",
+      "value": "revenue=120,cost=60,expense=10"
+    },
+    {
+      "name": "budget",
+      "value": "revenue=100,cost=50,expense=10"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "基于已登记实际预算数据计算利润差异并保存说明。"
+}

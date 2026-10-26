@@ -1,0 +1,84 @@
+{
+  "schema_version": "finance-independent-three-statement-v1",
+  "suite_id": "professional_supplement_v2",
+  "case_id": "SUP-E19-02--fulfilled-cash-sale",
+  "context": {
+    "purpose": "management",
+    "forecast_purpose": "forecast",
+    "period": "2026-10",
+    "opening_period": "2026-09",
+    "opening_balance_date": "2026-09-30",
+    "closing_balance_date": "2026-10-31",
+    "template_id": "linked_three_statement_management_v1",
+    "organization": "Supplement Fixture Co",
+    "ledger": "supplement-ledger-01",
+    "scenario": "management-forecast",
+    "currency": "CNY",
+    "unit": "元",
+    "model_purpose": "forecast",
+    "fiscal_year_start": "2026-01-01"
+  },
+  "synthetic_scenario_declarations": [
+    "所有流量为2026-10整期假设累计发生额；期初为2026-09月末，期末为2026-10月末；不是年初累计。三个情景均从相同期初独立推演。",
+    "这是单主体管理预测及简化三表联动核查；不是法定报表、实际到预测桥接、真实历史事实或专业人员签署。",
+    "95经营服务费用全部本期消耗并经经营应付确认，不含15折旧、60资本支出、税或利息；75供应商付款仅清偿经营应付。",
+    "折旧减少固定资产净值且无现金/AP影响；资本支出为假设已取得并支付的固定资产购置，不进入经营应付；PPE均为净账面价值。",
+    "本例期初AR80绑定AR-202609-001；当月收款为旧应收回款50、本期服务收款130、本期新增履约现金销售收款17，具体债权/合同分配见附表。本期新增履约与旧AR清偿分别追踪。",
+    "所列余额构成完整合成科目范围，所有未列期初及期末资产负债余额均明确为0；八项模型边界均有独立来源行明确为0，不是缺数据推定。",
+    "现金总额包含受限现金；期末受限12为其子集，无其他限制、透支净额或最低现金扣减。available_cash仅表示本管理模型现金总额扣受限额，不等同完整偿债能力或法定现金等价物认定。",
+    "交易与经理档案/边界预确认仅为合成工程运行的范围授权；不包含答案、已有计算、需求、草稿或完成回执，也不证明真实专业资质。"
+  ],
+  "task": "依据本例四份公开资料，使用来源绑定的已登记管理三表模板计算2026-10三表与现金可用性。逐一登记并回答required_metrics中的13项需求，核查全部12项model_checks，保存含每项结果真实引用的说明，并读取当前持久化完成回执。说明本例旧应收与本期履约收款的区别及管理预测范围；若缺有效档案或模型边界确认、来源不符或检查失败，应明确报告，不绕过。",
+  "required_metrics": [
+    "net_income",
+    "cash_flow_operating",
+    "cash_flow_investing",
+    "cash_flow_financing",
+    "closing_cash",
+    "closing_receivables",
+    "closing_ppe",
+    "closing_payables",
+    "closing_debt",
+    "closing_equity",
+    "total_assets",
+    "total_liabilities_equity",
+    "available_cash"
+  ],
+  "required_model_checks": [
+    "opening_balance_sheet",
+    "revenue_receivables_cash",
+    "ppe_rollforward",
+    "payables_rollforward",
+    "debt_financing",
+    "equity_rollforward",
+    "cash_reconciliation",
+    "cash_flow_indirect_bridge",
+    "closing_balance_sheet",
+    "nonnegative_operating_balances",
+    "restricted_cash_bounds",
+    "cash_sufficiency"
+  ],
+  "public_files": [
+    "request.json",
+    "template_inputs.json",
+    "model_boundary.json",
+    "transaction_allocation.json"
+  ],
+  "reporting_profile": {
+    "schema_version": 1,
+    "basis": "management",
+    "basis_version": "management-v1",
+    "purpose": "forecast",
+    "fiscal_year_start": "2026-01-01",
+    "early_adoption": false,
+    "effective_period": {
+      "start": "2026-10",
+      "end": "2026-10"
+    },
+    "functional_currency": "CNY",
+    "presentation_currency": "CNY",
+    "presentation_unit": "元",
+    "entity_scope": "Supplement Fixture Co",
+    "policies": {}
+  }
+}

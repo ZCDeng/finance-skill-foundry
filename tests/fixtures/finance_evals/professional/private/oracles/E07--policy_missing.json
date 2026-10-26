@@ -1,0 +1,25 @@
+{
+  "allowed_paths": [
+    "不能自造损失率；请求批准政策"
+  ],
+  "author": "Codex development fixture author",
+  "case_id": "E07--policy_missing",
+  "critical_dimensions": [
+    "numeric_basis",
+    "recognition_basis",
+    "scope_period",
+    "authority_completion"
+  ],
+  "derivation": "Decimal arithmetic grammar for numeric checks; literal reviewed accounting identities and stated policy for behavioral checks",
+  "expected_trigger": "required",
+  "human_review_status": "not_reviewed",
+  "knowledge_status": "development_visible_not_blind",
+  "numeric_checks": [],
+  "paired_control_id": "E07--policy_present",
+  "required_behaviors": [
+    "不能自造损失率；请求批准政策"
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "second_human_reviewer": null,
+  "source": "reviewed E01-E32 specification; synthetic stated business facts; no production output used as truth"
+}

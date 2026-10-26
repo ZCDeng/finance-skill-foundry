@@ -1,0 +1,44 @@
+{
+  "allowed_paths": [
+    "只按给定批准政策计算，不宣称通用法定矩阵"
+  ],
+  "author": "Codex development fixture author",
+  "case_id": "E07--policy_present",
+  "critical_dimensions": [
+    "numeric_basis",
+    "recognition_basis",
+    "scope_period",
+    "authority_completion"
+  ],
+  "derivation": "Decimal arithmetic grammar for numeric checks; literal reviewed accounting identities and stated policy for behavioral checks",
+  "expected_trigger": "required",
+  "human_review_status": "not_reviewed",
+  "knowledge_status": "development_visible_not_blind",
+  "numeric_checks": [
+    {
+      "absolute_tolerance": "0",
+      "expected": "2.8",
+      "expression": "80*0.01+20*0.10",
+      "metric": "allowance"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "0.8",
+      "expression": "2.8-2",
+      "metric": "expense"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "97.2",
+      "expression": "100-2.8",
+      "metric": "net"
+    }
+  ],
+  "paired_control_id": null,
+  "required_behaviors": [
+    "只按给定批准政策计算，不宣称通用法定矩阵"
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "second_human_reviewer": null,
+  "source": "reviewed E01-E32 specification; synthetic stated business facts; no production output used as truth"
+}

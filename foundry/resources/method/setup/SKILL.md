@@ -14,6 +14,12 @@ Use this pack to **route** a file-first session. It does not add posting, paymen
 
 Do **not** refuse `run_metric`, `explain_variance`, or the four method skills because this pack was not loaded.
 
+For F01 task scope, policy and source identity, read [accounting-basis.md](../accounting-basis.md)
+with `method-resource {skill: "setup", resource: "accounting-basis.md"}` before the
+dependent professional calculation. Load [model-checks.md](../model-checks.md) with
+`method-resource {skill: "setup", resource: "model-checks.md"}` when assessing a
+workbook/model. A method document is not evidence that every method is implemented.
+
 ## Suggested first tool
 
 Call `finance_readiness` (no need to load this pack first). The report is read-only: it does not write snapshots or finance context.

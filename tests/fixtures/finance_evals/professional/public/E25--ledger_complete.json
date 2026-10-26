@@ -1,0 +1,29 @@
+{
+  "case_id": "E25--ledger_complete",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "narrative",
+      "value": "收缴率改善"
+    },
+    {
+      "name": "prior_ratio",
+      "value": "0.9"
+    },
+    {
+      "name": "current_ratio",
+      "value": "0.8"
+    },
+    {
+      "name": "ledger_coverage",
+      "value": "完整同口径"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "比较叙述与台账，说明收缴趋势。"
+}

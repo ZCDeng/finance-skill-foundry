@@ -1,0 +1,33 @@
+{
+  "case_id": "E27--method_change",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "source_hash",
+      "value": "unchanged"
+    },
+    {
+      "name": "change",
+      "value": "volume_mix_price:rule-v1→rule-v2"
+    },
+    {
+      "name": "old_control",
+      "value": "confirmed"
+    },
+    {
+      "name": "old_disposition",
+      "value": "accepted"
+    },
+    {
+      "name": "old_receipt",
+      "value": "completed"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "来源字节未变，检查变更后的控制、差异接受和月结状态。"
+}

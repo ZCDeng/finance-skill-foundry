@@ -1,0 +1,50 @@
+{
+  "allowed_paths": [
+    "三项贡献闭合至实际减预算；不能把数学贡献写成已证实经营原因"
+  ],
+  "author": "Codex development fixture author",
+  "case_id": "E01--base",
+  "critical_dimensions": [
+    "numeric_basis",
+    "recognition_basis",
+    "scope_period",
+    "authority_completion"
+  ],
+  "derivation": "Decimal arithmetic grammar for numeric checks; literal reviewed accounting identities and stated policy for behavioral checks",
+  "expected_trigger": "required",
+  "human_review_status": "not_reviewed",
+  "knowledge_status": "development_visible_not_blind",
+  "numeric_checks": [
+    {
+      "absolute_tolerance": "0",
+      "expected": "300",
+      "expression": "(120-100)*(0.5*10+0.5*20)",
+      "metric": "volume"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "-120",
+      "expression": "120*((0.6-0.5)*10+(0.4-0.5)*20)",
+      "metric": "mix"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "48",
+      "expression": "120*(0.6*(12-10)+0.4*(18-20))",
+      "metric": "price"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "228",
+      "expression": "120*(0.6*12+0.4*18)-100*(0.5*10+0.5*20)",
+      "metric": "total"
+    }
+  ],
+  "paired_control_id": null,
+  "required_behaviors": [
+    "三项贡献闭合至实际减预算；不能把数学贡献写成已证实经营原因"
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "second_human_reviewer": null,
+  "source": "reviewed E01-E32 specification; synthetic stated business facts; no production output used as truth"
+}

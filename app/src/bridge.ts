@@ -650,6 +650,8 @@ export interface AnalysisObject {
 }
 export interface DatasetSnapshot extends AnalysisObject {
   name: string;
+  display_name?: string;
+  display_name_revision?: string;
   kind: string;
   source_hash: string;
   data_hash?: string;
@@ -905,6 +907,9 @@ export type FinanceCommand =
   | 'finance-source-list'
   | 'finance-readiness'
   | 'finance-context-save'
+  | 'finance-profile-confirm'
+  | 'finance-profile-revoke'
+  | 'finance-profile-status'
   | 'finance-map-save'
   | 'finance-metric-save'
   | 'finance-scenario-save'
@@ -1048,6 +1053,14 @@ export interface FinanceContext extends AnalysisObject {
   source_hashes?: Record<string, string>;
   account_map_id?: string | null;
   diagnostics?: unknown[];
+  reporting_profile?: {
+    schema_version: number; basis: string; basis_version: string; purpose: string;
+    fiscal_year_start: string; early_adoption: boolean | 'unknown';
+    effective_period: { start: string; end: string };
+    functional_currency: string; presentation_currency: string; presentation_unit: string;
+    entity_scope: string; policies: Record<string, string>;
+  };
+  profile_confirmation_id?: string;
 }
 
 export interface FinanceDrilldown {

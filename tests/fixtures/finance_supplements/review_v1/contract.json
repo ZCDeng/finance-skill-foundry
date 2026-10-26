@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "suite_id": "transaction_professional_review_v1",
+  "visibility": "controller_only",
+  "purpose": "Independent deterministic trusted-review workflow evidence; synthetic decisions only",
+  "original_planned_slots_added": [],
+  "original_slots_credit": 0,
+  "original_standard_sha256": "54f91a277c669e33329d2aaa48728a7db551ed80810e750bb5856f7c91d4ad4d",
+  "original_driver_sha256": "7868708a037dce6fabd89a0b41915ded1dc31913e55bf216960e48f1e4a8c7bf",
+  "required_checklist": [
+    "source_evidence",
+    "policy_applicability",
+    "recognition_cutoff",
+    "classification_measurement",
+    "boundaries"
+  ],
+  "approved_scope": "transaction_check_only",
+  "counts_as_amount_evidence": false,
+  "posting_authorized": false,
+  "human_signoff": false,
+  "required_stages": [
+    "unreviewed_incomplete",
+    "assistant_refused",
+    "stale_basis_refused",
+    "incomplete_checklist_refused",
+    "approved_same_draft_complete",
+    "revoked_incomplete",
+    "old_basis_replay_refused",
+    "fresh_approval_complete",
+    "clone_not_inherited",
+    "mutant_approval_refused",
+    "historical_files_preserved"
+  ],
+  "required_counts": {
+    "families": 3,
+    "legitimate_controls": 5,
+    "primary_mutants": 3
+  },
+  "numeric_tolerance": "0",
+  "cases": [
+    {
+      "id": "M07",
+      "controls": [
+        {
+          "kind": "uniform_service_advance",
+          "expected": {
+            "recognized_revenue": "10",
+            "contract_liability": "110"
+          }
+        }
+      ]
+    },
+    {
+      "id": "M08",
+      "controls": [
+        {
+          "kind": "ordinary_service_consumed",
+          "expected": {
+            "expense": "100",
+            "capitalized_asset": "0"
+          }
+        },
+        {
+          "kind": "capitalizable_acquisition",
+          "expected": {
+            "expense": "0",
+            "capitalized_asset": "100"
+          }
+        }
+      ]
+    },
+    {
+      "id": "M09",
+      "controls": [
+        {
+          "kind": "old_ar_collection",
+          "expected": {
+            "cash_delta": "10",
+            "receivables_delta": "-10",
+            "revenue_delta": "0",
+            "profit_delta": "0"
+          }
+        },
+        {
+          "kind": "new_earned_cash_sale",
+          "expected": {
+            "cash_delta": "10",
+            "receivables_delta": "0",
+            "revenue_delta": "10",
+            "profit_delta": "10"
+          }
+        }
+      ]
+    }
+  ],
+  "limits": [
+    "No original fixture or scorer modification",
+    "No standalone money evidence promotion",
+    "No posting authority",
+    "No professional credential or real business signoff claim",
+    "Controller-attached journal or statement is outside review approval scope"
+  ]
+}

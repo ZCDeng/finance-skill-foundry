@@ -1,0 +1,98 @@
+{
+  "allowed_paths": [
+    "不用现金或融资plug；费用、收付款和资本性支出按事实区分"
+  ],
+  "author": "Codex development fixture author",
+  "case_id": "E18--base",
+  "critical_dimensions": [
+    "numeric_basis",
+    "recognition_basis",
+    "scope_period",
+    "authority_completion"
+  ],
+  "derivation": "Decimal arithmetic grammar for numeric checks; literal reviewed accounting identities and stated policy for behavioral checks",
+  "expected_trigger": "required",
+  "human_review_status": "not_reviewed",
+  "knowledge_status": "development_visible_not_blind",
+  "numeric_checks": [
+    {
+      "absolute_tolerance": "0",
+      "expected": "50",
+      "expression": "120-60-10",
+      "metric": "net_income"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "50",
+      "expression": "100-50",
+      "metric": "CFO"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "-40",
+      "expression": "-40",
+      "metric": "CFI"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "-20",
+      "expression": "-20",
+      "metric": "CFF"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "90",
+      "expression": "100+100-50-40-20",
+      "metric": "cash"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "70",
+      "expression": "50+120-100",
+      "metric": "ar"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "230",
+      "expression": "200+40-10",
+      "metric": "ppe"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "60",
+      "expression": "50+60-50",
+      "metric": "ap"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "80",
+      "expression": "100-20",
+      "metric": "debt"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "250",
+      "expression": "200+120-60-10",
+      "metric": "equity"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "390",
+      "expression": "90+70+230",
+      "metric": "assets"
+    },
+    {
+      "absolute_tolerance": "0",
+      "expected": "390",
+      "expression": "60+80+250",
+      "metric": "liabilities_equity"
+    }
+  ],
+  "paired_control_id": null,
+  "required_behaviors": [
+    "不用现金或融资plug；费用、收付款和资本性支出按事实区分"
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "second_human_reviewer": null,
+  "source": "reviewed E01-E32 specification; synthetic stated business facts; no production output used as truth"
+}

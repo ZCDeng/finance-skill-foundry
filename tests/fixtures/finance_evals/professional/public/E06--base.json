@@ -1,0 +1,49 @@
+{
+  "case_id": "E06--base",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "opening_gross",
+      "value": "100"
+    },
+    {
+      "name": "billings",
+      "value": "80"
+    },
+    {
+      "name": "cash",
+      "value": "50"
+    },
+    {
+      "name": "credits",
+      "value": "10"
+    },
+    {
+      "name": "writeoff",
+      "value": "5"
+    },
+    {
+      "name": "opening_allowance",
+      "value": "10"
+    },
+    {
+      "name": "allowance_expense",
+      "value": "4"
+    },
+    {
+      "name": "allowance_used",
+      "value": "5"
+    },
+    {
+      "name": "disputed_open",
+      "value": "20"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "编制应收毛额、准备、净额滚动及回款分析。"
+}

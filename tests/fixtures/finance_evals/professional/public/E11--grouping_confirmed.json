@@ -1,0 +1,25 @@
+{
+  "case_id": "E11--grouping_confirmed",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "left",
+      "value": "T1:100"
+    },
+    {
+      "name": "right",
+      "value": "T1a:60;T1b:40"
+    },
+    {
+      "name": "grouping_rule",
+      "value": "T1a,T1b对应T1；经理确认，仅本期客户A"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "按已批准拆分映射对账。"
+}

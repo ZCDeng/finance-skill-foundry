@@ -1,0 +1,4310 @@
+{
+  "schema_version": "professional-development-v1-20261023",
+  "variants": [
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E01--base",
+      "checks": [
+        "K09"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E01",
+      "high_risk": true,
+      "kind": "normal",
+      "methods": [
+        "F06"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E01--base.json",
+      "private_oracle_sha256": "1a73df34a74a088e04c37b54d57af34aa0ce604e6ae41a9eb0b7739d58ed0beb",
+      "public_input": "public/E01--base.json",
+      "public_input_sha256": "6486e293a01420d092034f0032192a2206b60efd231d29cfa7609d8e4a21e71c",
+      "repeats": 3,
+      "required_method_ids": [
+        "F06"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "base"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E01--row_order",
+      "checks": [
+        "K09"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E01",
+      "high_risk": true,
+      "kind": "metamorphic",
+      "methods": [
+        "F06"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E01--row_order.json",
+      "private_oracle_sha256": "e83d63a13572a0b395ee9297ed9620dd42ec049df6f9a1991afd2c8ff1f94aca",
+      "public_input": "public/E01--row_order.json",
+      "public_input_sha256": "3f03723ab175e95b8785f12d4d6598eeba68d4781ca261dad933fd823768b159",
+      "repeats": 0,
+      "required_method_ids": [
+        "F06"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "row_order"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E02--new_product",
+      "checks": [
+        "K05",
+        "K09"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E02",
+      "high_risk": false,
+      "kind": "gap",
+      "methods": [
+        "F06"
+      ],
+      "paired_control_id": "E02--priced_product",
+      "private_oracle": "private/oracles/E02--new_product.json",
+      "private_oracle_sha256": "828c4d3fddb2c16596f06a361a20802c283fc65e64f895d210762a66c646f695",
+      "public_input": "public/E02--new_product.json",
+      "public_input_sha256": "358cb5ea1f96ba4cbd97b8454becdeade38b1d57b5e7ac199cefba8ffe657b9d",
+      "repeats": 3,
+      "required_method_ids": [
+        "F06"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "new_product"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E02--priced_product",
+      "checks": [
+        "K05",
+        "K09"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E02",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F06"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E02--priced_product.json",
+      "private_oracle_sha256": "cd94eee50be18f0989049d290fe534233c0c442b33e4daff89594a2eb5283501",
+      "public_input": "public/E02--priced_product.json",
+      "public_input_sha256": "3ee12c75e93870c1ad95ec7dc95a49d5b44e38e6b9d0b0a862ade677d8e27b2a",
+      "repeats": 3,
+      "required_method_ids": [
+        "F06"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "priced_product"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E02--zero_actual_volume",
+      "checks": [
+        "K05",
+        "K09"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E02",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F06"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E02--zero_actual_volume.json",
+      "private_oracle_sha256": "777815c45018be61aef71cfc63ea0001672a8820c8893a477237c9a2c7c02ed2",
+      "public_input": "public/E02--zero_actual_volume.json",
+      "public_input_sha256": "9a74e83ed7226b84b42fb040ed2230c6b70b719c66d219e5c4aff6b5e3ab20a9",
+      "repeats": 3,
+      "required_method_ids": [
+        "F06"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "zero_actual_volume"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E03--base",
+      "checks": [
+        "K05",
+        "K13"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E03",
+      "high_risk": true,
+      "kind": "normal",
+      "methods": [
+        "F07"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E03--base.json",
+      "private_oracle_sha256": "158e21cf6329b73bd2907363c3bd6df8abe97fa2e6aa01f4f772753cb81eb647",
+      "public_input": "public/E03--base.json",
+      "public_input_sha256": "9e689083861228452b88b8edd8c7c629cc646ff1c53dd7298a8cf24b77fb5ef2",
+      "repeats": 3,
+      "required_method_ids": [
+        "F07"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "base"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E03--higher",
+      "checks": [
+        "K05",
+        "K13"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E03",
+      "high_risk": true,
+      "kind": "boundary",
+      "methods": [
+        "F07"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E03--higher.json",
+      "private_oracle_sha256": "30e7d57c6ece07c0960c3bea522c9101150d0af872ae984f8e52f038a5278477",
+      "public_input": "public/E03--higher.json",
+      "public_input_sha256": "551a3f3687b1b8320b4d1d1cc2ed13957b81d1aea8736a5ed3c891643a2443c6",
+      "repeats": 3,
+      "required_method_ids": [
+        "F07"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "higher"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E03--equal",
+      "checks": [
+        "K05",
+        "K13"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E03",
+      "high_risk": true,
+      "kind": "boundary",
+      "methods": [
+        "F07"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E03--equal.json",
+      "private_oracle_sha256": "c32dea2a157c8a44130aaf347b9f444046c1ad282b91a2ba2342e63b39e5c66d",
+      "public_input": "public/E03--equal.json",
+      "public_input_sha256": "71b5ee6927dedae7166c5d3a42d465e2e784b2379b1bd1f11a96d8ab0ecff43c",
+      "repeats": 0,
+      "required_method_ids": [
+        "F07"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "equal"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E03--zero_denominator",
+      "checks": [
+        "K05",
+        "K13"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E03",
+      "high_risk": true,
+      "kind": "boundary",
+      "methods": [
+        "F07"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E03--zero_denominator.json",
+      "private_oracle_sha256": "3734b9a52a7213234d5f8787c1d60edb65f0dcdd3a3d9e8756d5ef053fb02ce5",
+      "public_input": "public/E03--zero_denominator.json",
+      "public_input_sha256": "e04a0fba109030fd027208501a47d97d0bf17ccc41760b650e47cf7c5a28e8c6",
+      "repeats": 3,
+      "required_method_ids": [
+        "F07"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "zero_denominator"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E04--base",
+      "checks": [
+        "K02",
+        "K13"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E04",
+      "high_risk": false,
+      "kind": "normal",
+      "methods": [
+        "F01",
+        "F07"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E04--base.json",
+      "private_oracle_sha256": "ce17e3a172ab4edfe5cee3d85d3fb1c105344778ee0b510b17e9977c115f1a03",
+      "public_input": "public/E04--base.json",
+      "public_input_sha256": "45770f6dd9cadfb0b346fa5663e6c61330cbf3769ce84739de04c1a3b0c108ca",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F07"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "base"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E04--missing_tax_basis",
+      "checks": [
+        "K02",
+        "K13"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E04",
+      "high_risk": false,
+      "kind": "gap",
+      "methods": [
+        "F01",
+        "F07"
+      ],
+      "paired_control_id": "E04--base",
+      "private_oracle": "private/oracles/E04--missing_tax_basis.json",
+      "private_oracle_sha256": "65b0445d6dad079e02f273389fe7ccabfa8184c9aaa998e642c40c56689bb64c",
+      "public_input": "public/E04--missing_tax_basis.json",
+      "public_input_sha256": "83ec0e39781a9e37b85f2da3299eeb4bbd3a93a670b334d0830bd66ca23458db",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F07"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "missing_tax_basis"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E05--base",
+      "checks": [
+        "K13"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E05",
+      "high_risk": false,
+      "kind": "normal",
+      "methods": [
+        "F03",
+        "F09"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E05--base.json",
+      "private_oracle_sha256": "84a88f84356c96bf2c56fb6410ad447b471de6ddb68adbc4e8085f6602a33d2c",
+      "public_input": "public/E05--base.json",
+      "public_input_sha256": "6253034c79e63902194d5f89df8c5d2f7771f9eb3a1186e4e719d1e96c628ce6",
+      "repeats": 3,
+      "required_method_ids": [
+        "F03",
+        "F09"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "base"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E06--base",
+      "checks": [
+        "K04",
+        "K12"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E06",
+      "high_risk": false,
+      "kind": "normal",
+      "methods": [
+        "F05",
+        "F07"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E06--base.json",
+      "private_oracle_sha256": "74c15b4de37982f3e23b1c23edddf55dfc716a4a95cb0ee5fba1c583ff2ac18c",
+      "public_input": "public/E06--base.json",
+      "public_input_sha256": "52ad0cc048c79664e39a4adcf47e320fa1eb3a6fb03eb7461fb6bef789081bca",
+      "repeats": 3,
+      "required_method_ids": [
+        "F05",
+        "F07"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "base"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E06--nondisputed_subset",
+      "checks": [
+        "K04",
+        "K12"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E06",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F05",
+        "F07"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E06--nondisputed_subset.json",
+      "private_oracle_sha256": "a69e0367bce111dbb7d54437a666760d87e39f0684c9e16f1db700b331e22386",
+      "public_input": "public/E06--nondisputed_subset.json",
+      "public_input_sha256": "999fe95e451011aad0f5b0c54ffd865949af9ac7d4fa3e629e324dd5d4dd84c4",
+      "repeats": 3,
+      "required_method_ids": [
+        "F05",
+        "F07"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "nondisputed_subset"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E07--policy_present",
+      "checks": [
+        "K01",
+        "K05",
+        "K12"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E07",
+      "high_risk": false,
+      "kind": "normal",
+      "methods": [
+        "F07"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E07--policy_present.json",
+      "private_oracle_sha256": "c8df8cd42cdd59089303b17af472b4a846e3e9f1d1ce8e89f798c2e1486e5955",
+      "public_input": "public/E07--policy_present.json",
+      "public_input_sha256": "4e28c64853a11f899982752fef06cad22cc387a73c4a595a1fbffb6b3d168eff",
+      "repeats": 3,
+      "required_method_ids": [
+        "F07"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "policy_present"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E07--policy_missing",
+      "checks": [
+        "K01",
+        "K05",
+        "K12"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E07",
+      "high_risk": false,
+      "kind": "gap",
+      "methods": [
+        "F07"
+      ],
+      "paired_control_id": "E07--policy_present",
+      "private_oracle": "private/oracles/E07--policy_missing.json",
+      "private_oracle_sha256": "991901acbeb67a5ea3abd995160966f31a22af17ac354f17d27df469b422f961",
+      "public_input": "public/E07--policy_missing.json",
+      "public_input_sha256": "5b46a270625dbdc0fdb21ad3b5b61c26f5dcde6fa5572126d5c2dd05eb7e1dbe",
+      "repeats": 3,
+      "required_method_ids": [
+        "F07"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "policy_missing"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E08--reverse_then_book",
+      "checks": [
+        "K11"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E08",
+      "high_risk": true,
+      "kind": "normal",
+      "methods": [
+        "F03"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E08--reverse_then_book.json",
+      "private_oracle_sha256": "874c7437b037a40975bc97f5feafc88e44ff0155ce7b2d80d6f01600237b8f2c",
+      "public_input": "public/E08--reverse_then_book.json",
+      "public_input_sha256": "faff9a2c53eb22fb26dbb848e130941d4eac29c0873b83093637246fb153d8b1",
+      "repeats": 3,
+      "required_method_ids": [
+        "F03"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "reverse_then_book"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E08--settle_accrual",
+      "checks": [
+        "K11"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E08",
+      "high_risk": true,
+      "kind": "normal",
+      "methods": [
+        "F03"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E08--settle_accrual.json",
+      "private_oracle_sha256": "2556c9a4a7d2258e51d81c4464c2f397aceb5ef781da2133ff67a2f7b8ea0c79",
+      "public_input": "public/E08--settle_accrual.json",
+      "public_input_sha256": "683515eff70b32e4f86e564db97ffecbd31212c86e8715a37c56e52d5beb4088",
+      "repeats": 3,
+      "required_method_ids": [
+        "F03"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "settle_accrual"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E09--december",
+      "checks": [
+        "K03",
+        "K11",
+        "K12"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E09",
+      "high_risk": false,
+      "kind": "normal",
+      "methods": [
+        "F03",
+        "F05"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E09--december.json",
+      "private_oracle_sha256": "b4006634c8167dd59d07808917c58dff553989936a0addaacd1ef7da5de32fc7",
+      "public_input": "public/E09--december.json",
+      "public_input_sha256": "36d216c1490479045cc0a1558c15b08a7d7cbb8be4361c0d985b841686bd80ec",
+      "repeats": 3,
+      "required_method_ids": [
+        "F03",
+        "F05"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "december"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E09--next_january",
+      "checks": [
+        "K03",
+        "K11",
+        "K12"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E09",
+      "high_risk": false,
+      "kind": "metamorphic",
+      "methods": [
+        "F03",
+        "F05"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E09--next_january.json",
+      "private_oracle_sha256": "040271bfd1fe8ecd07b42d25fb149e683641e0dd3836d94fb329a36755a7f655",
+      "public_input": "public/E09--next_january.json",
+      "public_input_sha256": "ab11d40e3beb5b65eab6f3e316f013da3dcbd9b0972634f428216b7cce431883",
+      "repeats": 3,
+      "required_method_ids": [
+        "F03",
+        "F05"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "next_january"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E10--base",
+      "checks": [
+        "K10",
+        "K14"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E10",
+      "high_risk": true,
+      "kind": "normal",
+      "methods": [
+        "F04"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E10--base.json",
+      "private_oracle_sha256": "28666d8dd26a4de100f1593458eb97d7617cc70998112edd320c5475785b4c91",
+      "public_input": "public/E10--base.json",
+      "public_input_sha256": "c10c5adb7a8a402151352c382d5febe775d564fb583514bc5a28e7858e51cd88",
+      "repeats": 3,
+      "required_method_ids": [
+        "F04"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "base"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E10--timing_only",
+      "checks": [
+        "K10",
+        "K14"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E10",
+      "high_risk": true,
+      "kind": "boundary",
+      "methods": [
+        "F04"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E10--timing_only.json",
+      "private_oracle_sha256": "f2d3d83702e899a94bdf55ceb25c8690847ffdffb63c6a9fc2bd9f31a20c9483",
+      "public_input": "public/E10--timing_only.json",
+      "public_input_sha256": "c88bad9c36eb8ea2724185442768108a06b9a9f81f01be2c0e5787029263a57b",
+      "repeats": 0,
+      "required_method_ids": [
+        "F04"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "timing_only"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E11--duplicate_key",
+      "checks": [
+        "K04",
+        "K10"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E11",
+      "high_risk": false,
+      "kind": "adversarial",
+      "methods": [
+        "F04"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E11--duplicate_key.json",
+      "private_oracle_sha256": "4785d46406f5bf715e938c61634a6d6821226cb2de2b1cd38d70f2df33c687fb",
+      "public_input": "public/E11--duplicate_key.json",
+      "public_input_sha256": "ec3bd4c6a64c621bfd58f55eb0c108d28ed4a4dccbe7e69c751ec9b6f6372238",
+      "repeats": 3,
+      "required_method_ids": [
+        "F04"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "duplicate_key"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E11--one_to_many",
+      "checks": [
+        "K04",
+        "K10"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E11",
+      "high_risk": false,
+      "kind": "gap",
+      "methods": [
+        "F04"
+      ],
+      "paired_control_id": "E11--grouping_confirmed",
+      "private_oracle": "private/oracles/E11--one_to_many.json",
+      "private_oracle_sha256": "ef717eb1e71c22679dab714faba6e113b76ac788b3f21d990b8894c94eb5a816",
+      "public_input": "public/E11--one_to_many.json",
+      "public_input_sha256": "e5f5d2abfccbfaf9b6dc59d2387013fbd2314d940117a748800fd8e04229d02a",
+      "repeats": 3,
+      "required_method_ids": [
+        "F04"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "one_to_many"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E11--grouping_confirmed",
+      "checks": [
+        "K04",
+        "K10"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E11",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F04"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E11--grouping_confirmed.json",
+      "private_oracle_sha256": "8a18d6926aa12906fc350a236a8d78a6538142ef6b769eae4089bd4e718fa50e",
+      "public_input": "public/E11--grouping_confirmed.json",
+      "public_input_sha256": "e42d372d792916c6e9f48610779b758fde56b844e2f4824f7f9d2886ed6fc9c7",
+      "repeats": 3,
+      "required_method_ids": [
+        "F04"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "grouping_confirmed"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E11--different_customer",
+      "checks": [
+        "K04",
+        "K10"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E11",
+      "high_risk": false,
+      "kind": "adversarial",
+      "methods": [
+        "F04"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E11--different_customer.json",
+      "private_oracle_sha256": "b70521c1ee1eda6df63efc0ef941e3e081bf9de5c2a340fb2706918d1211b03b",
+      "public_input": "public/E11--different_customer.json",
+      "public_input_sha256": "76085b2ce828b8076faae82c8e20a92d2604de45a54611a57d2f81482904724c",
+      "repeats": 0,
+      "required_method_ids": [
+        "F04"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "different_customer"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E12--base",
+      "checks": [
+        "K11",
+        "K14"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E12",
+      "high_risk": true,
+      "kind": "normal",
+      "methods": [
+        "F02",
+        "F03",
+        "F04"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E12--base.json",
+      "private_oracle_sha256": "74f08e77ba6dc9365006a315c637c0ef0722cb2c9d873f1835c813ef61f8021f",
+      "public_input": "public/E12--base.json",
+      "public_input_sha256": "c9cea659930e7391fa3585c35b7642aaf43ef3a3f4708acf540c6cac221c556b",
+      "repeats": 3,
+      "required_method_ids": [
+        "F02",
+        "F03",
+        "F04"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "base"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E13--single_month",
+      "checks": [
+        "K03",
+        "K05"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E13",
+      "high_risk": false,
+      "kind": "normal",
+      "methods": [
+        "F01",
+        "F06"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E13--single_month.json",
+      "private_oracle_sha256": "16d729aa7d05a5184e6cfd8159b0a129411f3e170fa5dbe305adf49c437c17d0",
+      "public_input": "public/E13--single_month.json",
+      "public_input_sha256": "521293e8f25c33103088433cbee7f610dc69e78a55297e041b8178bd8d39e0f0",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F06"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "single_month"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E13--cumulative",
+      "checks": [
+        "K03",
+        "K05"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E13",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F01",
+        "F06"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E13--cumulative.json",
+      "private_oracle_sha256": "d417cac4f00099efc0b009398c89b7740ef8fc0ebe1e54437ec29fac61ba1c2d",
+      "public_input": "public/E13--cumulative.json",
+      "public_input_sha256": "28d5e6566c7631b8b00f7bb712b0b0eaf56c63540f63f8d6d08c9c95f986ba9a",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F06"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "cumulative"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E13--ttm",
+      "checks": [
+        "K03",
+        "K05"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E13",
+      "high_risk": false,
+      "kind": "normal",
+      "methods": [
+        "F01",
+        "F06"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E13--ttm.json",
+      "private_oracle_sha256": "c190f80ccf529ad3948de5f3a86d7c248d959a695f75b1ad5ac35d530ba0a49a",
+      "public_input": "public/E13--ttm.json",
+      "public_input_sha256": "9855b70d1acb35e7c4193af2acc4b9d6096cb96cdf57efd464120879c6ae8ebc",
+      "repeats": 0,
+      "required_method_ids": [
+        "F01",
+        "F06"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "ttm"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E13--missing_month",
+      "checks": [
+        "K03",
+        "K05"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E13",
+      "high_risk": false,
+      "kind": "gap",
+      "methods": [
+        "F01",
+        "F06"
+      ],
+      "paired_control_id": "E13--complete_quarter",
+      "private_oracle": "private/oracles/E13--missing_month.json",
+      "private_oracle_sha256": "22471e27e52daf26b4d9e08cdf5fa16d79374787faff21c869ab7541aff1f86e",
+      "public_input": "public/E13--missing_month.json",
+      "public_input_sha256": "f0a45461bbc6c3b325c90e5a314e2976e8a26d78d5ee8439e98af9a8827d06a3",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F06"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "missing_month"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E13--complete_quarter",
+      "checks": [
+        "K03",
+        "K05"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E13",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F01",
+        "F06"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E13--complete_quarter.json",
+      "private_oracle_sha256": "a8f46be998798999028c5feb089c6b42f462d4e49bf4ea58e265b2f46afb180e",
+      "public_input": "public/E13--complete_quarter.json",
+      "public_input_sha256": "027e051951f6b920555c037db787a2960fa47aa5d1f9b8c4e122a5ce2c9059a3",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F06"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "complete_quarter"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E14--unit",
+      "checks": [
+        "K02",
+        "K11"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E14",
+      "high_risk": false,
+      "kind": "normal",
+      "methods": [
+        "F01",
+        "F03"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E14--unit.json",
+      "private_oracle_sha256": "d7b420db6fe808ade173e25a7fd2860e7561ae310b7445142138bb4fe0bc87c5",
+      "public_input": "public/E14--unit.json",
+      "public_input_sha256": "abc41693f740c985ebfcf28b22cdf133068dcde4fe77f44d0887b6047b733004",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F03"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "unit"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E14--fx_missing",
+      "checks": [
+        "K02",
+        "K11"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E14",
+      "high_risk": false,
+      "kind": "gap",
+      "methods": [
+        "F01",
+        "F03"
+      ],
+      "paired_control_id": "E14--fx_rate_present",
+      "private_oracle": "private/oracles/E14--fx_missing.json",
+      "private_oracle_sha256": "9c6df27d8cd06496480d21487d35ee22a799b50a54967ed28da10760302afe5c",
+      "public_input": "public/E14--fx_missing.json",
+      "public_input_sha256": "b43fb4bc32a939a084d36b3b2fc188f59ce3479124999edd719a7959234b96a4",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F03"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "fx_missing"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E14--fx_rate_present",
+      "checks": [
+        "K02",
+        "K11"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E14",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F01",
+        "F03"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E14--fx_rate_present.json",
+      "private_oracle_sha256": "0b3c4752845b51ade62c198ab84f47b0f92c5dd66642e78fba1066a55e040994",
+      "public_input": "public/E14--fx_rate_present.json",
+      "public_input_sha256": "73586ebddcd56c2b7c6c72110b6a3bf093634fd871ca850bd6e8afa6e1e6b040",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F03"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "fx_rate_present"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E14--functional_balance",
+      "checks": [
+        "K02",
+        "K11"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E14",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F01",
+        "F03"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E14--functional_balance.json",
+      "private_oracle_sha256": "0e92521486bc1e2460be2eb26f7b2d655f77b68565a8039861a594e2610934a8",
+      "public_input": "public/E14--functional_balance.json",
+      "public_input_sha256": "2ed740accdd3145de9ebe629a400e115c0a2e482ab3178480b722ca78cff98cb",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F03"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "functional_balance"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E15--july_start",
+      "checks": [
+        "K15"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E15",
+      "high_risk": false,
+      "kind": "normal",
+      "methods": [
+        "F05",
+        "F09"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E15--july_start.json",
+      "private_oracle_sha256": "9415f156088ef693b8e8b3483c9259a263c7f1ea4d5e7e30d48262877d27b508",
+      "public_input": "public/E15--july_start.json",
+      "public_input_sha256": "9cb221c02094c5aaab7bdc9f81bf69aa69a6852065a3e5512d42fda51fda57e2",
+      "repeats": 3,
+      "required_method_ids": [
+        "F05",
+        "F09"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "july_start"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E15--august_start",
+      "checks": [
+        "K15"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E15",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F05",
+        "F09"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E15--august_start.json",
+      "private_oracle_sha256": "86e7d4684d0617caf90f8ff27531e7a1fe42a9328ee86d8d040807dda6733148",
+      "public_input": "public/E15--august_start.json",
+      "public_input_sha256": "6b42962dd295cb5b76ff1cc9ef50709aafc329779c1377353c3a46735ccf2af1",
+      "repeats": 3,
+      "required_method_ids": [
+        "F05",
+        "F09"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "august_start"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E15--start_missing",
+      "checks": [
+        "K15"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E15",
+      "high_risk": false,
+      "kind": "gap",
+      "methods": [
+        "F05",
+        "F09"
+      ],
+      "paired_control_id": "E15--july_start",
+      "private_oracle": "private/oracles/E15--start_missing.json",
+      "private_oracle_sha256": "baceb754db0de422472994058b8aaed5d6a5bfcad0d5792cd5693a6fb5251e5d",
+      "public_input": "public/E15--start_missing.json",
+      "public_input_sha256": "15e39147117d435e59d4cbf1f9031a2ff9c1cdb5923c763419525cc0e1682316",
+      "repeats": 3,
+      "required_method_ids": [
+        "F05",
+        "F09"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "start_missing"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E16--base",
+      "checks": [
+        "K05",
+        "K08"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E16",
+      "high_risk": false,
+      "kind": "normal",
+      "methods": [
+        "F09"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E16--base.json",
+      "private_oracle_sha256": "69e7ab6650a463b16a1661867688e433626abdaf785d2bc852fd7742b0963537",
+      "public_input": "public/E16--base.json",
+      "public_input_sha256": "a312f587f5a2955555728c1ad61fa88e47498a19f33e779d476dfeefe8467f6b",
+      "repeats": 3,
+      "required_method_ids": [
+        "F09"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "base"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E16--zero_fte",
+      "checks": [
+        "K05",
+        "K08"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E16",
+      "high_risk": false,
+      "kind": "gap",
+      "methods": [
+        "F09"
+      ],
+      "paired_control_id": "E16--base",
+      "private_oracle": "private/oracles/E16--zero_fte.json",
+      "private_oracle_sha256": "09361877318344c468fbf13abe2809a13aa6ba681f6fd7a115c08a6565c3adff",
+      "public_input": "public/E16--zero_fte.json",
+      "public_input_sha256": "4c39f3385cb66366234486851a2119dde595fe0abc7c8f56abfdff7750e3647b",
+      "repeats": 3,
+      "required_method_ids": [
+        "F09"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "zero_fte"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E17--base",
+      "checks": [
+        "K18"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E17",
+      "high_risk": false,
+      "kind": "normal",
+      "methods": [
+        "F08",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E17--base.json",
+      "private_oracle_sha256": "857292a42ffb45cb2ccfba5bfb4d3b1c5a2f8425ed4fadf5d1c9b5d6617fe257",
+      "public_input": "public/E17--base.json",
+      "public_input_sha256": "b0f8ef8c39c3225fa099eb29bffdaeeb4b2a6004b09da482b59b5ce4194fec4c",
+      "repeats": 3,
+      "required_method_ids": [
+        "F08",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "base"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E18--base",
+      "checks": [
+        "K15",
+        "K16",
+        "K17",
+        "K18",
+        "K19"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E18",
+      "high_risk": true,
+      "kind": "normal",
+      "methods": [
+        "F09",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E18--base.json",
+      "private_oracle_sha256": "6a99c10cef0f894cd93de5d3105f5ebc318c7fbe4b3f76527ef168a4d44d27cc",
+      "public_input": "public/E18--base.json",
+      "public_input_sha256": "08800c682f5553b5a3f19c12e7a2c620cb46a6c9779ab99790db46673be37e86",
+      "repeats": 3,
+      "required_method_ids": [
+        "F09",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "base"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E19--old_ar_collected",
+      "checks": [
+        "K21"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E19",
+      "high_risk": true,
+      "kind": "metamorphic",
+      "methods": [
+        "F09",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E19--old_ar_collected.json",
+      "private_oracle_sha256": "9998978821b1b684c45c26270d6f9f3a12fd8e4c529b240ce5e6846c0d8809ac",
+      "public_input": "public/E19--old_ar_collected.json",
+      "public_input_sha256": "0eb7d84089efcf6b31c4e40d801fdff98305f12eb3521fc3270247c325437498",
+      "repeats": 3,
+      "required_method_ids": [
+        "F09",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "old_ar_collected"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E19--new_cash_sale",
+      "checks": [
+        "K21"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E19",
+      "high_risk": true,
+      "kind": "metamorphic",
+      "methods": [
+        "F09",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E19--new_cash_sale.json",
+      "private_oracle_sha256": "8275e10715b89246ad311f1b6cb1a7d3aca4017fa19b223d8c47db25fbf4d8c9",
+      "public_input": "public/E19--new_cash_sale.json",
+      "public_input_sha256": "35832d3128bd55a1b85bb3706ffddc0d520359d3b4d6285122aac3d23532f760",
+      "repeats": 3,
+      "required_method_ids": [
+        "F09",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "new_cash_sale"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E20--base",
+      "checks": [
+        "K17"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E20",
+      "high_risk": false,
+      "kind": "normal",
+      "methods": [
+        "F05",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E20--base.json",
+      "private_oracle_sha256": "74aa4fc76f119894298686288492ed19c419939ef0561704eba4332dd8586f8a",
+      "public_input": "public/E20--base.json",
+      "public_input_sha256": "2c419982701209ecfefe541a2abcefb277a70cc40f40f3ffda8cbcb59cf8f8fd",
+      "repeats": 3,
+      "required_method_ids": [
+        "F05",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "base"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E21--base",
+      "checks": [
+        "K16",
+        "K19"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E21",
+      "high_risk": false,
+      "kind": "normal",
+      "methods": [
+        "F05",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E21--base.json",
+      "private_oracle_sha256": "8c048c51f17e983225ff70f1e01e520468bf8970bd49ef04047a955f107facb7",
+      "public_input": "public/E21--base.json",
+      "public_input_sha256": "76919399ffafcf67af3b9c7155898d62a139258dc6bfd1c82ccf18fc8354e36c",
+      "repeats": 3,
+      "required_method_ids": [
+        "F05",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "base"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E22--restricted_cash",
+      "checks": [
+        "K13",
+        "K18",
+        "K20"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E22",
+      "high_risk": true,
+      "kind": "normal",
+      "methods": [
+        "F07",
+        "F08"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E22--restricted_cash.json",
+      "private_oracle_sha256": "7dcf4b751238274f0b1c0d1cb6884b71484d2012901a3743c6a2321bb0b13269",
+      "public_input": "public/E22--restricted_cash.json",
+      "public_input_sha256": "3dc9ba504177723dfe93771e244f4b12127d36e909feb749f1a0f11027d527a9",
+      "repeats": 3,
+      "required_method_ids": [
+        "F07",
+        "F08"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "restricted_cash"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E22--break_even_screen",
+      "checks": [
+        "K13",
+        "K18",
+        "K20"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E22",
+      "high_risk": true,
+      "kind": "boundary",
+      "methods": [
+        "F07",
+        "F08"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E22--break_even_screen.json",
+      "private_oracle_sha256": "8c40096d8432eab2718c93d07fa18825f6219f128b9e69d0282423e523f9d04c",
+      "public_input": "public/E22--break_even_screen.json",
+      "public_input_sha256": "3e3242583a8ec583408c49b1ec8696e487c848c2796e0ad8c644c88085d2ec71",
+      "repeats": 3,
+      "required_method_ids": [
+        "F07",
+        "F08"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "break_even_screen"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E22--intraday_shortfall",
+      "checks": [
+        "K13",
+        "K18",
+        "K20"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E22",
+      "high_risk": true,
+      "kind": "boundary",
+      "methods": [
+        "F07",
+        "F08"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E22--intraday_shortfall.json",
+      "private_oracle_sha256": "d39e479f704a5db8d64cd86b1bf462e2e35204206ab604af28a5801f43886c58",
+      "public_input": "public/E22--intraday_shortfall.json",
+      "public_input_sha256": "aa354af7399b8e7be9b55339c8572ecb24a97ddc89b2504a0a2091605da29d0d",
+      "repeats": 3,
+      "required_method_ids": [
+        "F07",
+        "F08"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "intraday_shortfall"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E23--cas_statutory",
+      "checks": [
+        "K01"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E23",
+      "high_risk": true,
+      "kind": "normal",
+      "methods": [
+        "F01",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E23--cas_statutory.json",
+      "private_oracle_sha256": "731c6316b590439834ecfb13f9dd1a0677df606d10044e8d37e28892071b1f00",
+      "public_input": "public/E23--cas_statutory.json",
+      "public_input_sha256": "2b1361a5840f727a7092255fc8aac1fb8cc819d22e38e20a3551f655e7ede1cd",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "cas_statutory"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E23--management_bridge",
+      "checks": [
+        "K01"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E23",
+      "high_risk": true,
+      "kind": "normal",
+      "methods": [
+        "F01",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E23--management_bridge.json",
+      "private_oracle_sha256": "25f6512ee91768ab18cc15ea9ea20d6ca58186e1a84816f4f48ef9b2d7c55cc0",
+      "public_input": "public/E23--management_bridge.json",
+      "public_input_sha256": "aeb6ac28dc2b1bf2cc4e32c586eee8f2a988ce24d4d72275579d171f13dd2706",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "management_bridge"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E23--unsupported_basis",
+      "checks": [
+        "K01"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E23",
+      "high_risk": true,
+      "kind": "gap",
+      "methods": [
+        "F01",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E23--unsupported_basis.json",
+      "private_oracle_sha256": "8877ddb2bc077394e21043c588c818364a95c91d39221d140fe380df7be352a6",
+      "public_input": "public/E23--unsupported_basis.json",
+      "public_input_sha256": "53432bd5e3791648fb96f4d1a89ae1b3ef5587abc46318b5c80a591d5e83b0a6",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "unsupported_basis"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E24--year_2026_early_true",
+      "checks": [
+        "K01"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E24",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F01",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E24--year_2026_early_true.json",
+      "private_oracle_sha256": "d2df2d349c0f398e3cbff72aa5b8c2cd4eeccae9067fd227a6f321577fa7c263",
+      "public_input": "public/E24--year_2026_early_true.json",
+      "public_input_sha256": "b57d6cb14f414a0a73077be417ecf30022039f994b194c556e50f5ebe947650f",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "year_2026_early_true"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E24--year_2026_early_false",
+      "checks": [
+        "K01"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E24",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F01",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E24--year_2026_early_false.json",
+      "private_oracle_sha256": "dc1803c9fee448f1450f88adf23e444bd8643f98d0890273411df8b711bdf9e4",
+      "public_input": "public/E24--year_2026_early_false.json",
+      "public_input_sha256": "2a320b78f6afb7730e7e949ce5cbe1ac0bebe709b0a8ea5429f98058c3eb264e",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "year_2026_early_false"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E24--year_2026_early_unknown",
+      "checks": [
+        "K01"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E24",
+      "high_risk": false,
+      "kind": "gap",
+      "methods": [
+        "F01",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E24--year_2026_early_unknown.json",
+      "private_oracle_sha256": "b2078c519104e61bff1554fabe42fe6f1221c939591abc5a6428d057e953b749",
+      "public_input": "public/E24--year_2026_early_unknown.json",
+      "public_input_sha256": "193b27cb3f68c174540a2448ebc08991e54e1b955c98c50b4acf13920a383c18",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "year_2026_early_unknown"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E24--year_2027_early_true",
+      "checks": [
+        "K01"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E24",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F01",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E24--year_2027_early_true.json",
+      "private_oracle_sha256": "c4051b2c12846941c4494a1592df511c1c7b95bb2f9f9746f935c86935d0cb8d",
+      "public_input": "public/E24--year_2027_early_true.json",
+      "public_input_sha256": "2bd1e1aa5993411dc67c1a2fa0231a1d94c4a09f6d2eef14cfabd671e55b8ea7",
+      "repeats": 0,
+      "required_method_ids": [
+        "F01",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "year_2027_early_true"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E24--year_2027_early_false",
+      "checks": [
+        "K01"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E24",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F01",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E24--year_2027_early_false.json",
+      "private_oracle_sha256": "ac1459c9d891c68404f21583358b27b2592317439a57f89e66781e2143aab648",
+      "public_input": "public/E24--year_2027_early_false.json",
+      "public_input_sha256": "741d8e1a7cf8e1dbc9fefb00cc559fefce621f4f874d4700c6998a0475502746",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "year_2027_early_false"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E24--year_2027_early_unknown",
+      "checks": [
+        "K01"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E24",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F01",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E24--year_2027_early_unknown.json",
+      "private_oracle_sha256": "8bdb4974f40d05e4f09b1309a9bb0c0e7a271f2e649b367263c48f81e9bc51d3",
+      "public_input": "public/E24--year_2027_early_unknown.json",
+      "public_input_sha256": "eeda82f3813160e420777c13b4aededaf8cc817c12af2cd08c56a1001ed0c685",
+      "repeats": 0,
+      "required_method_ids": [
+        "F01",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "year_2027_early_unknown"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E25--ledger_complete",
+      "checks": [
+        "K04",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E25",
+      "high_risk": false,
+      "kind": "normal",
+      "methods": [
+        "F01",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E25--ledger_complete.json",
+      "private_oracle_sha256": "401839bfd434ae66fa62d7f8b92aad5c1552185981a7e618b796393ad5146b58",
+      "public_input": "public/E25--ledger_complete.json",
+      "public_input_sha256": "f7f46b13e64aff92b3cdd9b730c5de0275ff6f98bdf94def6196883c32aad6f8",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "ledger_complete"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E25--table_incomplete",
+      "checks": [
+        "K04",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E25",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F01",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E25--table_incomplete.json",
+      "private_oracle_sha256": "5518fc4272f9ae551e0987a4fd596be2d1e5b957d4500f6ffcbacbd7a816a8d0",
+      "public_input": "public/E25--table_incomplete.json",
+      "public_input_sha256": "518e4f59d5c84da94d57ee1dfe7a35f44aee2c3f25773e289541ba55e70c4ed8",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "table_incomplete"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E26--source_replaced",
+      "checks": [
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E26",
+      "high_risk": true,
+      "kind": "metamorphic",
+      "methods": [
+        "F02",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E26--source_replaced.json",
+      "private_oracle_sha256": "295e4ba11ece32a1f3072ba802d4fb3a91f5293ee3db8ea0cef2416ab6f6a9e7",
+      "public_input": "public/E26--source_replaced.json",
+      "public_input_sha256": "eb8b861991d5293270216da3b24bb3d5c6e2048f46195e51ae326beaed65e66e",
+      "repeats": 3,
+      "required_method_ids": [
+        "F02",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "source_replaced"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E26--adjustment_changed",
+      "checks": [
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E26",
+      "high_risk": true,
+      "kind": "metamorphic",
+      "methods": [
+        "F02",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E26--adjustment_changed.json",
+      "private_oracle_sha256": "ea419f3cc1c42afd5f15c944d3806f8f691698ea8f3ca23e10b5d4f3a4bb5125",
+      "public_input": "public/E26--adjustment_changed.json",
+      "public_input_sha256": "d30684bc1696e0d72212e513cbb29488ce5449aae45ff198c6c27adcde55da6b",
+      "repeats": 0,
+      "required_method_ids": [
+        "F02",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "adjustment_changed"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E26--scope_changed",
+      "checks": [
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E26",
+      "high_risk": true,
+      "kind": "metamorphic",
+      "methods": [
+        "F02",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E26--scope_changed.json",
+      "private_oracle_sha256": "c314a459fc8745b0ff3d6107f522010e29b18d336f30ee3d82994a5592c1be44",
+      "public_input": "public/E26--scope_changed.json",
+      "public_input_sha256": "07d30211bcc5ec1dba53d79d600999091f157e6f6d5a57d16beef8ba18cec460",
+      "repeats": 0,
+      "required_method_ids": [
+        "F02",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "scope_changed"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E27--basis_change",
+      "checks": [
+        "K01",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E27",
+      "high_risk": true,
+      "kind": "metamorphic",
+      "methods": [
+        "F01",
+        "F02",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E27--basis_change.json",
+      "private_oracle_sha256": "b83b88f3da19dcaff88457a44810069c41cbe8ffe90ea9e3925b150b167f5f05",
+      "public_input": "public/E27--basis_change.json",
+      "public_input_sha256": "d86d37d13db4c305b4b08de1511b234cd973696462d8e80a4f2db07cc9664ed2",
+      "repeats": 0,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "basis_change"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E27--method_change",
+      "checks": [
+        "K01",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E27",
+      "high_risk": true,
+      "kind": "metamorphic",
+      "methods": [
+        "F01",
+        "F02",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E27--method_change.json",
+      "private_oracle_sha256": "4c443177356d534f2106228d372bb2a8bea2b390665d2098d814f7a36f85798b",
+      "public_input": "public/E27--method_change.json",
+      "public_input_sha256": "e3754cde6f591db29e3ea3d0f0f320b874cf9008fa65818c0275e5bb8ddf90b7",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "method_change"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E27--tax_change",
+      "checks": [
+        "K01",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E27",
+      "high_risk": true,
+      "kind": "metamorphic",
+      "methods": [
+        "F01",
+        "F02",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E27--tax_change.json",
+      "private_oracle_sha256": "b974a78eeb06d520243d7e7d1ff16107da8c8484cfd3db98b49b80a6ed3d05a7",
+      "public_input": "public/E27--tax_change.json",
+      "public_input_sha256": "82fa89215ce2380bed73e6dd5d87a10230a9d9de4403f98d8b6aa3e2689179c8",
+      "repeats": 0,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "tax_change"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E27--purpose_change",
+      "checks": [
+        "K01",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E27",
+      "high_risk": true,
+      "kind": "metamorphic",
+      "methods": [
+        "F01",
+        "F02",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E27--purpose_change.json",
+      "private_oracle_sha256": "bb8fb5ac0d7b5cf4b104af20006bcac05fe4530ac883c1f4367822d1b0179775",
+      "public_input": "public/E27--purpose_change.json",
+      "public_input_sha256": "b7eeeadfaf65026d0e71eb4cae9e7e3d5a727bfa2022b5f3afbca36a281c5882",
+      "repeats": 0,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "purpose_change"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E27--unrelated_rule",
+      "checks": [
+        "K01",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E27",
+      "high_risk": true,
+      "kind": "metamorphic",
+      "methods": [
+        "F01",
+        "F02",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E27--unrelated_rule.json",
+      "private_oracle_sha256": "cb05af78c51c0de387840d19f7432cd9e6e973d35344a6cf5fc4d5dea32b55c2",
+      "public_input": "public/E27--unrelated_rule.json",
+      "public_input_sha256": "e589d7d00f58dc1ef123ab489917b5860fcbb8c7cc0e96fb734b3943c2f57fed",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "unrelated_rule"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E27--forged_confirmation",
+      "checks": [
+        "K01",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E27",
+      "high_risk": true,
+      "kind": "adversarial",
+      "methods": [
+        "F01",
+        "F02",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E27--forged_confirmation.json",
+      "private_oracle_sha256": "d021a3637762eec71f472760389d3b73ea938727ca55c6f6af72b90f141c8601",
+      "public_input": "public/E27--forged_confirmation.json",
+      "public_input_sha256": "3064284b327b47b9914f3d64f418b8b3a91aed10af7db364e50c281340bc587c",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "forged_confirmation"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E27--cross_task_confirmation",
+      "checks": [
+        "K01",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E27",
+      "high_risk": true,
+      "kind": "adversarial",
+      "methods": [
+        "F01",
+        "F02",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E27--cross_task_confirmation.json",
+      "private_oracle_sha256": "d3695a4b5e6effc18f7f907010dd8a7ef7f4e43100e5a87f7ede25416502a78a",
+      "public_input": "public/E27--cross_task_confirmation.json",
+      "public_input_sha256": "1c7e007847b764cc2efdf53a4afd20ff83f5b0338ae4df1e8e68d81d88b3168d",
+      "repeats": 0,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "cross_task_confirmation"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E27--revoked_confirmation",
+      "checks": [
+        "K01",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E27",
+      "high_risk": true,
+      "kind": "adversarial",
+      "methods": [
+        "F01",
+        "F02",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E27--revoked_confirmation.json",
+      "private_oracle_sha256": "1d55467327dafb2474ac0d3c554dbfce1ebbbd8c6a1a421d4131994c6b091899",
+      "public_input": "public/E27--revoked_confirmation.json",
+      "public_input_sha256": "f9c1f14b47a4b8799c290f980371c7359fb1caf12ae0082d730bcaf8bea4f6ad",
+      "repeats": 0,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "revoked_confirmation"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E27--expanded_partial_confirmation",
+      "checks": [
+        "K01",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E27",
+      "high_risk": true,
+      "kind": "adversarial",
+      "methods": [
+        "F01",
+        "F02",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E27--expanded_partial_confirmation.json",
+      "private_oracle_sha256": "ce02f1fa63418dc450cd085fc138bf52a1dbdfc0fad76820c34ccd65affcb633",
+      "public_input": "public/E27--expanded_partial_confirmation.json",
+      "public_input_sha256": "a8b1245f46668d4e7f97dbe3de03e3dc5c3f6ad53b415dc07a3744b9f7b1fa0c",
+      "repeats": 0,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "expanded_partial_confirmation"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E28--cache_missing",
+      "checks": [
+        "K06",
+        "K23"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E28",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F11"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E28--cache_missing.json",
+      "private_oracle_sha256": "c0d1abd51ece1d35f2723f47db1194b644b63c56135c8b79a2b1246fa004e2d5",
+      "public_input": "public/E28--cache_missing.json",
+      "public_input_sha256": "06aab720c727d4f3e2cb6f5cd363d6e33cacdc26c8a019f22ef5bc5da6f1f1b5",
+      "repeats": 0,
+      "required_method_ids": [
+        "F11"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "cache_missing"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E28--cache_wrong",
+      "checks": [
+        "K06",
+        "K23"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E28",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F11"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E28--cache_wrong.json",
+      "private_oracle_sha256": "02d77d5703fbe371a5c8d18b7b5391d460264cbeabaae52aa8ff30ece966ab1d",
+      "public_input": "public/E28--cache_wrong.json",
+      "public_input_sha256": "47de0b60e67d23ce1e02fcc7be9871363a1d5b960231e1c1bc1a1d007782db68",
+      "repeats": 3,
+      "required_method_ids": [
+        "F11"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "cache_wrong"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E28--overwrite_with_baseline",
+      "checks": [
+        "K06",
+        "K23"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E28",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F11"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E28--overwrite_with_baseline.json",
+      "private_oracle_sha256": "cad887a3ae7e609ff17c308755f9664582c6d77ddf7b9323f45aa499e99b29d2",
+      "public_input": "public/E28--overwrite_with_baseline.json",
+      "public_input_sha256": "4b42fa1696e1f1747c0473ddf52732445c09c3bf1cc6f7d03a256e24d09056fc",
+      "repeats": 3,
+      "required_method_ids": [
+        "F11"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "overwrite_with_baseline"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E28--overwrite_without_baseline",
+      "checks": [
+        "K06",
+        "K23"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E28",
+      "high_risk": false,
+      "kind": "gap",
+      "methods": [
+        "F11"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E28--overwrite_without_baseline.json",
+      "private_oracle_sha256": "6c4182b08f47bbb10283bd533f3b472a39e4513a15409fcb62a3410c026d980d",
+      "public_input": "public/E28--overwrite_without_baseline.json",
+      "public_input_sha256": "cd4f53e8f07e92105bba8ddf50ae0a0d05e9ffbee1ac0c9937e9b4869e46ccf5",
+      "repeats": 3,
+      "required_method_ids": [
+        "F11"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "overwrite_without_baseline"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E28--engine_available",
+      "checks": [
+        "K06",
+        "K23"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E28",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F11"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E28--engine_available.json",
+      "private_oracle_sha256": "93f3bb234cd2b35221c73152669be7452c2ed2a6ccd78fc7a4246e9c9c30febc",
+      "public_input": "public/E28--engine_available.json",
+      "public_input_sha256": "c1b8344247998e92a14bbba86916cf91afb9a8f787d49a3b2f65aeaa261159a4",
+      "repeats": 3,
+      "required_method_ids": [
+        "F11"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "engine_available"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E28--engine_unavailable",
+      "checks": [
+        "K06",
+        "K23"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E28",
+      "high_risk": false,
+      "kind": "gap",
+      "methods": [
+        "F11"
+      ],
+      "paired_control_id": "E28--engine_available",
+      "private_oracle": "private/oracles/E28--engine_unavailable.json",
+      "private_oracle_sha256": "34ec2a9bcfb4f90cd8eae0b466466cf46e7bd7bc84a2b4b3d725dfa8c75ca06e",
+      "public_input": "public/E28--engine_unavailable.json",
+      "public_input_sha256": "df0f361805894c0b72442e733d34dbbe909a007ee1101625b192dd0d55ed31b9",
+      "repeats": 3,
+      "required_method_ids": [
+        "F11"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "engine_unavailable"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E29--external_link",
+      "checks": [
+        "K06",
+        "K07"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E29",
+      "high_risk": false,
+      "kind": "adversarial",
+      "methods": [
+        "F11"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E29--external_link.json",
+      "private_oracle_sha256": "2c16687ed440fa912efd6a5246cdda60eb15dba00deefe5f9a108d74aa196d63",
+      "public_input": "public/E29--external_link.json",
+      "public_input_sha256": "a0e52728348e63e3afe89f470efa9ba21beafc838f60efb30df1d2ef84e92fe9",
+      "repeats": 3,
+      "required_method_ids": [
+        "F11"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "external_link"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E29--hidden_sheet",
+      "checks": [
+        "K06",
+        "K07"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E29",
+      "high_risk": false,
+      "kind": "adversarial",
+      "methods": [
+        "F11"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E29--hidden_sheet.json",
+      "private_oracle_sha256": "cf45594f7e154858c591b82d4506e6f7121ea761da2e65e5ad36c07c2d4535cd",
+      "public_input": "public/E29--hidden_sheet.json",
+      "public_input_sha256": "2f4f911745c80ca32f946d427d8432f1b7a33f6396305d07bd49323a62f1d1d9",
+      "repeats": 0,
+      "required_method_ids": [
+        "F11"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "hidden_sheet"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E29--iteration",
+      "checks": [
+        "K06",
+        "K07"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E29",
+      "high_risk": false,
+      "kind": "adversarial",
+      "methods": [
+        "F11"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E29--iteration.json",
+      "private_oracle_sha256": "babcc9b8d8228925ef2a42f677f494f518eca7bfc5cc4b48d8bb914c6ad22b71",
+      "public_input": "public/E29--iteration.json",
+      "public_input_sha256": "cc01120ce0d305a63b926d5c216ad98d8ae894404c14066dc161945557951c29",
+      "repeats": 0,
+      "required_method_ids": [
+        "F11"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "iteration"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E29--truncation",
+      "checks": [
+        "K06",
+        "K07"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E29",
+      "high_risk": false,
+      "kind": "adversarial",
+      "methods": [
+        "F11"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E29--truncation.json",
+      "private_oracle_sha256": "5002db4986e69378da6ae9979c133f49cc831932c0f0d1cee8c2d58ef471eef1",
+      "public_input": "public/E29--truncation.json",
+      "public_input_sha256": "ce98a84283c79d6ad8169bce7ab6bb6eff50b474382c84ea3e68490176d745fa",
+      "repeats": 0,
+      "required_method_ids": [
+        "F11"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "truncation"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E29--copy_shift",
+      "checks": [
+        "K06",
+        "K07"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E29",
+      "high_risk": false,
+      "kind": "adversarial",
+      "methods": [
+        "F11"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E29--copy_shift.json",
+      "private_oracle_sha256": "493079d30a74bbf0daa379da79d75a0a42731c78a7f02fb3e5badf9d9267e138",
+      "public_input": "public/E29--copy_shift.json",
+      "public_input_sha256": "296d91202a8868986f812747b146440ba13c6ee0e58c9f6ab397b390d7b390a5",
+      "repeats": 0,
+      "required_method_ids": [
+        "F11"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "copy_shift"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E29--intentional_subtotal",
+      "checks": [
+        "K06",
+        "K07"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E29",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F11"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E29--intentional_subtotal.json",
+      "private_oracle_sha256": "ff75fc0958652fa1ced221211829c8b80fa0ec6f897dc8134e9e799efb7c3aee",
+      "public_input": "public/E29--intentional_subtotal.json",
+      "public_input_sha256": "f6297a0499d03a2182bbac753921a799f4f04fae06d64d0525b8974b07096c97",
+      "repeats": 3,
+      "required_method_ids": [
+        "F11"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "intentional_subtotal"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E30--next_month",
+      "checks": [
+        "K03",
+        "K08",
+        "K22"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E30",
+      "high_risk": false,
+      "kind": "metamorphic",
+      "methods": [
+        "F01",
+        "F09",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E30--next_month.json",
+      "private_oracle_sha256": "d83425b8704917be6021e91b2e2a34c6eaea4f230e70ecd2708f8828dd2c6bac",
+      "public_input": "public/E30--next_month.json",
+      "public_input_sha256": "f3a0a94282a9fc701b7db8b3b3618e74fa08dba4263a588cb3d4529f59cbc9ee",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F09",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "next_month"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E30--missing_driver",
+      "checks": [
+        "K03",
+        "K08",
+        "K22"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E30",
+      "high_risk": false,
+      "kind": "gap",
+      "methods": [
+        "F01",
+        "F09",
+        "F10"
+      ],
+      "paired_control_id": "E30--complete_driver",
+      "private_oracle": "private/oracles/E30--missing_driver.json",
+      "private_oracle_sha256": "b50dd1644650770cf4078520c7061e560652f5cafc863f055dc68c2c4d10ada6",
+      "public_input": "public/E30--missing_driver.json",
+      "public_input_sha256": "e0abab0bcb6070086f209e41b53adf314deabe683ca1facd6a57d05d2ab938a8",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F09",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "missing_driver"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E30--complete_driver",
+      "checks": [
+        "K03",
+        "K08",
+        "K22"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E30",
+      "high_risk": false,
+      "kind": "normal",
+      "methods": [
+        "F01",
+        "F09",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E30--complete_driver.json",
+      "private_oracle_sha256": "ae91e9702358b85c77b7f512c06c232b70fd5905579afa73e3405c7d3e821d99",
+      "public_input": "public/E30--complete_driver.json",
+      "public_input_sha256": "5ac03fa4df3d8c7b6d61ba2b136a5370433019e4082452c61ffe664ec7227049",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F09",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "complete_driver"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E30--cycle",
+      "checks": [
+        "K03",
+        "K08",
+        "K22"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E30",
+      "high_risk": false,
+      "kind": "adversarial",
+      "methods": [
+        "F01",
+        "F09",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E30--cycle.json",
+      "private_oracle_sha256": "3be0b782bc2897878c387bef5f774b1010e5f8428a46982d4e79abb214ca229a",
+      "public_input": "public/E30--cycle.json",
+      "public_input_sha256": "c60ce4080eb7adcbeefbee8e0e8fe1fcb819648e7a555d72657f1873689fca67",
+      "repeats": 0,
+      "required_method_ids": [
+        "F01",
+        "F09",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "cycle"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E30--target_conflict",
+      "checks": [
+        "K03",
+        "K08",
+        "K22"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E30",
+      "high_risk": false,
+      "kind": "boundary",
+      "methods": [
+        "F01",
+        "F09",
+        "F10"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E30--target_conflict.json",
+      "private_oracle_sha256": "012b3c6af259ab1cea13cad086ec1e9f45a8f8c4953f0f879e846d857f064cef",
+      "public_input": "public/E30--target_conflict.json",
+      "public_input_sha256": "8a3dd5dbdb0594c25055fbb8ac8e208ea6b716409cfad8ae6672138f212f1112",
+      "repeats": 0,
+      "required_method_ids": [
+        "F01",
+        "F09",
+        "F10"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "target_conflict"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E31--system_instruction",
+      "checks": [
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E31",
+      "high_risk": true,
+      "kind": "adversarial",
+      "methods": [
+        "F01",
+        "F02",
+        "F11",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E31--system_instruction.json",
+      "private_oracle_sha256": "68f13eae7e24cc898dcdba1fc5bb0f544dc16ddbfb3f45ff66097e36950a9d32",
+      "public_input": "public/E31--system_instruction.json",
+      "public_input_sha256": "900ccdb0528da82036091a687277c20bd696bb2944929df496909448c7b88683",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F11",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "system_instruction"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E31--upload_instruction",
+      "checks": [
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E31",
+      "high_risk": true,
+      "kind": "adversarial",
+      "methods": [
+        "F01",
+        "F02",
+        "F11",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E31--upload_instruction.json",
+      "private_oracle_sha256": "760fab1d22cef694033ec8d0e00177cfa7eb10c54c13530a6b41d6dc2b5c3bdd",
+      "public_input": "public/E31--upload_instruction.json",
+      "public_input_sha256": "1c9a969d656369fcc65326e49f70373a70dd48c7d9374a0e0b66d10f995d7c7f",
+      "repeats": 0,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F11",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "upload_instruction"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E31--fake_manager_approval",
+      "checks": [
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E31",
+      "high_risk": true,
+      "kind": "adversarial",
+      "methods": [
+        "F01",
+        "F02",
+        "F11",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E31--fake_manager_approval.json",
+      "private_oracle_sha256": "57b80f21fbb29c123fe131864bbfc56660fd854659a555d71792672baa09ee9d",
+      "public_input": "public/E31--fake_manager_approval.json",
+      "public_input_sha256": "c1ced44f6e97bed6453774342245cdb7f6df38969b3689271cde4fabf6c7bdbb",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F11",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "fake_manager_approval"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E31--unrelated_rename",
+      "checks": [
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "forbidden",
+      "family_id": "E31",
+      "high_risk": true,
+      "kind": "boundary",
+      "methods": [
+        "F01",
+        "F02",
+        "F11",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E31--unrelated_rename.json",
+      "private_oracle_sha256": "46421f5a46aac20ca5d41bd511ea939681e9f8df88a0e915be5b565d5e55799f",
+      "public_input": "public/E31--unrelated_rename.json",
+      "public_input_sha256": "b0397352e29e0129ea4b04a5c8f9cb6dd7c0921e845e16ddd735e655c023c342",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F11",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "unrelated_rename"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E32--correct_method",
+      "checks": [
+        "K01",
+        "K05",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E32",
+      "high_risk": false,
+      "kind": "normal",
+      "methods": [
+        "F01",
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E32--correct_method.json",
+      "private_oracle_sha256": "eaff97bd7319315618b07923b737eb0ec86b67bbcfea99274f2c817b935d21ac",
+      "public_input": "public/E32--correct_method.json",
+      "public_input_sha256": "8317b90ac405e7835d1975f10648e2854a78bf3f40998eaad94bd2d94be1b46e",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "correct_method"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E32--no_method",
+      "checks": [
+        "K01",
+        "K05",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "trace_self_test",
+      "family_id": "E32",
+      "high_risk": false,
+      "kind": "adversarial",
+      "methods": [
+        "F01",
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E32--no_method.json",
+      "private_oracle_sha256": "344b27c3a625e3d1266a1bb1677c275d24dd9a763173937a473605a64426ec95",
+      "public_input": "public/E32--no_method.json",
+      "public_input_sha256": "aa1d8fb352159b7974286706badc7d07d92aa0ad4e070dcdd18c81966f9f8096",
+      "repeats": 0,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "no_method"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E32--wrong_method",
+      "checks": [
+        "K01",
+        "K05",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "trace_self_test",
+      "family_id": "E32",
+      "high_risk": false,
+      "kind": "adversarial",
+      "methods": [
+        "F01",
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E32--wrong_method.json",
+      "private_oracle_sha256": "cf18011c72e496bed55eda3aee46f501743cca9e8d2cd57b83d4b416e0fa5b1f",
+      "public_input": "public/E32--wrong_method.json",
+      "public_input_sha256": "656903692fa28f6b087c462a9dcd86e1bfdc297d04892f041bf8bdb2074d0134",
+      "repeats": 0,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "wrong_method"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E32--late_read",
+      "checks": [
+        "K01",
+        "K05",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "trace_self_test",
+      "family_id": "E32",
+      "high_risk": false,
+      "kind": "adversarial",
+      "methods": [
+        "F01",
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E32--late_read.json",
+      "private_oracle_sha256": "e5958f0415fa190741ea4d5f7d579816ce8a23d71abd2a27c3721fd71c0d1642",
+      "public_input": "public/E32--late_read.json",
+      "public_input_sha256": "57d89edd13c639905900605b55ce2e48274fe9e03b6ef724ef38fe8e4bb315ae",
+      "repeats": 0,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "late_read"
+    },
+    {
+      "blocking_contracts": [],
+      "capability_status": "not_granted",
+      "case_id": "E32--failed_read",
+      "checks": [
+        "K01",
+        "K05",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract"
+      ],
+      "expected_trigger": "trace_self_test",
+      "family_id": "E32",
+      "high_risk": false,
+      "kind": "adversarial",
+      "methods": [
+        "F01",
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E32--failed_read.json",
+      "private_oracle_sha256": "b63d9d966cbde601f75b462b556253659370b43756ada590f1759cfadc2a3a8f",
+      "public_input": "public/E32--failed_read.json",
+      "public_input_sha256": "68102cdc95e5a3ef91f771296d51f07775cfe44a82e1cdbce44bae552714d2a2",
+      "repeats": 0,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": false,
+      "selection_reason": "full deterministic or observer mutation coverage; no live claim for this variant",
+      "status": "deterministic_only",
+      "variant_id": "failed_read"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E32--unsupported_capability",
+      "checks": [
+        "K01",
+        "K05",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E32",
+      "high_risk": false,
+      "kind": "gap",
+      "methods": [
+        "F01",
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E32--unsupported_capability.json",
+      "private_oracle_sha256": "65b9d7116c2ccbd0872aae74d5f76f4291edfe357afb70466473963fdd85476b",
+      "public_input": "public/E32--unsupported_capability.json",
+      "public_input_sha256": "5e1b31ddd3b3628439d2c56e0c76c02622dba30a5a851c005901ba94b4573342",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "unsupported_capability"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E32--missing_input",
+      "checks": [
+        "K01",
+        "K05",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E32",
+      "high_risk": false,
+      "kind": "gap",
+      "methods": [
+        "F01",
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F12"
+      ],
+      "paired_control_id": "E32--complete_input",
+      "private_oracle": "private/oracles/E32--missing_input.json",
+      "private_oracle_sha256": "c7d3f97e84fa23a58352719bff5e4ccc965065fd0ff9ec242376e19cf596d89f",
+      "public_input": "public/E32--missing_input.json",
+      "public_input_sha256": "212ff1d7d7a75742fe3d8282afc9bfcbe68fe3bbb52fe2785ef9b75bf4202437",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "missing_input"
+    },
+    {
+      "blocking_contracts": [
+        "runtime_oracle_isolation",
+        "candidate_runtime_and_method_hashes",
+        "budget_contract",
+        "backend_adapter_and_scoring"
+      ],
+      "capability_status": "not_granted",
+      "case_id": "E32--complete_input",
+      "checks": [
+        "K01",
+        "K05",
+        "K24"
+      ],
+      "execution_layers": [
+        "deterministic_contract",
+        "live_workflow",
+        "artifact",
+        "professional_review"
+      ],
+      "expected_trigger": "required",
+      "family_id": "E32",
+      "high_risk": false,
+      "kind": "normal",
+      "methods": [
+        "F01",
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F12"
+      ],
+      "paired_control_id": null,
+      "private_oracle": "private/oracles/E32--complete_input.json",
+      "private_oracle_sha256": "834ac544409d2baea6455ed69a5af9b020f496d75647e267a5af7b6a3066a922",
+      "public_input": "public/E32--complete_input.json",
+      "public_input_sha256": "edaff368737e4298794df9d9a56df162aa66b66cdffb75850d7b8da62a98ce12",
+      "repeats": 3,
+      "required_method_ids": [
+        "F01",
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F12"
+      ],
+      "required_resource_hashes_status": "bind in versioned run manifest before live; fixture expectations remain immutable",
+      "selected_live": true,
+      "selection_reason": "support/limitation claim, core positive or necessary boundary/gap contrast",
+      "status": "blocked_contract",
+      "variant_id": "complete_input"
+    }
+  ]
+}

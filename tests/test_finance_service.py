@@ -261,7 +261,7 @@ def _recorded_before_calculation_version(service, run):
 def test_finance_run_records_its_calculation_version_outside_the_result(finance):
     service, context = finance
     run = service.explain_variance({"context_id": context["id"]})
-    assert run["calculation_version"] == FINANCE_CALCULATION_VERSION == 3
+    assert run["calculation_version"] == FINANCE_CALCULATION_VERSION == 4
     assert "calculation_version" not in run["result"]
     assert run["environment"]["runner"] == "finance-v1"
 
@@ -606,7 +606,7 @@ def test_saved_evidence_appendix_records_server_hash_metadata(finance):
     persisted = service.analysis.get_draft(draft["id"])
 
     assert draft["evidence_appendix_meta"]["schema_version"] == 1
-    assert draft["evidence_appendix_meta"]["render_version"] == 1
+    assert draft["evidence_appendix_meta"]["render_version"] == 3
     assert draft["evidence_appendix_meta"]["body_sha256"] == hashlib.sha256(
         draft["evidence_appendix"].encode("utf-8")
     ).hexdigest()
@@ -986,7 +986,7 @@ def test_completion_requests_fresh_run_after_requirements_revision(finance):
     assert stopped['status'] == 'repair_available'
     assert stopped['actions'][0]['code'] == 'requirements_run_outdated'
     assert stopped['actions'][0]['run_ids'] == [old_run['id']]
-    assert stopped['completion_policy_version'] == 13
+    assert stopped['completion_policy_version'] == 16
     assert record_completion(service.analysis, draft, quality)['id'] == stopped['id']
 
     fresh_run = service.explain_variance({'context_id': context['id']})

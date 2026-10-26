@@ -16,15 +16,40 @@ argument-hint: "<frequency> <period>"
 
 **Important**: This command assists with financial statement workflows but does not provide financial advice. All statements should be reviewed by qualified financial professionals before use in reporting or filings.
 
-Generate financial statements with period-over-period comparison and variance analysis. The workflow below walks through income statement generation; balance sheet and cash flow statement reference formats, GAAP presentation requirements (ASC 220/210/230), and common period-end adjustments are included as supporting reference material.
+Prepare supported financial working papers with period-over-period comparison and variance analysis. The workflow below walks through income statement generation; balance-sheet and cash-flow reference formats and common period-end adjustments are supporting material, subject to the confirmed basis, purpose and effective period.
 
 ## Foundry analysis mode
+
+Before professional calculations, read [accounting-basis.md](../accounting-basis.md)
+with `method-resource {skill: "financial-statements", resource: "accounting-basis.md"}`.
+For F09/F10 driver or linked statements read [forecast-models.md](../forecast-models.md)
+with `method-resource {skill: "financial-statements", resource: "forecast-models.md"}`;
+for F11 model review read [model-checks.md](../model-checks.md) with
+`method-resource {skill: "financial-statements", resource: "model-checks.md"}`.
+Use [close-checklist.md](../close-checklist.md) with
+`method-resource {skill: "financial-statements", resource: "close-checklist.md"}`
+when a statement depends on accrual, reconciliation or balance-rollforward work.
+These references specify methods; native capability and professional acceptance
+must be established separately for the current scope.
 
 Start with `list_finance_context` to identify the current scenarios, source snapshots, account maps, and dataset versions. If the current task includes uploaded statement, balance, or budget files that have not been registered, use `finance_source_refresh` with `file_identity_policy: "snapshot_only"` for ordinary files without real document-line identifiers, then bind the published snapshot with `finance_context_save` and any account rollups with `finance_map_save`. Use `"business_key"` only when the file carries genuine source keys.
 
 Save the analysis requirements before calculation, including the statement question, scope, required metrics, and requested drilldowns. Use `run_metric` when the requested statement work fits a management P&L, ratio, account total, or control total. Use `explain_variance` for supported statement bridges, `finance_scenario_save` / `finance_scenario_run` when the answer depends on a saved actual/budget/forecast scenario, `drilldown_fact` for source-backed cells from the run, and `save_explanation_draft` for editable commentary with calculation claims tied to real run fields. Continue with SQL/Python for statement layouts, cash-flow reconstruction, disclosure tables, or presentation work outside those contracts. Do not claim an ERP or data-warehouse connection unless this session has configured and named one.
 
-For explanation quality, follow the analysis-mode explanation contract in `FOUNDRY.md`: prepare facts and automatic supporting tables from successful runs with `prepare_explanation`, draft with stable `fact_ids` and `{{fact:FACT_ID}}` value placeholders, then check the current text with `validate_explanation`. Use the returned `quality` and `completion` state for bounded repair: at most two targeted repair-and-check rounds, stopping on `no_progress`. Reuse only applicable scoped business context. Separate financial contributions from supported operational causes and manager judgment; preserve an editable draft when evidence is incomplete.
+For explanation quality, follow the analysis-mode explanation contract in `FOUNDRY.md`: prepare facts and automatic supporting tables from successful runs with `prepare_explanation`, draft with stable `{{fact:FACT_ID}}` value placeholders. Saving already validates the current text; use `validate_explanation` separately when checking an existing draft or a specific unsaved revision. Use the returned `quality` and `completion` state for bounded repair: at most two targeted repair-and-check rounds, stopping on `no_progress`. Reuse only applicable scoped business context. Separate financial contributions from supported operational causes and manager judgment; preserve an editable draft when evidence is incomplete.
+
+### Finish the current statement request
+
+For a source-bound management statement template, follow this sequence:
+
+1. Check the existing context, scenario, source snapshots and confirmed boundaries. Register the complete current question with `analysis_requirements_save` **before** `finance_scenario_run`; include the source bindings, scope, exact registered output metric keys and their template_id dimension. If dimensions.metric_key is supplied, it must name the same output as metric; a generic profit requirement does not rename a net_income output. Use the scenario and registered metric catalog returned by the tools. Do not invent a second calculation path when the native scenario covers the request.
+2. Run the scenario after registration. Verify its `requirements_id` and semantic fingerprint belong to that registration, and inspect all model checks and evidence eligibility. If requirements changed, calculate a new run; a later registration cannot certify an earlier run.
+3. Call `prepare_explanation` for that successful run. Its default `writing` view separates output `facts` from source input_facts; `fact_view: "inspection"` exposes the complete fact set for inspection. Input amount eligibility is unchanged in both views. When save_template_spec is present, send that short spec to `save_explanation_draft` and add only a brief qualitative_note for necessary qualitative treatment or limitations; omit amounts, formulas, counts and repeated check descriptions. Do not add body, body_template, document, claims or fact_ids to this short spec: the service regenerates the current authorized template and validates the complete saved draft. This avoids copying the table and its references. If only draft_template is present, use that complete editable save spec as the starting point: it contains the requested eligible output table, exact fact tokens, run IDs and current requirements ID. Its empty `claims` and `fact_ids` arrays are intentional: the server generates exact claims from the tokens and a repair does not inherit obsolete claims. Do not copy claims, repeat the table in prose, or recompute formulas. When the template is absent, select each requested eligible fact by metric_identity, period and unit, retain its reference_template.body_token and top-level `run_ids`; row numbers are zero-based. Ineligible facts remain ineligible.
+4. Keep the draft concise. Tie headings and prose to the same-contract, same-period forecast_performance; forecast assumptions do not prove actual fulfilment. Add only necessary treatment and limitations; the run retains bindings and checks. Every additional financial amount or formula operand requires its own eligible citation. State an evidence gap for unsupported input allocations. Statement totals alone do not establish transaction composition. Recognize revenue under the fulfilment assumption; do not assign that recognition basis to collection. Collection against an identified receivable reduces that receivable: name the object and distinguish partial collection from full settlement. Reconcile its opening balance, specifically allocated receipts, other adjustments and remaining balance. Say fully settled only when sources establish that the same receivable was paid in full with no balance remaining; partial collection leaves an unpaid balance. Aggregate receipts, even when larger than one receivable, do not establish its allocation. Keep write-offs or other adjustments separate from cash collection. Describe tracing to the receivable's origin separately; do not pair revenue and collection respectively with fulfilment recognition and receivable creation, or say a collection offsets another collection. Fulfilled cash sales may recognize revenue and receive cash without assuming a prior credit sale. Unpaid consideration creates the outstanding balance; collection against an identified receivable reduces it. Specific old-receivable, unpaid credit-sale or settled cash-sale allocations need their own source evidence. Passing model checks do not mean all check differences are zero. Use returned structure_counts.body_template for optional counts; omit unnecessary input and boundary counts.
+   A performance or allocation month establishes the service period, not the contract signing date. Without archived signing-date evidence, call it a current-period fulfilled contract or service; do not describe it as a newly signed contract or a new contract of that month. A contract identifier does not establish its signing date.
+5. Save with `save_explanation_draft` and inspect its actual `quality` and `completion.status`. The save performs validation. Also inspect its nonblocking `readability` suggestions: ambiguous recognition/collection pairing, a repeated settlement object or an unclear parenthetical modifier calls for a targeted clarification within the existing repair budget, saved as a revision without overwriting history. These suggestions do not change financial quality or completion; an unresolved suggestion remains a wording limitation. Current semantic checks do not cover every per-receivable full-settlement assertion: readability clear, quality pass and a completed receipt do not replace independent review of the saved prose against allocation sources. Once no such wording clarification remains, a separate validation or save is unnecessary when the persisted receipt is `complete`. End by copying that saved receipt’s final_response exactly. It binds the actual saved draft and pending professional-review limitation. Do not expand it to claim that detailed checks were saved in the body: the body contains a pass summary, and individual checks remain in the run. Do not restate amounts, formulas or check differences in the final reply; do not load the full analysis state. The save receipt is sufficient to confirm this workflow; pending professional review remains a stated limitation. If repair is required, change only the diagnosed issue within the existing repair budget, keep all required outputs and clear obsolete claims explicitly. Do not repair a qualification failure by renaming the metric or repeating the same ineligible fact. A cancelled call requires inspection of persisted state before any retry; incomplete receipts must be reported accurately.
+
+Large tool responses may use `$foundry_ref` JSON pointers for exact repeated objects. A `foundry.model-result.v2` packet instead contains `columns`, `values`, and `result`: decode `{$r:[n,items]}` by pairing `columns[n]` with the items, and decode `{$v:n}` from `values[n]`, recursively. These preserve the original values and qualifications. A save receipt marked `full_result:false` explicitly lists omitted saved-document and supporting-detail paths; inspect the retained quality issues and completion receipt, and use `prepare_explanation` / `drilldown_fact` for facts and provenance. Never infer approval from omitted detail or an overflow warning. The complete original tool result remains archived.
 
 When visuals help management compare the result, read [report-visuals.md](../report-visuals.md) through `method-resource {skill: "financial-statements", resource: "report-visuals.md"}`. Use `bar` for category or actual/budget comparisons, `line` for ordered periods, and `flow` for explicitly attributed explanatory steps. Archive a successful run using `chart_deliverable_save`, then reference its `chart_id` in a `reportVisual` block of `save_explanation_draft.spec.document`. Keep values bound to the run, preserve units and missing/negative values, and attach the figure's supported conclusion and source. A visual does not certify a financial claim; retain the existing facts, claims and checks. Use the data table when exact lookup is the purpose or the figure is too dense.
 
@@ -190,42 +215,29 @@ Provide:
 4. Suggested follow-up questions for unexplained variances
 5. Offer to drill into any specific variance with `/variance-analysis`
 
-## GAAP Presentation Requirements
+## Accounting basis, purpose and effective period
 
-### Income Statement (ASC 220 / IAS 1)
+Route professional presentation by the confirmed accounting basis, reporting
+purpose, entity scope, fiscal-year start and effective period. The reference formats
+below are working-paper examples and do not establish full compliance with CAS,
+IFRS or US GAAP. Missing basis information need not prevent ordinary arithmetic;
+it does limit statutory presentation and basis-sensitive recognition conclusions.
 
-- Present all items of income and expense recognized in a period
-- Classify expenses either by nature (materials, labor, depreciation) or by function (COGS, R&D, S&M, G&A) — function is more common for US companies
-- If classified by function, disclose depreciation, amortization, and employee benefit costs by nature in the notes
-- Present operating and non-operating items separately
-- Show income tax expense as a separate line
-- Extraordinary items are prohibited under both US GAAP and IFRS
-- Discontinued operations presented separately, net of tax
+| Basis / purpose | Required route and boundary |
+| --- | --- |
+| CAS statutory statements | Apply the relevant Chinese standards and the entity's confirmed policies. CAS 31 requires the direct method for operating cash flows, with the required reconciliation/disclosures. An indirect management bridge is not a CAS statutory cash-flow statement. |
+| IFRS statements | Determine the annual reporting period and documented early adoption. IFRS 18 applies for annual periods beginning on or after 2027-01-01, with early adoption permitted; do not assume IAS 1 already ceased to apply to a 2026 non-early-adopter. Use the selected effective presentation rules and applicable IAS 7 requirements. |
+| US GAAP statements | Use the applicable ASC topics and effective amendments for that entity; ASC 210/220/230 references are US-specific and must not be applied as universal CAS or IFRS rules. Verify any presentation or policy exception before asserting compliance. |
+| Management reporting / forecast | State the management purpose, definitions, assumptions and reconciliation to source books. An indirect cash bridge may aid planning, but does not certify statutory presentation under any basis. |
 
-**Common presentation considerations:**
+Income, balance-sheet, cash-flow, revenue, lease, impairment and tax rules are not
+interchangeable across bases. A method must be declared supported for the specific
+basis, purpose and period before a professional completion claim. Otherwise deliver
+the supported calculations and identify the specific unsupported judgment or data
+gap. No standard is inferred from the language of a workbook or the user's location.
 
-- **Revenue disaggregation:** ASC 606 requires disaggregation of revenue into categories that depict how the nature, amount, timing, and uncertainty of revenue are affected by economic factors
-- **Stock-based compensation:** Classify within the functional expense categories (R&D, S&M, G&A) with total SBC disclosed in notes
-- **Restructuring charges:** Present separately if material, or include in operating expenses with note disclosure
-- **Non-GAAP adjustments:** If presenting non-GAAP measures (common in earnings releases), clearly label and reconcile to GAAP
-
-### Balance Sheet (ASC 210 / IAS 1)
-
-- Distinguish between current and non-current assets and liabilities
-- Current: expected to be realized, consumed, or settled within 12 months (or the operating cycle if longer)
-- Present assets in order of liquidity (most liquid first) — standard US practice
-- Accounts receivable shown net of allowance for credit losses (ASC 326)
-- Property and equipment shown net of accumulated depreciation
-- Goodwill is not amortized — tested for impairment annually (ASC 350)
-- Leases: recognize right-of-use assets and lease liabilities for operating and finance leases (ASC 842)
-
-### Cash Flow Statement (ASC 230 / IAS 7)
-
-- Indirect method is most common (start with net income, adjust for non-cash items)
-- Direct method is permitted but rarely used (requires supplemental indirect reconciliation)
-- Interest paid and income taxes paid must be disclosed (either on the face or in the notes)
-- Non-cash investing and financing activities disclosed separately (e.g., assets acquired under leases, stock issued for acquisitions)
-- Cash equivalents: short-term, highly liquid investments with original maturities of 3 months or less
+Source anchors: [CAS 31](https://kjs.mof.gov.cn/zt/kjzzss/kuaijizhunzeshishi/200806/t20080618_46250.htm)
+and [IFRS 18](https://www.ifrs.org/issued-standards/list-of-standards/ifrs-18-presentation-and-disclosure-in-financial-statements/).
 
 ## Balance Sheet Reference Format
 
@@ -281,6 +293,9 @@ TOTAL LIABILITIES AND STOCKHOLDERS' EQUITY
 ```
 
 ## Cash Flow Statement Reference Format (Indirect Method)
+
+This format is a management reconciliation example. For CAS statutory operating
+cash flows, use the required direct method and the applicable disclosures instead.
 
 ```
 CASH FLOWS FROM OPERATING ACTIVITIES

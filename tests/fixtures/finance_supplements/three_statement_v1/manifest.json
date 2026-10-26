@@ -1,0 +1,1325 @@
+{
+  "schema_version": "finance-independent-three-statement-v1",
+  "suite_id": "professional_supplement_v2",
+  "status": "frozen",
+  "contract_path": "contract.json",
+  "cases": [
+    {
+      "case_id": "SUP-E18-01--management-closed",
+      "family_id": "E18",
+      "public_files": [
+        "public/SUP-E18-01--management-closed/request.json",
+        "public/SUP-E18-01--management-closed/template_inputs.json",
+        "public/SUP-E18-01--management-closed/model_boundary.json",
+        "public/SUP-E18-01--management-closed/transaction_allocation.json"
+      ],
+      "oracle_path": "private/oracles/SUP-E18-01--management-closed.json",
+      "source_bindings": {
+        "opening_cash": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "opening_cash"
+          },
+          "aggregation": "single",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "opening_receivables": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "opening_receivables"
+          },
+          "aggregation": "single",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "opening_ppe": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "opening_ppe"
+          },
+          "aggregation": "single",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "opening_payables": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "opening_payables"
+          },
+          "aggregation": "single",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "opening_debt": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "opening_debt"
+          },
+          "aggregation": "single",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "opening_equity": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "opening_equity"
+          },
+          "aggregation": "single",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "revenue": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "revenue"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "customer_receipts": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "customer_receipts"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "operating_expense": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "operating_expense"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "supplier_payments": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "supplier_payments"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "depreciation": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "depreciation"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "capex": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "capex"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "debt_drawdowns": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "debt_drawdowns"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "debt_principal_repayments": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "debt_principal_repayments"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "dividends_paid": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "dividends_paid"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "closing_restricted_cash": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "closing_restricted_cash"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        }
+      },
+      "boundary_bindings": {
+        "boundary.inventory_movement": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "inventory_movement"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.tax_effect": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "tax_effect"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.interest_effect": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "interest_effect"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.vat_effect": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "vat_effect"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.fx_effect": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "fx_effect"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.oci_effect": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "oci_effect"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.noncash_investing_financing": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "noncash_investing_financing"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.other_balance_sheet_movements": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "other_balance_sheet_movements"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        }
+      },
+      "source_binding_names": [
+        "opening_cash",
+        "opening_receivables",
+        "opening_ppe",
+        "opening_payables",
+        "opening_debt",
+        "opening_equity",
+        "revenue",
+        "customer_receipts",
+        "operating_expense",
+        "supplier_payments",
+        "depreciation",
+        "capex",
+        "debt_drawdowns",
+        "debt_principal_repayments",
+        "dividends_paid",
+        "closing_restricted_cash"
+      ],
+      "boundary_binding_names": [
+        "boundary.inventory_movement",
+        "boundary.tax_effect",
+        "boundary.interest_effect",
+        "boundary.vat_effect",
+        "boundary.fx_effect",
+        "boundary.oci_effect",
+        "boundary.noncash_investing_financing",
+        "boundary.other_balance_sheet_movements"
+      ]
+    },
+    {
+      "case_id": "SUP-E19-01--old-ar-collection",
+      "family_id": "E19",
+      "public_files": [
+        "public/SUP-E19-01--old-ar-collection/request.json",
+        "public/SUP-E19-01--old-ar-collection/template_inputs.json",
+        "public/SUP-E19-01--old-ar-collection/model_boundary.json",
+        "public/SUP-E19-01--old-ar-collection/transaction_allocation.json"
+      ],
+      "oracle_path": "private/oracles/SUP-E19-01--old-ar-collection.json",
+      "source_bindings": {
+        "opening_cash": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "opening_cash"
+          },
+          "aggregation": "single",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "opening_receivables": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "opening_receivables"
+          },
+          "aggregation": "single",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "opening_ppe": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "opening_ppe"
+          },
+          "aggregation": "single",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "opening_payables": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "opening_payables"
+          },
+          "aggregation": "single",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "opening_debt": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "opening_debt"
+          },
+          "aggregation": "single",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "opening_equity": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "opening_equity"
+          },
+          "aggregation": "single",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "revenue": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "revenue"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "customer_receipts": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "customer_receipts"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "operating_expense": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "operating_expense"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "supplier_payments": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "supplier_payments"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "depreciation": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "depreciation"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "capex": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "capex"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "debt_drawdowns": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "debt_drawdowns"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "debt_principal_repayments": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "debt_principal_repayments"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "dividends_paid": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "dividends_paid"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "closing_restricted_cash": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "closing_restricted_cash"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        }
+      },
+      "boundary_bindings": {
+        "boundary.inventory_movement": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "inventory_movement"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.tax_effect": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "tax_effect"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.interest_effect": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "interest_effect"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.vat_effect": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "vat_effect"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.fx_effect": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "fx_effect"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.oci_effect": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "oci_effect"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.noncash_investing_financing": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "noncash_investing_financing"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.other_balance_sheet_movements": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "other_balance_sheet_movements"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        }
+      },
+      "source_binding_names": [
+        "opening_cash",
+        "opening_receivables",
+        "opening_ppe",
+        "opening_payables",
+        "opening_debt",
+        "opening_equity",
+        "revenue",
+        "customer_receipts",
+        "operating_expense",
+        "supplier_payments",
+        "depreciation",
+        "capex",
+        "debt_drawdowns",
+        "debt_principal_repayments",
+        "dividends_paid",
+        "closing_restricted_cash"
+      ],
+      "boundary_binding_names": [
+        "boundary.inventory_movement",
+        "boundary.tax_effect",
+        "boundary.interest_effect",
+        "boundary.vat_effect",
+        "boundary.fx_effect",
+        "boundary.oci_effect",
+        "boundary.noncash_investing_financing",
+        "boundary.other_balance_sheet_movements"
+      ]
+    },
+    {
+      "case_id": "SUP-E19-02--fulfilled-cash-sale",
+      "family_id": "E19",
+      "public_files": [
+        "public/SUP-E19-02--fulfilled-cash-sale/request.json",
+        "public/SUP-E19-02--fulfilled-cash-sale/template_inputs.json",
+        "public/SUP-E19-02--fulfilled-cash-sale/model_boundary.json",
+        "public/SUP-E19-02--fulfilled-cash-sale/transaction_allocation.json"
+      ],
+      "oracle_path": "private/oracles/SUP-E19-02--fulfilled-cash-sale.json",
+      "source_bindings": {
+        "opening_cash": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "opening_cash"
+          },
+          "aggregation": "single",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "opening_receivables": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "opening_receivables"
+          },
+          "aggregation": "single",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "opening_ppe": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "opening_ppe"
+          },
+          "aggregation": "single",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "opening_payables": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "opening_payables"
+          },
+          "aggregation": "single",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "opening_debt": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "opening_debt"
+          },
+          "aggregation": "single",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "opening_equity": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "opening_equity"
+          },
+          "aggregation": "single",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "revenue": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "revenue"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "customer_receipts": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "customer_receipts"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "operating_expense": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "operating_expense"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "supplier_payments": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "supplier_payments"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "depreciation": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "depreciation"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "capex": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "capex"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "debt_drawdowns": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "debt_drawdowns"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "debt_principal_repayments": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "debt_principal_repayments"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "dividends_paid": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "dividends_paid"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "closing_restricted_cash": {
+          "alias": "template_inputs",
+          "column": "amount",
+          "selector": {
+            "input_name": "closing_restricted_cash"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        }
+      },
+      "boundary_bindings": {
+        "boundary.inventory_movement": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "inventory_movement"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.tax_effect": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "tax_effect"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.interest_effect": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "interest_effect"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.vat_effect": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "vat_effect"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.fx_effect": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "fx_effect"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.oci_effect": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "oci_effect"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.noncash_investing_financing": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "noncash_investing_financing"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        },
+        "boundary.other_balance_sheet_movements": {
+          "alias": "model_boundary",
+          "column": "amount",
+          "selector": {
+            "boundary_name": "other_balance_sheet_movements"
+          },
+          "aggregation": "single",
+          "period": "2026-10",
+          "scope": {
+            "organization": "Supplement Fixture Co",
+            "ledger": "supplement-ledger-01",
+            "scenario": "management-forecast"
+          },
+          "currency": "CNY",
+          "unit": "元"
+        }
+      },
+      "source_binding_names": [
+        "opening_cash",
+        "opening_receivables",
+        "opening_ppe",
+        "opening_payables",
+        "opening_debt",
+        "opening_equity",
+        "revenue",
+        "customer_receipts",
+        "operating_expense",
+        "supplier_payments",
+        "depreciation",
+        "capex",
+        "debt_drawdowns",
+        "debt_principal_repayments",
+        "dividends_paid",
+        "closing_restricted_cash"
+      ],
+      "boundary_binding_names": [
+        "boundary.inventory_movement",
+        "boundary.tax_effect",
+        "boundary.interest_effect",
+        "boundary.vat_effect",
+        "boundary.fx_effect",
+        "boundary.oci_effect",
+        "boundary.noncash_investing_financing",
+        "boundary.other_balance_sheet_movements"
+      ]
+    }
+  ],
+  "artifact_hashes": {
+    "contract.json": "3f646f634a12e43852d21acd70731113e4557b65da05d12ebe654e30fc18817c",
+    "private/oracles/SUP-E18-01--management-closed.json": "3a8b069e2c52ddedd754c19d7616431c1a967c8bd0451d3ef63aa5403e878d43",
+    "private/oracles/SUP-E19-01--old-ar-collection.json": "88cfdcd23934947d2ccefa974c39f527bdf2ee6d13dec98370b8e112d2067b07",
+    "private/oracles/SUP-E19-02--fulfilled-cash-sale.json": "dcb9438218a8315cf62c5822eeef805375580b7a56b6cc3577324600aa9047cc",
+    "public/SUP-E18-01--management-closed/model_boundary.json": "a1c8fa221c95a7ada33dc5eeff31308706cef195ce48d1716c6eed0a59ef512e",
+    "public/SUP-E18-01--management-closed/request.json": "df2d437d3240c8cf98d7f9704ff2632f448572697b4634a7e4dac63c22d522f2",
+    "public/SUP-E18-01--management-closed/template_inputs.json": "9ed50116d6546c8d855d3e7368f085c9a7e2d15fd212f0f5309cf4bf2f2fccfe",
+    "public/SUP-E18-01--management-closed/transaction_allocation.json": "081ad95a4ef08ef1ffef7989a89dcf7bd462445d9f6728543c7b96b3503a544f",
+    "public/SUP-E19-01--old-ar-collection/model_boundary.json": "a1c8fa221c95a7ada33dc5eeff31308706cef195ce48d1716c6eed0a59ef512e",
+    "public/SUP-E19-01--old-ar-collection/request.json": "9c78849532407221f04519e02c87809acdd37e0fcd682433248dfb8063403346",
+    "public/SUP-E19-01--old-ar-collection/template_inputs.json": "d466d2f3d01e4e8a24f7e3053faa6ca749a11477724f0db98682fdaf32c48841",
+    "public/SUP-E19-01--old-ar-collection/transaction_allocation.json": "30ee1be1db359ef19ea3fdaa65d255609739334ba60a22d0e408ad7e0538cd4a",
+    "public/SUP-E19-02--fulfilled-cash-sale/model_boundary.json": "a1c8fa221c95a7ada33dc5eeff31308706cef195ce48d1716c6eed0a59ef512e",
+    "public/SUP-E19-02--fulfilled-cash-sale/request.json": "0811521c31d5a1e3351c94382bbabcb62752177ab649bd4902f701ed00173fee",
+    "public/SUP-E19-02--fulfilled-cash-sale/template_inputs.json": "35e08a11b918f7ee59ecde8ecbd7fdebf40f61de7d7f930cca346e9d086be799",
+    "public/SUP-E19-02--fulfilled-cash-sale/transaction_allocation.json": "08b3ba55c7a84efe733abb6b15ec41e30e79297aae966c7a884afe14183195d2"
+  },
+  "original_release_credit": 0,
+  "candidate_revision": 3,
+  "frozen_at": "2026-10-24T09:37:11.250924+00:00",
+  "scope": "independent synthetic management forecast; zero original release credit",
+  "original_frozen_manifest_sha256": "54f91a277c669e33329d2aaa48728a7db551ed80810e750bb5856f7c91d4ad4d",
+  "stage1_gate_sha256": "75d0f48b9551e177a3b4a254ca160b9037f5ce911b2e0110dd9d162441c91e1c",
+  "pre_freeze_review_sha256": "59be56a9282c23e5e0f2da4735782fadd6dba3d31db929f8d34fa639840abaf6",
+  "candidate_index_sha256": "fd9694d3ac8015a3b4dd33b8e1302b371d5a965389bf3011baac6ee1bc5939a0",
+  "freeze_tool_sha256": "7fb84bebdbeb3e2ecc0bfe2ae34fac3b6fe19c2e02a783f476130acb568e4188",
+  "validation": {
+    "numeric_assertions": 39,
+    "opening_balance_checks": 3,
+    "closing_balance_checks": 3,
+    "indirect_cash_bridges": 3,
+    "product_runs": 0,
+    "model_runs": 0,
+    "professional_signatures": 0
+  }
+}

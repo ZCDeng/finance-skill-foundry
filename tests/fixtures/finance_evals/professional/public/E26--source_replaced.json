@@ -1,0 +1,25 @@
+{
+  "case_id": "E26--source_replaced",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "previous_result",
+      "value": "passed"
+    },
+    {
+      "name": "change",
+      "value": "source_hash:old→new"
+    },
+    {
+      "name": "archived_task",
+      "value": "exists"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "资料发生所列变化后，检查旧结果和完成回执能否复用。"
+}

@@ -1,0 +1,25 @@
+{
+  "case_id": "E04--base",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "net_revenues",
+      "value": "100,100"
+    },
+    {
+      "name": "vat_factors",
+      "value": "1.06,1.13"
+    },
+    {
+      "name": "cash_receipts",
+      "value": "106,113"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "按各业务税口径计算应收和同口径收缴比。"
+}

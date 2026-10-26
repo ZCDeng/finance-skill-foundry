@@ -1,0 +1,32 @@
+{
+  "allowed_paths": [
+    "纯在途调节不重复过账；跟踪后续结清"
+  ],
+  "author": "Codex development fixture author",
+  "case_id": "E10--timing_only",
+  "critical_dimensions": [
+    "numeric_basis",
+    "recognition_basis",
+    "scope_period",
+    "authority_completion"
+  ],
+  "derivation": "Decimal arithmetic grammar for numeric checks; literal reviewed accounting identities and stated policy for behavioral checks",
+  "expected_trigger": "required",
+  "human_review_status": "not_reviewed",
+  "knowledge_status": "development_visible_not_blind",
+  "numeric_checks": [
+    {
+      "absolute_tolerance": "0",
+      "expected": "950",
+      "expression": "1050+100-200",
+      "metric": "adjusted_bank"
+    }
+  ],
+  "paired_control_id": null,
+  "required_behaviors": [
+    "纯在途调节不重复过账；跟踪后续结清"
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "second_human_reviewer": null,
+  "source": "reviewed E01-E32 specification; synthetic stated business facts; no production output used as truth"
+}

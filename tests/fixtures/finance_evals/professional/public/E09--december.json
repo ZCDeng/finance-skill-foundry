@@ -1,0 +1,33 @@
+{
+  "case_id": "E09--december",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "prepay_date",
+      "value": "2026-10-01"
+    },
+    {
+      "name": "amount",
+      "value": "120"
+    },
+    {
+      "name": "months",
+      "value": "12"
+    },
+    {
+      "name": "approved_policy",
+      "value": "按月，从10月开始"
+    },
+    {
+      "name": "cutoff",
+      "value": "2026-12-31"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "计算12月末预付费用累计摊销及余额。"
+}

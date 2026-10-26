@@ -1107,6 +1107,19 @@ def test_a_session_runs_its_control_by_the_files_it_may_read(tmp_path):
     assert [row["result"]["status"] for row in FinanceStore(task).finance_controls_list({})["controls"]] == ["stale"]
 
 
+def test_session_recomputing_hidden_upload_staleness_retains_captured_rule_identity(tmp_path):
+    packs = _packs(tmp_path / "packs")
+    task, _var = _control_world(tmp_path, "upload_before_run", packs)
+    manager = FinanceStore(task)
+    stored = manager._list("control_runs")[-1]["results"][0]
+    assert stored["status"] == "stale"
+    control = manager._control_heads()[0]
+    session = FinanceStore(task, snapshot_ids=list(control["bindings"].values()), session_id="sess")
+    projected = session.finance_controls_list({})["controls"][0]["result"]
+    assert projected["status"] == "break" and projected["difference"] == "11655"
+    assert projected["professional_identity"] == stored["professional_identity"]
+
+
 def test_superseded_snapshots_counts_only_the_replacements_a_reader_may_read(tmp_path):
     from foundry.finance_controls import superseded_snapshots
 

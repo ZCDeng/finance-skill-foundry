@@ -22,7 +22,7 @@ Methodology and best practices for account reconciliation, including GL-to-suble
 
 Start with `list_finance_context` to identify the registered ledgers, organizations, periods, source snapshots, account maps, and scenario bindings. If GL, bank, subledger, or intercompany files are current task uploads and not yet registered, use `finance_source_refresh` as a file-backed immutable snapshot. Use `file_identity_policy: "snapshot_only"` for ordinary balance or listing files without real document-line identifiers, and use `"business_key"` only for exports with genuine source keys. Bind the published snapshot and explicit scope with `finance_context_save` before relying on it.
 
-Save the reconciliation requirements before calculation, including the account scope, required tie-outs, and requested drilldowns. Use `run_metric` for control totals, account totals, and ratio checks that fit the finance metric contract. Use `drilldown_fact` only for source-backed cells from a saved run, and `save_explanation_draft` for the reconciliation narrative and exception support. Use `finance_scenario_save` / `finance_scenario_run` when a reconciliation depends on a named scenario such as an aging cut or cash-timing view. For receivables aging status cuts such as disputed or active invoices, use native `inputs.status_filter` with source/manager status mapping and inspect included or excluded invoices with `drilldown_fact.section`. Continue with SQL/Python for matching logic, exception aging, many-to-many joins, and reconciliations the finance tools do not model. Do not post entries, initiate payments, or claim actual ERP access unless a configured connector is named in the session.
+Save the reconciliation requirements before calculation, including the account scope, required tie-outs, and requested drilldowns. Resolve registration errors first. Preserve every original source binding in the finance context, including recognition evidence that is not part of the arithmetic table. Use `control_totals` for full totals, or a real ledger account identity with account_total.accounts; generic amount results cannot replace a registered account identity. After any revision, rerun affected calculations before preparing and saving the same current run set. Use `run_metric` for control totals, account totals, and ratio checks that fit the finance metric contract. Use `drilldown_fact` only for source-backed cells from a saved run, and `save_explanation_draft` for the reconciliation narrative and exception support. Use `finance_scenario_save` / `finance_scenario_run` when a reconciliation depends on a named scenario such as an aging cut or cash-timing view. For receivables aging status cuts such as disputed or active invoices, use native `inputs.status_filter` with source/manager status mapping and inspect included or excluded invoices with `drilldown_fact.section`. Continue with SQL/Python for matching logic, exception aging, many-to-many joins, and reconciliations the finance tools do not model. Do not post entries, initiate payments, or claim actual ERP access unless a configured connector is named in the session.
 
 For explanation quality, follow the analysis-mode explanation contract in `FOUNDRY.md`: prepare facts and automatic supporting tables from successful runs with `prepare_explanation`, draft with stable `fact_ids` and `{{fact:FACT_ID}}` value placeholders, then check the current text with `validate_explanation`. Use the returned `quality` and `completion` state for bounded repair: at most two targeted repair-and-check rounds, stopping on `no_progress`. Reuse only applicable scoped business context. Separate financial contributions from supported operational causes and manager judgment; preserve an editable draft when evidence is incomplete.
 
@@ -117,16 +117,48 @@ Reconcile balances between related entities to ensure they net to zero on consol
 
 ## Reconciling Item Categorization
 
+Before matching or drawing a cut-off conclusion, read [close-checklist.md](../close-checklist.md)
+with `method-resource {skill: "reconciliation", resource: "close-checklist.md"}` for
+F04/F05 coverage, duplicate keys and rollforward rules. Read [model-checks.md](../model-checks.md)
+with `method-resource {skill: "reconciliation", resource: "model-checks.md"}` and
+[accounting-basis.md](../accounting-basis.md) with
+`method-resource {skill: "reconciliation", resource: "accounting-basis.md"}` for
+applicable policy and evidence identity. Every input belongs in a matched or
+unmatched set; those sets must reconstruct both source totals.
+
 ### Category 1: Timing Differences
 
-Items that exist because of normal processing timing and will clear without action:
+Items already recorded in the GL can be bank timing differences when supported by
+transaction evidence and the correct period cut-off:
 
 - **Outstanding checks:** Checks issued and recorded in GL, pending bank clearance
 - **Deposits in transit:** Deposits made and recorded in GL, pending bank credit
-- **In-transit transactions:** Items posted in one system but pending interface to the other
-- **Pending approvals:** Transactions awaiting approval to post in one system
+- **Interface delays:** inspect both records and cut-off; an interface delay alone does not establish correct period recognition
 
-**Expected resolution:** These items should clear within the normal processing cycle (typically 1-5 business days). No adjusting entry needed.
+**Expected resolution:** Record the expected clearing date from the actual process
+and follow up with subsequent settlement evidence. A valid outstanding cheque or
+deposit already recorded correctly need not generate a duplicate GL adjustment.
+Do not assign a universal clearing period or assume every timing difference needs
+no adjustment. Subsequent clearance is evidence, not an automatic change to the
+period-end recognition judgment.
+
+A source flag such as `service_completed=yes` establishes operational completion
+only. Before proposing accounting recognition, establish whether the entity
+received or provided the service, its economic nature, contract or obligation,
+period, and relevant GL account scope. A subledger/GL difference proves a
+reconciliation difference; it does not by itself prove an expense, liability,
+revenue, asset, or a missing journal entry. A received service may be an expense
+or an asset depending on its nature and the applicable policy. Keep unresolved
+direction or recognition facts visible; use conditional illustrations rather
+than a definite debit/credit recommendation when those facts are absent.
+
+An **unrecorded obligation** for a documented service received before period end
+is a cut-off/accrual question when the obligation and appropriate account basis
+are supported. Investigate the missing recognition and prepare an adjustment
+draft for authorized review. When an item is pending approval, that status alone does not justify
+omitting a supported expense, asset or liability; approval status governs the
+authorized action and does not establish the economic substance. Foundry does
+not post the adjustment.
 
 ### Category 2: Adjustments Required
 

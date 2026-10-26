@@ -55,6 +55,25 @@ RESULT_FIELDS = frozenset(
         "fact_ids",
         "no_progress",
         "run_id",
+        # Native collection component inputs and source-bound explanation fields.
+        "current_due",
+        "current_collection",
+        "opening_ar",
+        "arrears_collection",
+        "context_id",
+        "parent_id",
+        "scenario_id",
+        "run_ids",
+        "requirements_id",
+        "semantic_fingerprint",
+        "display_value",
+        "fact_id",
+        "draft_id",
+        # Source-bound transaction review inputs and qualification result.
+        "policy_id",
+        "source_bindings",
+        "proposed_entries",
+        "source_bound_transaction_check_requires_professional_review",
     }
 )
 
@@ -214,13 +233,12 @@ def _method_resource_errors(tree: Path, relative: Path, text: str) -> list[str]:
     owner = relative.parts[0] if len(relative.parts) == 2 and relative.name == "SKILL.md" else None
     references = METHOD_RESOURCE_REF.findall(text)
     errors = []
-    if owner in BUNDLED_IDS and not references:
+    if owner in SKILL_IDS and not references:
         errors.append(f"{relative}: companion notes are no longer referenced")
     for skill, resource in references:
-        # read_method_resource serves any of the four method ids, whichever skill
-        # is loaded, and never a pack id. A method's own notes name the method
-        # itself; packs and root notes may name any bundled method.
-        if skill not in BUNDLED_IDS:
+        # All eight existing entry ids share the same fixed resource allowlist.
+        # A method's own notes name that method; packs may route to other methods.
+        if skill not in SKILL_IDS:
             errors.append(f"{relative}: {skill} is not a bundled method")
         elif owner in BUNDLED_IDS and skill != owner:
             errors.append(f"{relative}: references {skill}")
@@ -373,7 +391,7 @@ def test_method_resource_rule_follows_what_the_runtime_serves() -> None:
     assert _method_resource_errors(tree, pack, ref("financial-statements")) == []
     assert _method_resource_errors(tree, Path("report-visuals.md"), ref("reconciliation")) == []
     assert _method_resource_errors(tree, method, ref("journal-entry")) == []
-    assert _method_resource_errors(tree, pack, ref("close"))
+    assert _method_resource_errors(tree, pack, ref("close")) == []
     assert _method_resource_errors(tree, pack, ref("financial-statements", "packs.json"))
     assert _method_resource_errors(tree, method, ref("reconciliation"))
     assert _method_resource_errors(tree, method, "")
@@ -549,7 +567,7 @@ def test_method_resource_tool_enums_match_the_engine(plugin: Path) -> None:
 
     skills = enum("skill")
     resources = enum("resource")
-    assert sorted(skills) == sorted(BUNDLED_IDS)
+    assert sorted(skills) == sorted(SKILL_IDS)
     assert sorted(resources) == sorted(METHOD_RESOURCE_NAMES)
 
 

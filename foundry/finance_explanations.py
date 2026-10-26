@@ -12,11 +12,21 @@ from typing import Any
 from foundry.analysis import BASIS, _hash, _safe_text
 from foundry.analysis_data import json_value
 from foundry.errors import FoundryError
-from foundry.result_semantics import PERCENT_UNITS
+from foundry.result_semantics import FRACTION_UNITS, PERCENT_UNITS, POINT_UNITS
 
 FACT_TOKEN = re.compile(r"\{\{fact:([0-9a-f]{64})\}\}")
-NUMBER = re.compile(r"(?<![A-Za-z0-9_.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?[%％]?(?![A-Za-z0-9_.])")
+NUMBER = re.compile(r"(?<![A-Za-z0-9_.])[-+−－]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?[%％]?(?![A-Za-z0-9_.])")
 CLOSURE_EXPR = re.compile(r"(?P<expr>[-+]?\d+(?:\.\d+)?(?:\s*[+\-−]\s*\d+(?:\.\d+)?)+\s*=\s*[-+]?\d+(?:\.\d+)?)")
+_LABELED_CLOSURE_TERM = (
+    r"(?P<label{index}>收入|成本|费用|利润)[^\S\r\n]*"
+    r"(?P<value{index}>[-+−－]?[^\S\r\n]*\d+(?:\.\d+)?)[^\S\r\n]*"
+    r"(?P<unit{index}>[A-Za-z\u4e00-\u9fff%％/]+)"
+)
+LABELED_PROFIT_CLOSURE_EXPR = re.compile(
+    r"(?P<expr>利润(?:影响|贡献)合计[^\S\r\n]*[=＝][^\S\r\n]*"
+    + r"[^\S\r\n]*[+＋][^\S\r\n]*".join(_LABELED_CLOSURE_TERM.format(index=i) for i in range(3))
+    + r"[^\S\r\n]*[=＝][^\S\r\n]*" + _LABELED_CLOSURE_TERM.format(index=3) + r")"
+)
 DATE_SPAN = re.compile(r"\b\d{4}[-/年]\d{1,2}(?:[-/月]\d{1,2})?")
 PERIOD_RANGE = re.compile(
     r"(?<![\d.,])\d+[ \u00a0\u2009\u202f\u3000]*[-–—~至到][ \u00a0\u2009\u202f\u3000]*\d+[ \u00a0\u2009\u202f\u3000]*[年月日]"
@@ -25,7 +35,7 @@ FACT_ID = re.compile(r"^[0-9a-f]{64}$")
 PERIOD_OR_DATE = re.compile(r"^\d{4}-\d{2}(?:-\d{2})?$")
 # A bare year, yyyymm or yyyymmdd written as a row's period.
 PERIOD_IDENTIFIER = re.compile(r"(?:19|20)\d{2}(?:(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])?)?")
-EVIDENCE_APPENDIX_RENDER_VERSION = 1
+EVIDENCE_APPENDIX_RENDER_VERSION = 3
 # A difference of two percentages and how its value reads (_points_display).
 POINTS_UNIT = "百分点"
 POINTS_SUFFIX = " 个百分点"
@@ -54,12 +64,16 @@ MONEY_COLUMNS = {
     "cost",
     "expense",
     "profit",
+    "source_total",
+    "adjusted_total",
     "actual",
     "baseline",
     "contribution",
     "numerator",
     "denominator",
     "quantity_contribution",
+    "volume_contribution",
+    "mix_contribution",
     "price_contribution",
     "interaction",
     "total_variance",
@@ -107,11 +121,77 @@ POSITIVE_WORDS = ("增加", "增长", "提升", "上升", "超", "高", "有利"
 NEGATIVE_WORDS = ("减少", "下降", "降低", "少", "不利", "恶化")
 
 
+def refresh_saved_explanation(service, spec):
+    """Judge an editable saved draft as written, without regenerating its evidence.
+
+    Authoring and managed save remain different operations: this path preserves
+    the stored prose, claims and appendix, then records the current validation's
+    completion decision. A missing check therefore cannot be repaired merely by
+    asking for its receipt. Runtime saves still require their prepared/full spec
+    and operation budget; transaction review refresh keeps its existing path.
+    """
+    if not isinstance(spec, dict) or set(spec) != {"draft_id"}:
+        raise FoundryError("saved explanation refresh requires only draft_id")
+    draft = service._named_draft(spec["draft_id"])
+    service._authorize_draft(draft)
+    from foundry.finance_transaction_reviews import has_transaction, refresh_draft
+
+    if has_transaction(service.analysis, draft, allowed=service.allowed):
+        return refresh_draft(service, spec)
+    if service.session_id:
+        raise FoundryError("runtime draft refresh requires a prepared template or full draft spec")
+    from foundry.finance_completion import record_completion
+    from foundry.analysis import _quality_status_dimensions
+    from foundry.locking import exclusive
+
+    with exclusive(service.analysis._inside(service.analysis.root / "completion.lock")):
+        quality = service.validate_explanation({"draft_id": draft["id"]})
+        # save_draft builds dimensions after issue locations and requirement
+        # checks are attached. Use that same representation for this fresh
+        # validation; never substitute the stored draft's earlier verdict.
+        quality = {**quality, "status_dimensions": _quality_status_dimensions(
+            execution_status=draft.get("execution_status", "not_run"),
+            review_status=draft.get("review_status", "unreviewed"),
+            quality_issues=quality["issues"],
+            evidence_report=quality["evidence_report"],
+            consistency_report=quality["consistency_report"],
+            numeric_configured=bool(draft.get("run_ids") or draft.get("claims")),
+        )}
+        receipt = record_completion(service.analysis, draft, quality, allowed=service.allowed)
+    return {**draft, "quality": quality, "explanation_check": quality,
+            "completion": service._readable_receipt(receipt),
+            "validation_basis": "current_saved_explanation"}
+
+
+def _service_recognition_basis(analysis, runs, *, requirements_id=None, allowed=None):
+    """Qualitative source facts never come from caller claims or SQL labels."""
+    from foundry.finance_recognition_basis import recognition_basis_report
+    from foundry.finance_requirements import latest_requirements, requirements_readable
+
+    bindings = {f"{run['id']}:{alias}": dataset_id for run in runs
+                for alias, dataset_id in (run.get("bindings") or {}).items()}
+    records = []
+    current = latest_requirements(analysis, allowed)
+    # With no requirements, the manager's legacy validation ignores an unused
+    # version id. Sessions still resolve explicit ids within their own ceiling.
+    if requirements_id and (current is not None or allowed is not None):
+        requirements = analysis._get("requirements", requirements_id)
+        if requirements_readable(requirements, allowed):
+            records.append(requirements)
+    if current and all(current["id"] != record["id"] for record in records):
+        records.append(current)
+    for record in records:
+        bindings.update({f"{record['id']}:{alias}": dataset_id
+                         for alias, dataset_id in (record.get("bindings") or {}).items()})
+    return recognition_basis_report(analysis, bindings, allowed=allowed)
+
+
 def prepare_explanation(
     analysis,
     runs: list[dict],
     backgrounds: list[dict] | None = None,
     materiality: dict | None = None,
+    *, _allowed: set[str] | None = None,
 ) -> dict:
     facts: list[dict] = []
     materiality = _materiality(materiality or {})
@@ -121,11 +201,11 @@ def prepare_explanation(
         if run.get("execution_status") != "succeeded":
             raise FoundryError("explanation facts require a referenced successful run")
         diagnostics.extend(_run_diagnostics(run))
-        run_facts = _facts_for_run(run, materiality)
+        run_facts = _facts_for_run(run, materiality, analysis=analysis)
         facts.extend(run_facts)
         evidence_groups.extend(_evidence_groups_for_run(run, run_facts))
     required = _required_fact_ids(facts)
-    return {
+    prepared = {
         "schema_version": 1,
         "task_id": analysis.task.id,
         "facts": facts,
@@ -135,7 +215,604 @@ def prepare_explanation(
         "business_contexts": backgrounds or [],
         "materiality": materiality,
         "writing_guidance": WRITING_GUIDANCE,
+        "structure_counts": _structure_counts(analysis, runs, facts, allowed=_allowed),
+        "forecast_performance": _forecast_performance_sources(analysis, runs, allowed=_allowed),
     }
+    recognition_basis = _service_recognition_basis(analysis, runs, allowed=_allowed)
+    if recognition_basis["status"] != "not_applicable":
+        prepared["recognition_basis"] = recognition_basis
+    prepared["draft_template"] = _statement_draft_template(analysis, runs, prepared, allowed=_allowed)
+    from foundry.finance_native_drafts import prepare_aging_audit_metadata, prepare_native_draft
+
+    aging_audit = prepare_aging_audit_metadata(analysis, runs, allowed=_allowed)
+    if aging_audit is not None:
+        prepared["aging_audit_metadata"] = aging_audit
+    native_template = False
+    if prepared["draft_template"] is None:
+        native = prepare_native_draft(analysis, runs, prepared, allowed=_allowed)
+        prepared["draft_template"] = native["draft_template"]
+        prepared["diagnostics"].extend(native["diagnostics"])
+        native_template = prepared["draft_template"] is not None
+    if prepared["draft_template"] is None:
+        from foundry.finance_non_numeric_outcomes import prepare_undefined_draft
+
+        prepared["draft_template"] = prepare_undefined_draft(analysis, runs, allowed=_allowed)
+        native_template = prepared["draft_template"] is not None
+    if prepared["draft_template"] is not None:
+        prepared["save_template_spec"] = {
+            "use_prepared_template": True,
+            "run_ids": prepared["draft_template"]["run_ids"],
+            "requirements_id": prepared["draft_template"]["requirements_id"],
+            "qualitative_note": "",
+        }
+        # These registered monetary outputs need no generic percentage or
+        # annual-estimation examples. Keep the complete facts and provenance.
+        prepared["writing_guidance"] = {
+            "schema_version": 1,
+            "summary": "直接保存 save_template_spec；qualitative_note 仅补模板未表达的必要说明，通常一两句；不重复模板已有的期间、范围、边界数字、金额、公式或计数，无补充可留空串；必要的额外事实或金额仍须通过原有引用与 claim 校验。",
+            "rules": [
+                "不传 body/claims/fact_ids；服务保留范围与合格引用，完整校验。",
+                "通过不等于差额为零。检查 readability 的措辞建议，必要时在既有预算内局部改句并另存修订；"
+                "建议不改变财务通过。最终回复原样采用保存回执 final_response，不扩写正文内容。",
+                "收入按履约假设确认，勿把收款写成其确认对象；未收价款形成余额，对已识别债权的收款属于清偿，须写明清偿对象。来源追踪另述。"
+                "不能假定所有收款都先形成赊销应收；汇总数不能证明交易分配。"
+                "按来源核对同一债权的余额、收款归属及其他调整，只有足额清偿且无余额才称结清；"
+                "部分清偿须保留未结清余额，归属不明不判断结清。",
+                "标题与正文的履约状态均按 forecast_performance 的同合同、预测期来源说明；预测内已履约不等于现实已发生。"
+                "未知状态不推为待履约。修复只依据本次 quality.issues 的 code/text/position，不增造其他数字或原因。",
+            ],
+        }
+        if native_template:
+            prepared["writing_guidance"] = {
+                "schema_version": 1,
+                "summary": "直接保存 save_template_spec；qualitative_note 通常留空，仅补必要定性说明。",
+                "rules": [
+                    "不传 body/claims/fact_ids，不手抄数字或公式；额外数字仍须原有引用与校验。",
+                    "模板不代完成原要求或指定下钻。量价贡献不证明业务因果，账龄边界及发票审计明细见来源附录。",
+                    "保存时重新准备并完整校验。最终回复原样采用保存回执 final_response，不扩写正文内容。",
+                ],
+            }
+    return prepared
+
+
+def _forecast_performance_sources(analysis, runs, *, allowed=None):
+    """Read typed forecast assumptions from the current run's archived sources.
+
+    This is qualitative evidence only. It neither changes the native output nor
+    proves actual performance, amount eligibility, or professional signoff.
+    Shared runs follow the service's existing snapshot authorization boundary;
+    no SDK current-request or caller-session attestation is claimed here.
+    """
+    import json
+    from foundry.finance_controls import superseded_snapshots
+    from foundry.finance_driver_templates import TEMPLATE_ID
+    from foundry.finance_professional import cell_evidence_eligibility, requirement_rule_identity
+    from foundry.finance_requirements import latest_requirements, requirements_readable
+    from foundry.finance_service import FinanceStore
+
+    denied = {"status": "unverifiable", "facts": [], "counts_as_amount_evidence": False}
+    if len(runs) != 1:
+        return denied
+    try:
+        run = analysis.get_run(runs[0]["id"])
+        result = run.get("result") or {}
+        current = latest_requirements(analysis)
+        if (run.get("task_id") != analysis.task.id or run.get("engine") != "finance"
+                or run.get("execution_status") != "succeeded" or run.get("output_hash") != _hash(result)
+                or result.get("template_id") != TEMPLATE_ID or not current
+                or current["id"] != run.get("requirements_id")
+                or not requirements_readable(current, allowed)
+                or run.get("requirements_semantic_fingerprint") != analysis.fingerprint_in_view(current, allowed)):
+            return denied
+        service = FinanceStore(analysis.task, snapshot_ids=allowed)
+        service._authorize(run["bindings"])
+        service._authorize_current(current)
+        context = service._read("contexts", run["finance_context_id"])
+        scenario = service._read("scenarios", result["scenario_id"])
+        inputs = scenario["inputs"]
+        period, scope = inputs.get("period"), inputs.get("scope") or {}
+        if (not isinstance(period, str) or not re.fullmatch(r"\d{4}-\d{2}", period)
+                or scenario.get("kind") != "driver_model" or inputs.get("template_id") != TEMPLATE_ID
+                or scenario.get("context_id") != context["id"] or current.get("context_id") != context["id"]
+                or context["bindings"] != run["bindings"] or current.get("bindings") != run["bindings"]
+                or scenario.get("input_hash") != _hash(inputs) or result.get("input_hash") != scenario["input_hash"]):
+            return denied
+        date.fromisoformat(period + "-01")
+        identity = requirement_rule_identity(analysis, current, allowed=allowed)
+        if (not identity or identity.get("professional_status") != "supported"
+                or identity.get("rule_fingerprint") != (run.get("requirements_rule_identity") or {}).get("rule_fingerprint")
+                or set(run["bindings"].values()) & superseded_snapshots(
+                    analysis.task, analysis.published_datasets(), allowed=None)):
+            return denied
+        row = next(row for row in result["rows"] if row.get("template_id") == TEMPLATE_ID and row.get("metric_key"))
+        if not cell_evidence_eligibility(run, row, "value", analysis=analysis)["counts_as_amount_evidence"]:
+            return denied
+        datasets = {}
+        for alias, key in run["bindings"].items():
+            data = analysis.read_dataset(key)
+            if (data["source_hash"] != run["source_hashes"][alias]
+                    or data["data_hash"] != run["input_hashes"][alias]):
+                return denied
+            datasets[alias] = data
+        facts = []
+        for alias, data in datasets.items():
+            for index, raw in enumerate(data.get("rows") or [], 1):
+                if raw.get("record_type") != "transaction_allocation" or not isinstance(raw.get("public_record_json"), str):
+                    continue
+                record = json.loads(raw["public_record_json"])
+                # This registered envelope defines the field's forecast meaning.
+                # Case IDs, titles, aliases and arbitrary prose never select it.
+                if (not isinstance(record, dict) or record.get("schema_version") != "finance-independent-three-statement-v1"
+                        or not isinstance(record.get("scope"), dict)
+                        or any(record["scope"].get(k) != v for k, v in scope.items())):
+                    continue
+                for role in ("base_current_service", "additional_sale"):
+                    item = record.get(role)
+                    # This envelope's optional null denotes no role record,
+                    # never an unknown state, a no-sale fact or amount evidence.
+                    if item is None and (role not in record or role == "additional_sale"):
+                        continue
+                    if not isinstance(item, dict) or not isinstance(item.get("contract_id"), str) or not item["contract_id"].strip():
+                        return denied
+                    state = item.get("performed_in_forecast")
+                    fields = {"contract_id", "customer_id", "performance_period", "performed_in_forecast",
+                              "revenue", "receipt", "receipts", "no_incremental_cost_basis"}
+                    known = (type(state) is bool and item.get("performance_period") == period
+                             and not set(item) - fields)
+                    facts.append({"contract_id": item["contract_id"], "role": role,
+                        "period": period, "state": "performed" if known and state is True else "pending" if known else "unknown",
+                        "status": "verified" if known else "unverifiable",
+                        "authority": "source_defined_forecast_assumption", "counts_as_amount_evidence": False,
+                        "run_id": run["id"], "requirements_id": current["id"], "output_hash": run["output_hash"],
+                        "scenario_id": scenario["id"], "context_id": context["id"], "scope": scope,
+                        "source": {"dataset_id": data["id"], "row_index": index, "column": "public_record_json",
+                            "json_pointer": "/" + role + "/performed_in_forecast", "source_hash": data["source_hash"],
+                            "data_hash": data["data_hash"]}})
+        for fact in facts:
+            peers = [other for other in facts if other["contract_id"] == fact["contract_id"]]
+            if len({(p["state"], p["status"]) for p in peers}) > 1:
+                for peer in peers:
+                    peer["status"] = "source_conflict"
+        # A proof is a point-in-time read, never a lease on mutable authority.
+        if (current != latest_requirements(analysis) or identity != requirement_rule_identity(analysis, current, allowed=allowed)
+                or run != analysis.get_run(run["id"]) or context != service._read("contexts", context["id"])
+                or scenario != service._read("scenarios", scenario["id"])
+                or set(run["bindings"].values()) & superseded_snapshots(analysis.task, analysis.published_datasets(), allowed=None)):
+            return denied
+        for data in datasets.values():
+            fresh = analysis.read_dataset(data["id"])
+            if any(fresh[key] != data[key] for key in ("source_hash", "data_hash")):
+                return denied
+        return {"status": "verified" if facts and all(f["status"] == "verified" for f in facts) else "unverifiable",
+                "facts": facts, "counts_as_amount_evidence": False}
+    except (FoundryError, OSError, KeyError, TypeError, ValueError, StopIteration):
+        return denied
+
+
+def _statement_draft_template(analysis, runs: list[dict], prepared: dict, *, allowed=None) -> dict | None:
+    """Suggest concise prose from current qualified outputs; save still validates it.
+
+    This is ordinary editable draft input, not a completion verdict. Empty
+    explicit reference arrays prevent a repair from inheriting obsolete claims;
+    the existing save path derives exact claims from the retained body tokens.
+    """
+    counts = prepared.get("structure_counts", [])
+    required = [item for item in counts if item.get("kind") == "required_metrics"]
+    checks = [item for item in counts if item.get("kind") == "model_checks"]
+    if (len(runs) != 1 or len(required) != 1 or len(checks) != 1
+            or not required[0].get("source_bound") or checks[0].get("all_pass") is not True):
+        return None
+    run, proof = runs[0], required[0]
+    from foundry.finance_requirements import latest_requirements, requirements_readable
+    from foundry.finance_professional import requirement_rule_identity
+
+    current = latest_requirements(analysis)
+    if (not current or current.get("id") != proof.get("requirements_id")
+            or not requirements_readable(current, allowed)):
+        return None
+    fingerprint = analysis.fingerprint_in_view(current, allowed)
+    if (not fingerprint or run.get("requirements_semantic_fingerprint") != fingerprint
+            or requirement_rule_identity(analysis, current, allowed=allowed)
+            != (current.get("semantic_basis") or {}).get("professional_identity")):
+        return None
+    fact_ids = proof.get("fact_ids", [])
+    facts = [fact for fact in prepared["facts"] if fact["id"] in fact_ids]
+    if (len(facts) != len(fact_ids) or len({fact["id"] for fact in facts}) != len(facts)
+            or any(fact.get("evidence_eligibility", {}).get("counts_as_amount_evidence") is not True
+                   or fact.get("metric_identity", {}).get("metric_key") != fact.get("semantics", {}).get("metric")
+                   or fact.get("metric_identity", {}).get("template_id") != proof["template_id"]
+                   or fact.get("metric_identity", {}).get("scenario_id") != proof["scenario_id"]
+                   for fact in facts)):
+        return None
+    # Keep scope and units next to values, without importing unqualified inputs,
+    # formulas or assertions that every passing inequality has a zero difference.
+    def cell(value):
+        return str(value).replace("|", "\\|").replace("\n", " ").replace("\r", " ")
+
+    scope_parts = []
+    for key in ("organization", "ledger", "period", "scenario", "currency", "unit"):
+        values = [fact["metric_identity"].get(key) for fact in facts]
+        if any(value != values[0] for value in values):
+            return None
+        if values[0] is not None:
+            scope_parts.append(cell(values[0]))
+    lines = ["## 管理预测结果", "", "口径：" + "；".join(scope_parts) + "。",
+             "流量为期间数，存量为期末数。",
+             "本模型按收入与收款滚动应收；收入确认依履约假设，对已识别债权的收款属于清偿。"
+             "汇总数本身不能证明具体交易分配。同一债权须有来源证明足额清偿且无余额才称结清；"
+             "部分清偿仍有未结清债权。", "",
+             "| 指标 | 金额 |", "| --- | --- |"]
+    by_id = {fact["id"]: fact for fact in facts}
+    for fact_id in fact_ids:
+        fact = by_id[fact_id]
+        identity = fact["metric_identity"]
+        lines.append("| " + " | ".join((cell(identity["metric_key"]),
+                     fact["reference_template"]["body_token"])) + " |")
+    lines.extend(["", checks[0]["body_template"] + "。全部通过。",
+                  "限当前来源及已确认模型边界，仍需专业复核；不作为审定或过账授权。"])
+    return {"title": "管理预测结果与核查", "body": "\n".join(lines),
+            "run_ids": [run["id"]], "requirements_id": current["id"], "claims": [], "fact_ids": []}
+
+
+def _structure_counts(analysis, runs: list[dict], facts: list[dict], *, allowed=None) -> list[dict]:
+    """Counts describe one actual native result, never amounts or caller-supplied summaries.
+
+    Multiple runs have no implicit combined count. A requirement count also needs
+    the run's persisted requirement and a distinct fact for each exact metric.
+    These observations do not change any fact's evidence eligibility.
+    """
+    if len(runs) != 1:
+        return []
+    run = runs[0]
+    if run.get("engine") != "finance":
+        return []
+    if allowed is not None and not set((run.get("bindings") or {}).values()) <= set(allowed):
+        return []
+    from foundry.finance_requirements import requirements_readable
+
+    # The run's own sources can be readable while its captured requirement also
+    # binds private sources. Authorize that original record before exposing any
+    # requirement metadata; a visible predecessor is not its count authority.
+    requirement = None
+    if run.get("requirements_id"):
+        try:
+            record = analysis._get("requirements", run["requirements_id"])
+            if record.get("id") == run["requirements_id"] and requirements_readable(record, allowed):
+                requirement = record
+        except FoundryError:
+            pass
+    if allowed is not None:
+        run = analysis.run_in_view(run, allowed)
+    result = run.get("result") or {}
+    if (run.get("engine") != "finance" or run.get("execution_status") != "succeeded"
+            or not result.get("template_id") or not result.get("scenario_id")
+            or run.get("output_hash") != _hash(result)):
+        return []
+    binding = {"run_id": run["id"], "output_hash": run["output_hash"],
+               "requirements_id": requirement["id"] if requirement and requirement["id"] == run.get("requirements_id") else None,
+               "template_id": result["template_id"], "scenario_id": result["scenario_id"]}
+    counts = []
+    checks = result.get("model_checks")
+    if (isinstance(checks, list) and checks
+            and all(isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"]
+                    and item.get("status") in {"pass", "fail"} for item in checks)
+            and len({item["id"] for item in checks}) == len(checks)):
+        counts.append({**binding, "kind": "model_checks", "count": len(checks),
+                       "member_ids": [item["id"] for item in checks],
+                       "all_pass": all(item["status"] == "pass" for item in checks),
+                       "body_template": f"{len(checks)} 项 model_checks 核查结果"})
+    if requirement is None or binding["requirements_id"] is None:
+        return counts
+    items = requirement.get("items")
+    if (requirement.get("id") != run["requirements_id"] or not isinstance(items, list) or not items
+            or not all(isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"]
+                       and isinstance(item.get("metric"), str) and item["metric"] for item in items)):
+        return counts
+    # A semantic pin can constrain the requirement's metric, not rename it.
+    # Otherwise an unanswered unknown metric could borrow a known output's count.
+    metrics = [item["metric"] for item in items]
+    if (len(set(metrics)) != len(items) or len({item["id"] for item in items}) != len(items)
+            or any("metric_key" in item.get("dimensions", {})
+                   and item["dimensions"]["metric_key"] != item["metric"] for item in items)
+            or any(item.get("dimensions", {}).get(key) != binding[key]
+                   for item in items for key in ("template_id", "scenario_id"))):
+        return counts
+    selected = [fact for fact in facts if fact.get("run_id") == run["id"] and fact.get("column") == "value"
+                and fact.get("semantics", {}).get("metric") in metrics]
+    if (len(selected) != len(metrics)
+            or {fact["semantics"]["metric"] for fact in selected} != set(metrics)):
+        return counts
+    from foundry.finance_requirements import (
+        _dimensions_match, _requested_grains, _requirement_scope_matches, _row_grain,
+    )
+
+    rows = result.get("rows")
+    if not isinstance(rows, list):
+        return counts
+    scopes = run.get("finance_scope") or {}
+    scenarios = [scope.get("scenario") if isinstance(scope, dict) else None
+                 for scope in scopes.values()] if isinstance(scopes, dict) else []
+    uniform_scenario = (scenarios[0] if scenarios and all(
+        isinstance(value, str) and value and value == scenarios[0] for value in scenarios) else None)
+    by_metric = {fact["semantics"]["metric"]: fact for fact in selected}
+    for item in items:
+        fact = by_metric[item["metric"]]
+        index = fact.get("row")
+        if type(index) is not int or not 0 <= index < len(rows) or not isinstance(rows[index], dict):
+            return counts
+        row = rows[index]
+        # Native template rows can omit scenario; their captured source scopes
+        # provide it only when every scope declares the same explicit identity.
+        # This local view never mutates the result or qualifies an amount.
+        if row.get("scenario") in (None, "") and uniform_scenario is not None:
+            row = {**row, "scenario": uniform_scenario}
+        elif row.get("scenario") not in (None, "") and any(
+                value not in (None, "", row["scenario"]) for value in scenarios):
+            return counts
+        grains = _requested_grains(item)
+        # As at the native single-model entry, the shared comparison matcher
+        # needs an explicit flat scenario check (it otherwise ignores that key).
+        scenario = (requirement.get("scope") or {}).get("scenario")
+        if (row.get("metric_key") != item["metric"] or not _dimensions_match(item, row, run)
+                or not _requirement_scope_matches(run, row, item, requirement)
+                or (scenario is not None and scenario != row.get("scenario"))
+                or (grains is not None and {_row_grain(item, run, row)} != set(grains))):
+            return counts
+    counts.append({**binding, "kind": "required_metrics", "count": len(items),
+                   "member_ids": [item["id"] for item in items], "metrics": metrics,
+                   "fact_ids": [fact["id"] for fact in selected],
+                   "source_bound": result.get("source_binding_status", {}).get("all_sources_verified") is True,
+                   "body_template": f"{len(items)} 项 required_metrics 结果"})
+    input_count = _source_bound_input_count(run, binding, counts)
+    if input_count is not None:
+        counts.append(input_count)
+    return counts
+
+
+def _source_bound_input_count(run: dict, binding: dict, counts: list[dict]) -> dict | None:
+    """Count verified template inputs, without qualifying their financial values."""
+    from foundry.finance_driver_templates import TEMPLATE_ID, TEMPLATE_INPUTS, TEMPLATE_VERSION, previous_month
+
+    result = run["result"]
+    required = [proof for proof in counts if proof["kind"] == "required_metrics"]
+    checks = [proof for proof in counts if proof["kind"] == "model_checks"]
+    if (result.get("template_id") != TEMPLATE_ID or result.get("template_version") != TEMPLATE_VERSION
+            or len(required) != 1 or required[0].get("source_bound") is not True
+            or len(checks) != 1 or checks[0].get("all_pass") is not True
+            or result.get("model_checks") != result.get("driver_model", {}).get("model_checks")):
+        return None
+    if any(not isinstance(row, dict) for row in result["rows"]):
+        return None
+    output_rows = [row for row in result["rows"] if row.get("metric_key") in required[0]["metrics"]]
+    output_scope = {}
+    for key in ("period", "organization", "currency", "unit"):
+        values = [row.get(key) for row in output_rows]
+        if not values or any(not isinstance(value, str) or not value or value != values[0] for value in values):
+            return None
+        output_scope[key] = values[0]
+    rows = [row for row in result["rows"] if row.get("source") == "input"]
+    if (len(rows) != len(TEMPLATE_INPUTS) or any(not isinstance(row.get("driver"), str) for row in rows)
+            or {row["driver"] for row in rows} != set(TEMPLATE_INPUTS)):
+        return None
+    source_state = result.get("source_binding_status") or {}
+    proofs, drivers = source_state.get("bindings"), source_state.get("drivers")
+    if not isinstance(proofs, dict) or not isinstance(drivers, dict):
+        return None
+    scopes, datasets = run.get("finance_scope") or {}, run.get("bindings") or {}
+    used_datasets = set()
+    for row in rows:
+        name = row["driver"]
+        proof, driver = proofs.get(name), drivers.get(name)
+        if (not isinstance(proof, dict) or not isinstance(driver, dict)
+                or row.get("check_status") != "pass" or row.get("value") != proof.get("value")
+                or any(row.get(key) != value for key, value in output_scope.items())
+                or any(part.get("status") != "source_verified" for part in (row, proof, driver))
+                or any(part.get("source_binding_ids") != [name] or part.get("assumption_ids")
+                       or part.get("unverified_inputs") for part in (row, driver))):
+            return None
+        refs = proof.get("source_rows")
+        if (not isinstance(refs, list) or not refs
+                or any(not isinstance(ref, dict) or not isinstance(ref.get("dataset_id"), str)
+                       or type(ref.get("row_index")) is not int or ref["row_index"] < 0
+                       or not isinstance(ref.get("column"), str) or not ref["column"] for ref in refs)
+                or len({_hash(ref) for ref in refs}) != len(refs)
+                or any(sorted(part.get("source_rows") or [], key=_hash) != sorted(refs, key=_hash)
+                       for part in (row, driver))):
+            return None
+        try:
+            expected_period = previous_month(row["period"]) if name.startswith("opening_") else row["period"]
+        except (KeyError, FoundryError):
+            return None
+        if proof.get("period") != expected_period:
+            return None
+        for ref in refs:
+            aliases = [alias for alias, dataset_id in datasets.items() if dataset_id == ref["dataset_id"]]
+            if not aliases:
+                return None
+            for alias in aliases:
+                scope = scopes.get(alias)
+                if (not isinstance(scope, dict)
+                        or any(not scope.get(key) or proof.get(key) != scope[key]
+                               for key in ("organization", "currency", "unit", "scenario"))
+                        or proof.get("ledger") != scope.get("ledger")
+                        or any(row.get(key) != scope[key] for key in ("organization", "currency", "unit"))):
+                    return None
+            used_datasets.add(ref["dataset_id"])
+    return {**binding, "kind": "source_bound_inputs", "count": len(rows),
+            "member_ids": [row["driver"] for row in rows], "source_bound": True,
+            "source_dataset_ids": sorted(used_datasets), "counts_as_amount_evidence": False,
+            "body_template": f"{len(rows)} 项来源绑定输入有效"}
+
+
+def _structure_count_spans(body: str, prepared: dict, requirements_id: str | None) -> tuple[list, list]:
+    """Validate a small count grammar and exempt only its integer token.
+
+    Unsupported wording and mismatched counts are issues even when that integer
+    happens to equal a cited financial amount. Surrounding numbers are untouched.
+    """
+    number = r"[-+−－]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?[%％]?"
+    kinds = r"required_metrics|model_checks|来源绑定输入|模型(?:联动)?(?:核查|检查)|需求|必答指标|指标|核查|检查"
+    reverse = re.compile(r"(?P<kind>" + kinds + r")\s*(?P<opening>[（(])\s*(?P<count>" + number + r")\s*项")
+    forward = re.compile(r"(?<![A-Za-z0-9_.+%％−－-])(?P<count>" + number
+                         + r")\s*项\s*(?:(?P<kind>" + kinds + r")(?![A-Za-z_]))?")
+    matches = [(match, True) for match in reverse.finditer(body)]
+    covered = [match.span("count") for match, _ in matches]
+    matches.extend((match, False) for match in forward.finditer(body) if match.span("count") not in covered)
+    spans, issues = [], []
+    for match, reversed_order in sorted(matches, key=lambda item: item[0].start("count")):
+        tail = body[match.end():]
+        implicit = match["kind"] is None
+        if implicit and not re.match(r"(?:全部|均)?通过|(?:全部为|均返回)\s*pass", tail):
+            continue  # Unknown collections, including inputs/boundaries, gain no exemption.
+        kind = ("source_bound_inputs" if match["kind"] == "来源绑定输入" else
+                "required_metrics" if match["kind"] in {"required_metrics", "需求", "必答指标", "指标"} else "model_checks")
+        proofs = [item for item in prepared.get("structure_counts", []) if item.get("kind") == kind]
+        proof = proofs[0] if len(proofs) == 1 else None
+        # Count statements start a clause/title. '现金为12项模型检查' is not a count statement.
+        prefix = re.split(r"[\n。！？；，]", body[:match.start()])[-1].strip()
+        if not prefix.startswith("#"):
+            prefix = prefix.rsplit("、", 1)[-1].strip()
+        wrapper = next((mark for mark in ("**", "__", "`") if prefix.endswith(mark)), "")
+        if wrapper:
+            prefix = prefix[:-len(wrapper)].rstrip()
+        closing = {"(": ")", "（": "）"}.get(match["opening"]) if reversed_order else None
+        if not reversed_order and re.fullmatch(r"#{1,6}\s+[^\n。！？]*结果[（(]", prefix):
+            closing = {"(": ")", "（": "）"}[prefix[-1]]
+            prefix = ""
+        if reversed_order:
+            prefix = re.sub(r"^(#{1,6})\s*[一二三四五六七八九十]+、\s*", r"\1", prefix)
+        valid = (prefix in {"", "以下", "共", "合计", "全部"} or re.fullmatch(r"#{1,6}", prefix)
+                 or re.fullmatch(r"#{1,6}[ \t]+[A-Za-z\u4e00-\u9fff][A-Za-z\u4e00-\u9fff _-]*(?:与|及|和| and)", prefix)
+                 or re.fullmatch(r"[^：:\n]*(?:需求|模型|核查|检查)[^：:\n]*[：:]", prefix))
+        if kind == "source_bound_inputs":
+            valid = bool((valid or re.fullmatch(r"仅限已确认的(?:[一二三四五六七八九十]+项零边界与)?", prefix))
+                         and proof and proof.get("source_bound") is True
+                         and proof.get("counts_as_amount_evidence") is False)
+        if match["kind"] == "指标":
+            # Generic metrics need an explicit heading or a bounded completion label.
+            valid = bool(re.fullmatch(r"#{1,6}", prefix) or (
+                prefix in {"", "以下", "共", "合计", "全部"}
+                and re.match(r"\s*全部(?:取得结果|得出)", tail)))
+        if match["kind"] in {"指标", "必答指标"}:
+            valid = bool(valid and proof and proof.get("source_bound") is True)
+        if implicit:
+            # A bare "N 项通过" only belongs to an immediately preceding check heading.
+            prior_lines = body[:body.rfind("\n", 0, match.start())].rstrip().splitlines() if "\n" in body[:match.start()] else []
+            heading = prior_lines[-1].strip() if prior_lines else ""
+            valid = valid and bool(re.fullmatch(
+                r"(?:#{1,6}\s+|\*\*)(?:\d+\s*项\s*)?(?:model_checks|模型(?:联动)?(?:检查|核查))(?:\s*核查结果)?(?:\*\*)?", heading))
+        valid = bool(valid and proof and re.fullmatch(r"[1-9]\d*", match["count"])
+                     and int(match["count"]) == proof["count"]
+                     and (requirements_id is None or proof.get("requirements_id") == requirements_id))
+        valid = valid and _structure_count_tail(tail, proof, kind, closing, wrapper)
+        if valid:
+            spans.append(match.span("count"))
+        else:
+            issues.append({"code": "unverified_structure_count", "severity": "warning",
+                           "message": "结构计数或其状态描述未与当前运行及需求逐项核对；金额仍须单独引用。",
+                           "text": match["count"], "position": match.start("count"), "kind": kind})
+    return spans, issues
+
+
+def _structure_count_tail(tail: str, proof: dict, kind: str, closing: str | None, wrapper: str) -> bool:
+    """Only count/status labels and bounded caption metadata; never financial claims."""
+    titles = (["有效", ""] if kind == "source_bound_inputs" else
+              ["结果", ""] if kind == "required_metrics" else ["核查结果", "核查", "结果", ""])
+    states = []
+    if kind == "model_checks" and proof.get("all_pass") is True:
+        states = ["均通过不替代经理认可", "全部通过", "均通过", "通过", "全部为 pass", "均返回 pass",
+                  "均来自同一运行（run_id " + proof["run_id"] + "）的 model_checks 数组，状态全部为 pass"]
+    computed = []
+    if kind == "required_metrics" and proof.get("source_bound") is True:
+        computed = ["全部由 finance 引擎模型验证输出回答", "全部由已登记三表模板原生计算得出",
+                    "全部由来源绑定模板算得", "全部有引擎输出且来源可追溯", "全部取得结果", "全部得出"] + [
+            "全部由来源绑定的已登记管理三表模板（" + proof["template_id"] + "，" + label + " "
+            + proof["scenario_id"] + "）计算得出" for label in ("场景", "情景")]
+    if closing:
+        tail = re.sub(r"^\s*[，,]\s*", "", tail)
+    for label in states + computed + titles:
+        match = re.match(r"[ \t]*" + re.escape(label), tail)
+        if not match:
+            continue
+        rest = tail[match.end():]
+        status = label in states
+        if status:
+            rest = re.sub(r"^[ \t]*(?:\((?:status=)?pass\)|（(?:status=)?pass）)", "", rest)
+            # A bounded non-implication qualifies the pass statement, not its count
+            # or any numeric difference. The same all-pass proof is still required.
+            rest = re.sub(r"^[ \t]*(?:不等于|不表示|不代表|不意味着)(?:所有|全部|各(?:项)?|每(?:项)?)"
+                          r"(?:检查|核查)?(?:的)?(?:差额|差异)(?:一定|必然)?(?:全部|均|都)?为(?:零|0(?![\d.]))", "", rest)
+        if closing:
+            if not rest.lstrip().startswith(closing):
+                continue
+            rest = rest.lstrip()[1:]
+        if wrapper:
+            if not rest.lstrip().startswith(wrapper):
+                continue
+            rest = rest.lstrip()[len(wrapper):]
+        if label in titles:
+            # Units/periods label a result table; only the count's integer is exempt.
+            rest = re.sub(r"^[ \t]*[（(]单位[：:]\s*(?:人民币元|万元|千元|亿元|元|美元|CNY|USD)"
+                          r"(?:[，,]\s*\d{4}-\d{2}\s*(?:整期|期间))?[）)]", "", rest)
+            if kind == "model_checks" and re.match(r"^\s*[：:，,]", rest):
+                # A result label followed by approval must still pass the same status gate.
+                continuation = re.sub(r"^\s*[：:，,]\s*", "", rest)
+                if any(continuation.startswith(state) for state in states):
+                    if _structure_count_tail(continuation, proof, kind, None, ""):
+                        return True
+                continue
+        boundary = r"^[ \t]*(?=$|[\n。！？；，：、])" if status or label in computed else r"^[ \t]*(?=$|[\n。！？；])"
+        if re.match(boundary, rest):
+            return True
+    return False
+
+
+def _table_ordinal_spans(body: str) -> list[tuple[int, int]]:
+    """Recognize only complete Markdown ordinal columns, never their other cells.
+
+    The column declares its formatting role with an exact header and every row
+    must contain the next bare integer. This does not certify the table's data,
+    its claimed number of metrics, or a model check's status.
+    """
+    lines = body.splitlines(keepends=True)
+    offsets, position = [], 0
+    for line in lines:
+        offsets.append(position)
+        position += len(line)
+
+    def cells(line):
+        if not line.strip().startswith("|") or not line.strip().endswith("|") or "\\|" in line:
+            return []
+        return list(re.finditer(r"(?<=\|)[^|\r\n]*(?=\|)", line))
+
+    spans, index = [], 0
+    while index + 2 < len(lines):
+        headers = cells(lines[index])
+        ordinals = [column for column, cell in enumerate(headers)
+                    if cell.group().strip().casefold() in {"#", "序号", "no.", "no"}]
+        separators = cells(lines[index + 1])
+        if (len(headers) < 2 or len(ordinals) != 1 or len(headers) != len(separators)
+                or not all(re.fullmatch(r"\s*:?-{3,}:?\s*", cell.group()) for cell in separators)):
+            index += 1
+            continue
+        end = index + 2
+        while end < len(lines) and lines[end].lstrip().startswith("|"):
+            end += 1
+        candidate = []
+        for number, row_index in enumerate(range(index + 2, end), 1):
+            row = cells(lines[row_index])
+            if len(row) != len(headers):
+                break
+            cell = row[ordinals[0]]
+            match = re.fullmatch(r"[ \t]*(?P<ordinal>[1-9]\d*)[ \t]*", cell.group())
+            if not match or match["ordinal"] != str(number):
+                break
+            base = offsets[row_index] + cell.start()
+            candidate.append((base + match.start("ordinal"), base + match.end("ordinal")))
+        else:
+            spans.extend(candidate)
+        index = end
+    return spans
 
 
 def render_fact_template(body: str, facts: list[dict]) -> tuple[str, list[str]]:
@@ -196,6 +873,14 @@ def claims_for_facts(facts: list[dict], fact_ids: list[str]) -> list[dict]:
 
 def render_evidence_appendix(prepared: dict) -> dict:
     """Render readable calculation evidence without changing manager prose."""
+    from foundry.finance_native_drafts import verified_aging_audit_metadata
+
+    version = 4 if verified_aging_audit_metadata(prepared.get("aging_audit_metadata")) else EVIDENCE_APPENDIX_RENDER_VERSION
+    return _render_evidence_appendix(prepared, render_version=version)
+
+
+def _render_evidence_appendix(prepared: dict, *, render_version: int) -> dict:
+    """Versioned reconstruction verifies saved appendices without rewriting them."""
     if not isinstance(prepared, dict):
         raise FoundryError("prepared explanation payload must be an object")
     groups = prepared.get("evidence_groups", [])
@@ -221,12 +906,17 @@ def render_evidence_appendix(prepared: dict) -> dict:
         for member in members:
             if not isinstance(member, dict):
                 continue
-            fact = _appendix_member_fact(group, member, facts_by_id)
+            fact = _appendix_member_fact(group, member, facts_by_id, render_version=render_version)
             state = fact.get("state") if fact else member.get("state", "missing")
             label = member.get("label") or member.get("semantic_role") or member.get("column")
-            value = fact.get("display_value") if fact else None
+            native = fact is not None and _appendix_native_identity(fact)
+            eligible = fact is not None and fact.get("evidence_eligibility", {}).get("counts_as_amount_evidence") is True
+            adjustment_unavailable = _adjustment_fact_unavailable(fact)
+            # An existing input fact is not automatically qualified as a report
+            # amount. Show its status/source without citing its numeric value.
+            value = fact.get("display_value") if fact and not adjustment_unavailable and (render_version == 1 or not native or eligible) else None
             suffix = f"：{value}" if value not in (None, "") else ""
-            if fact:
+            if fact and not adjustment_unavailable and (render_version == 1 or not native or eligible):
                 fact_ids.append(fact["id"])
             source_count = (
                 fact.get("source_trace", {}).get("source_row_count")
@@ -238,13 +928,24 @@ def render_evidence_appendix(prepared: dict) -> dict:
                 if fact and isinstance(source_count, int) and source_count > 0
                 else ""
             )
-            lines.append(f"- {label}{suffix}（{_appendix_member_label(state, fact)}{source}）")
+            status = _appendix_member_label(state, fact)
+            if adjustment_unavailable:
+                status += "；当前批准不支持引用此调整后金额"
+            if render_version >= 2 and native:
+                status += "；可引用金额" if eligible else "；不具金额引用资格"
+            lines.append(f"- {label}{suffix}（{status}{source}）")
         closure = group.get("closure")
         if isinstance(closure, dict) and closure.get("status") != "unsupported":
             lines.append(f"- 闭合核对：{_closure_label(closure)}")
+    if render_version == 4:
+        from foundry.finance_native_drafts import render_aging_audit_appendix
+
+        audit = render_aging_audit_appendix(prepared.get("aging_audit_metadata"))
+        if audit:
+            lines.append("\n" + audit)
     unique_fact_ids = list(dict.fromkeys(fact_ids))
     return {
-        "schema_version": EVIDENCE_APPENDIX_RENDER_VERSION,
+        "schema_version": render_version,
         "body": "\n".join(lines).strip() if len(lines) > 1 else "",
         "fact_ids": unique_fact_ids,
         "claims": claims_for_facts(
@@ -253,22 +954,27 @@ def render_evidence_appendix(prepared: dict) -> dict:
     }
 
 
-def evidence_appendix_metadata(body: str, *, base_body: str | None = None) -> dict:
+def evidence_appendix_metadata(body: str, *, base_body: str | None = None,
+                               render_version: int = EVIDENCE_APPENDIX_RENDER_VERSION) -> dict:
     if not isinstance(body, str):
         raise FoundryError("evidence appendix body must be text")
     base = body if base_body is None else base_body
     if not isinstance(base, str):
         raise FoundryError("evidence appendix base body must be text")
+    if type(render_version) is not int or render_version not in {1, 2, 3, 4}:
+        raise FoundryError("unsupported evidence appendix render version")
     return {
         "schema_version": 1,
-        "render_version": EVIDENCE_APPENDIX_RENDER_VERSION,
+        "render_version": render_version,
         "body_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
         "base_body_sha256": hashlib.sha256(base.encode("utf-8")).hexdigest(),
         "body_chars": len(body),
     }
 
 
-def _appendix_member_fact(group: dict, member: dict, facts_by_id: dict[str, dict]) -> dict | None:
+def _appendix_member_fact(
+    group: dict, member: dict, facts_by_id: dict[str, dict], *, render_version: int = EVIDENCE_APPENDIX_RENDER_VERSION
+) -> dict | None:
     fact_id = member.get("fact_id")
     if not isinstance(fact_id, str):
         return None
@@ -286,7 +992,33 @@ def _appendix_member_fact(group: dict, member: dict, facts_by_id: dict[str, dict
         return None
     if member.get("state") is not None and member.get("state") != fact.get("state"):
         return None
-    if not _appendix_scope_matches(member.get("scope"), fact.get("scope")):
+    if render_version >= 3:
+        identity, semantics = fact.get("metric_identity", {}), fact.get("semantics", {})
+        if (("template_id" in identity or semantics.get("model_scope") == "management_forecast")
+                and not _appendix_native_identity(fact)):
+            # A damaged native identity must not become an ordinary fact: that would let result_scope
+            # restore its period and the generic rendering path cite even unqualified template inputs.
+            return None
+    scope = fact.get("scope")
+    if render_version >= 2 and isinstance(scope, dict) and _appendix_native_identity(fact):
+        # The native output period belongs to its server-generated metric identity.
+        # Its source scope may combine opening and flow inputs and have no period.
+        # Never override an explicit source-scope period or relax other dimensions.
+        if "period" not in scope and not any(isinstance(value, dict) and "period" in value for value in scope.values()):
+            scope = {**scope, "period": fact["metric_identity"].get("period")}
+    if render_version >= 3 and isinstance(fact.get("result_scope"), dict):
+        # Group members and facts share the server's result-row identity. Source binding aliases need not
+        # be named actual/budget (a single pq input can contain both sides). Retain explicit source-scope
+        # conflicts rather than letting the result identity overwrite them.
+        result_scope = fact["result_scope"]
+        for key, value in result_scope.items():
+            declared = _appendix_scope_value(scope, key) if isinstance(scope, dict) else None
+            if declared is None and "." in key and isinstance(scope, dict):
+                declared = _appendix_scope_value(scope, key.split(".", 1)[1])
+            if declared is not None and declared != value:
+                return None
+        scope = {**(scope if isinstance(scope, dict) else {}), **result_scope}
+    if not _appendix_scope_matches(member.get("scope"), scope):
         return None
     if (
         member.get("display_value") is not None
@@ -294,6 +1026,16 @@ def _appendix_member_fact(group: dict, member: dict, facts_by_id: dict[str, dict
     ):
         return None
     return fact
+
+
+def _appendix_native_identity(fact: dict) -> bool:
+    from foundry.finance_driver_templates import TEMPLATE_ID
+
+    identity = fact.get("metric_identity", {})
+    semantics = fact.get("semantics", {})
+    return (identity.get("template_id") == TEMPLATE_ID
+            and semantics.get("model_scope") == "management_forecast"
+            and identity.get("metric_key") == semantics.get("metric"))
 
 
 def _appendix_scope_matches(member_scope: Any, fact_scope: Any) -> bool:
@@ -346,7 +1088,9 @@ def _appendix_member_label(state: str, fact: dict | None) -> str:
     return "非可引用：未生成可核验事实"
 
 
-def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: dict | None = None) -> dict:
+def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: dict | None = None,
+                         _required_check_authorship: dict | None = None,
+                         _allowed: set[str] | None = None) -> dict:
     """Check a draft; evidence recipes are evaluated here, never read from a caller's evidence_report.
 
     `_requirement_recipe_report` lets save_draft hand over the report it computed for its own recipes so
@@ -354,6 +1098,8 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
     """
     if not isinstance(spec, dict):
         raise FoundryError("explanation spec must be an object")
+    if {"required_check_authorship", "_required_check_authorship"}.intersection(spec):
+        raise FoundryError("required_check_authorship is service-owned evidence")
     draft = analysis.get_draft(spec["draft_id"]) if spec.get("draft_id") else {}
     body = _safe_text(spec.get("body", draft.get("body", "")), "draft body")
     run_ids = spec.get("run_ids", draft.get("run_ids", []))
@@ -368,6 +1114,7 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
         analysis,
         [r for r in runs if r.get("execution_status") == "succeeded"],
         materiality=spec.get("materiality", draft.get("materiality", {})),
+        _allowed=_allowed,
     )
     from foundry.financial_evidence import evaluate_evidence_recipes
 
@@ -376,10 +1123,24 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
         analysis, body, {**draft, **spec}, prepared,
         recipe_report=_requirement_recipe_report if _requirement_recipe_report is not None else evidence_report,
     )
+    from foundry.finance_recognition_basis import VERSION as RECOGNITION_BASIS_VERSION, recognition_claim_issues
+
+    recognition_basis = _service_recognition_basis(
+        analysis, runs, requirements_id=spec.get("requirements_id", draft.get("requirements_id")), allowed=_allowed)
     facts = prepared["facts"]
     by_id = {fact["id"]: fact for fact in facts}
     by_location = {(fact["run_id"], fact["row"], fact["column"]): fact for fact in facts}
-    issues: list[dict] = []
+    native_run_ids = _native_template_run_ids(runs)
+    from foundry.finance_adjustments import current_reference_issues
+
+    # save_draft supplies its server-evaluated recipes through this report.
+    # Their claim cells remain dependencies even without direct run citations.
+    dependency_spec = {**draft, **spec}
+    if _requirement_recipe_report is not None:
+        dependency_spec["evidence_recipes"] = _requirement_recipe_report.get("results") or []
+    issues: list[dict] = [*transaction_review_issues(runs, analysis=analysis, spec={**draft, **spec}),
+                          *recognition_claim_issues(body, recognition_basis),
+                          *current_reference_issues(analysis, dependency_spec, allowed=_allowed, facts=facts)]
     # Cited order, not a set: which of two same-valued facts an issue names must not follow PYTHONHASHSEED
     # (the completion issue_fingerprint hashes these issues).
     referenced: dict[str, None] = {}
@@ -410,6 +1171,13 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
             )
             continue
         fact = by_id.get(claim.get("fact_id")) if claim.get("fact_id") else None
+        if not fact and claim.get("basis") != "calculation" and claim.get("run_id") in native_run_ids:
+            # A caller category or omitted/forged ID cannot erase an explicit
+            # native cell location. Resolve identity before checking its value.
+            fact = by_location.get((claim.get("run_id"), claim.get("row"), claim.get("column")))
+            if not fact or claim.get("fact_id"):
+                issues.append({"code": "unknown_fact", "severity": "error",
+                               "message": "引用的事实或位置不存在于当前成功运行结果。"})
         if fact:
             referenced.setdefault(fact["id"])
             if any(
@@ -436,11 +1204,22 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
                     issues.append({"code": "unknown_fact", "severity": "error", "message": "引用位置没有可核验的数值事实。"})
             if claim.get("fact_id"):
                 issues.append({"code": "unknown_fact", "severity": "error", "message": "引用的事实不存在于当前成功运行结果。"})
+    body_template = _validated_fact_template(
+        body, spec.get("body_template", draft.get("body_template")), facts, generated_regions,
+    )
     issues.extend(
         _fact_context_issues(
             body,
             [by_id[f] for f in referenced if f in by_id],
             prepared.get("evidence_groups", []),
+            runs=runs,
+            performance_facts=prepared.get("forecast_performance", {}).get("facts", []),
+            qualification_facts=facts,
+            body_template=body_template,
+            trusted_fact_ids=_trusted_recipe_fact_ids(
+                analysis, facts, runs,
+                _requirement_recipe_report if _requirement_recipe_report is not None else evidence_report,
+            ),
         )
     )
     presentation = _presentation_allowed_numbers_and_issues(claims, by_id)
@@ -456,10 +1235,17 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
     percent_token_allowed_numbers = _allowed_numbers(
         [by_id[fact_id] for fact_id in referenced if fact_id in by_id and _fact_is_ratio(by_id[fact_id])]
     )
+    count_spans, count_issues = _structure_count_spans(
+        body, prepared, spec.get("requirements_id", draft.get("requirements_id")),
+    )
+    issues.extend(count_issues)
     ignored_number_spans = [
+        *count_spans,
+        *_table_ordinal_spans(body),
         *_generated_appendix_heading_number_spans(body, prepared),
         *_generated_appendix_label_number_spans(body, generated_regions, prepared),
         *_generated_appendix_reference_spans(body, generated_regions),
+        *_generated_aging_audit_number_spans(body, generated_regions, prepared),
     ]
     for token in _body_numbers(body, ignored_spans=ignored_number_spans):
         normalized = _normalize_number(token["text"])
@@ -480,7 +1266,21 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
                 }
             )
     required = set(_required_fact_ids(facts))
-    missing_required = sorted(required - referenced.keys())
+    missing_required = required - referenced.keys()
+    authorship = draft.get("required_check_authorship", _required_check_authorship)
+    if authorship is not None:
+        required_checks = {fact["id"] for fact in facts if fact["id"] in required and fact["column"] == "residual"}
+        if (not isinstance(authorship, dict) or authorship.get("schema_version") != 1
+                or authorship.get("run_output_hashes") != {run["id"]: run.get("output_hash") for run in runs}
+                or not isinstance(authorship.get("required_fact_ids"), list)
+                or not isinstance(authorship.get("authored_fact_ids"), list)
+                or any(not isinstance(value, str) for value in
+                       [*authorship["required_fact_ids"], *authorship["authored_fact_ids"]])
+                or set(authorship["required_fact_ids"]) != required_checks
+                or not set(authorship["authored_fact_ids"]) <= by_id.keys()):
+            raise FoundryError("required check authorship does not match the current facts and runs")
+        missing_required |= required_checks - set(authorship["authored_fact_ids"])
+    missing_required = sorted(missing_required)
     for fact_id in missing_required:
         issues.append(
             {
@@ -558,8 +1358,18 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
     status = "pass" if not issues else "needs_attention"
     issues = _locate_issues(issues, generated_regions)
     readability = _readability_suggestions(body, generated_regions)
+    from foundry.finance_claim_semantics import CLAIM_SEMANTICS_VERSION
+
+    from foundry.finance_transaction_reviews import decision_for_spec, QUALIFICATION
+    review_state = (decision_for_spec(analysis, {**draft, **spec}) if any(
+        (run.get("result") or {}).get("qualification") == QUALIFICATION for run in runs) else None)
     return {
+        **({"transaction_review": {key: review_state.get(key) for key in
+                                  ("current_status", "decision", "basis_fingerprint")}} if review_state else {}),
         "schema_version": 1,
+        "claim_semantics_version": CLAIM_SEMANTICS_VERSION,
+        "recognition_basis_version": RECOGNITION_BASIS_VERSION,
+        **({"recognition_basis": recognition_basis} if recognition_basis["status"] != "not_applicable" else {}),
         "status": status,
         "issues": [issue for issue in issues if issue],
         "status_dimensions": status_dimensions,
@@ -579,6 +1389,190 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
         "facts": facts,
         "evidence_groups": prepared.get("evidence_groups", []),
     }
+
+
+def _validated_fact_template(body, template, facts, generated_regions):
+    if not isinstance(template, str):
+        return None
+    try:
+        rendered, _ = render_fact_template(template, facts)
+        prose = body
+        for region in sorted(generated_regions, key=lambda item: item["start"], reverse=True):
+            prose = prose[:region["start"]] + prose[region["end"]:]
+        return template if rendered.strip() == prose.strip() else None
+    except FoundryError:
+        return None
+
+
+def _native_template_run_ids(runs):
+    from foundry.finance_driver_templates import TEMPLATE_ID
+
+    return {run["id"] for run in runs if run.get("execution_status") == "succeeded"
+            and run.get("engine") == "finance"
+            and (run.get("result") or {}).get("template_id") == TEMPLATE_ID}
+
+
+def saved_claim_semantic_issues(analysis, draft, allowed=None):
+    """Recheck earlier semantic verdicts in a current read, without rewriting history."""
+    from foundry.finance_claim_semantics import CLAIM_SEMANTICS_VERSION, check_claim_semantics
+    from foundry.finance_recognition_basis import _ASSERTION, recognition_claim_issues
+
+    check = draft.get("explanation_check") or draft.get("quality") or {}
+    current = check.get("claim_semantics_version") == CLAIM_SEMANTICS_VERSION
+    body = draft.get("body") or ""
+    # This is only a syntax prefilter for whether source-bound recognition
+    # validation is needed. A matching assertion never supplies its own basis.
+    refresh_recognition = bool(_ASSERTION.search(body))
+    if current:
+        from foundry.finance_claim_semantics import _PERFORMANCE_STATE, qualification_assertion_lines
+        refresh_performance = bool(_PERFORMANCE_STATE.search(body))
+        refresh_qualification = bool(qualification_assertion_lines(body))
+        if not refresh_performance and not refresh_qualification and not refresh_recognition:
+            return []
+    # Preserve filed verdicts. Current reads refresh relevant mutable source and
+    # qualification metadata without adding uncited facts to amount authority.
+    runs = [analysis.get_run(run_id) for run_id in dict.fromkeys(draft.get("run_ids") or [])]
+    if allowed is not None and any(not set((run.get("bindings") or {}).values()) <= set(allowed) for run in runs):
+        return []  # The caller's existing visibility gate owns inaccessible drafts.
+    recognition_issues = (recognition_claim_issues(
+        body, _service_recognition_basis(
+            analysis, runs, requirements_id=draft.get("requirements_id"), allowed=allowed))
+        if refresh_recognition else [])
+    if current and not refresh_performance and not refresh_qualification:
+        return recognition_issues
+    if current:
+        from foundry.finance_claim_semantics import forecast_performance_issues, qualification_claim_report
+        issues = []
+        if refresh_performance:
+            proof = _forecast_performance_sources(analysis, runs, allowed=allowed)
+            issues = forecast_performance_issues(body, performance_facts=proof["facts"])
+        if refresh_qualification:
+            catalog = [fact for run in runs if run.get("execution_status") == "succeeded"
+                       for fact in _facts_for_run(run, _materiality(draft.get("materiality") or {}), analysis=analysis)]
+            issues += qualification_claim_report(body, facts=catalog, runs=runs)["issues"]
+        return [*recognition_issues, *issues]
+    runs = [run for run in runs if run.get("execution_status") == "succeeded"]
+    transaction_issues = transaction_review_issues(runs, analysis=analysis, spec=draft, allowed=allowed)
+    if not runs:
+        return recognition_issues
+    prepared = prepare_explanation(analysis, runs, materiality=draft.get("materiality"), _allowed=allowed)
+    facts = prepared["facts"]
+    referenced = set(draft.get("fact_ids") or [])
+    native_run_ids = _native_template_run_ids(runs)
+    locations = set()
+    for claim in draft.get("claims") or []:
+        if isinstance(claim, dict):
+            if claim.get("fact_id"):
+                referenced.add(claim["fact_id"])
+            if claim.get("basis") == "calculation" or claim.get("run_id") in native_run_ids:
+                locations.add((claim.get("run_id"), claim.get("row"), claim.get("column")))
+    cited = [fact for fact in facts if fact["id"] in referenced
+             or (fact["run_id"], fact["row"], fact["column"]) in locations]
+    body = draft.get("body") or ""
+    regions = _trusted_generated_appendix_regions(analysis, body, draft, prepared)
+    template = _validated_fact_template(body, draft.get("body_template"), facts, regions)
+    from foundry.financial_evidence import evaluate_evidence_recipes
+    recipe_report = evaluate_evidence_recipes(analysis, draft.get("evidence_recipes") or [])
+    issues = check_claim_semantics(body, cited, runs=runs, body_template=template, qualification_facts=facts,
+                                  performance_facts=prepared.get("forecast_performance", {}).get("facts", []),
+                                  referenced_fact_ids=[fact["id"] for fact in cited],
+                                  trusted_fact_ids=_trusted_recipe_fact_ids(analysis, facts, runs, recipe_report))
+    prose = body
+    for region in sorted(regions, key=lambda item: item["start"], reverse=True):
+        prose = prose[:region["start"]] + prose[region["end"]:]
+    # Recheck earlier signed-bridge and token-unit verdicts without editing
+    # the archived draft. Only a template verified against its body can bind units.
+    issues.extend(issue for issue in _fact_context_issues(
+        prose, cited, prepared.get("evidence_groups", []), body_template=template)
+                  if issue.get("code") in {"fact_direction_mismatch", "body_closure_mismatch", "fact_unit_mismatch"})
+    if any(((run.get("result") or {}).get("evidence") or {}).get("status_filter") for run in runs):
+        from foundry.finance_requirements import check_requirements
+
+        requirements = check_requirements(analysis, draft, _allowed=allowed)
+        for item in requirements["items"]:
+            if item["status"] != "answered" and any(
+                location.get("evidence", {}).get("not_counted_reason") == "receivables_population_filtered"
+                for location in item.get("locations", [])
+            ):
+                issues.append({"code": "fact_population_scope_mismatch", "severity": "error",
+                               "requirement_item_id": item["id"],
+                               "message": "完整应收要求不能仅由筛选后的应收子集回答。"})
+    return [*transaction_issues, *recognition_issues, *issues]
+
+
+def transaction_review_issues(runs, *, analysis=None, spec=None, allowed=None):
+    """A transaction check is a review artifact, never an approved accounting amount."""
+    from foundry.finance_transaction_reviews import decision_for_spec, QUALIFICATION
+    runs = [run for run in runs if (run.get("result") or {}).get("qualification") == QUALIFICATION]
+    if not runs:
+        return []
+    state = decision_for_spec(analysis, spec, allowed) if analysis is not None and spec is not None else {}
+    issues = []
+    for run in runs:
+        blockers = [issue for issue in _run_diagnostics(run) if issue.get("severity") == "error"]
+        if not blockers and state.get("approved"):
+            continue
+        issues.extend(blockers or [{
+            **({"requirement_item_id": state["obligation_ids"][0]} if state.get("obligation_ids") else {}),
+            "code": "transaction_review_requires_professional_review", "severity": "warning",
+            "run_id": run["id"], "message": "来源约束的交易检查已通过，仍需专业复核；检查结果不授予金额证据或过账资格。",
+        }])
+    return issues
+
+
+def _trusted_recipe_fact_ids(analysis, facts, runs, report):
+    """Preserve a source metric's identity through verified direct/sum recipes.
+
+    Numeric equality alone cannot rename a source metric. This deliberately
+    accepts only explicit typed workbook rows at the same scope and unit.
+    The report is computed by the server; no caller trust flags are read.
+    """
+    from openpyxl.utils import range_boundaries
+
+    by_cell = {(fact["run_id"], fact["row"], fact["column"]): fact for fact in facts}
+    by_run = {run["id"]: run for run in runs}
+    trusted = set()
+    for result in report.get("results") or []:
+        if (result.get("status") != "pass" or result.get("kind") not in {"direct", "sum"}
+                or result.get("evidence_class") not in {"source_value", "source_calculation"}
+                or result.get("scale") != "1" or result.get("factor")):
+            continue
+        claim = result.get("claim") or {}
+        fact = by_cell.get((claim.get("run_id"), claim.get("row"), claim.get("column")))
+        refs = result.get("source_refs") or []
+        if not fact or len(refs) != 1:
+            continue
+        metric = fact.get("semantics", {}).get("metric")
+        source = refs[0]
+        run = by_run.get(fact["run_id"], {})
+        if not metric or source.get("dataset_id") not in (run.get("bindings") or {}).values():
+            continue
+        try:
+            dataset = analysis.read_dataset(source["dataset_id"])
+            transform = dataset.get("transformation") or {}
+            if dataset.get("source_hash") != source.get("source_hash") or transform.get("sheet") != source.get("sheet"):
+                continue
+            left, first, right, last = range_boundaries(source["range"])
+            if left != right:
+                continue
+            headers = transform.get("header_columns") or {}
+            source_column = next((name for name, letter in headers.items()
+                                  if range_boundaries(f"{letter}1")[0] == left), None)
+            if source_column not in {"amount", "value", metric}:
+                continue
+            indexed = dict(zip(transform.get("source_row_numbers") or [], dataset.get("rows") or []))
+            rows = [indexed.get(number) for number in range(first, last + 1)]
+            output = run["result"]["rows"][fact["row"]]
+            scope = {**(fact.get("scope") or {}), **_row_scope(output), "scenario": output.get("scenario")}
+            if not rows or any(not row or row.get("metric_key") != metric or row.get("unit") != fact.get("unit")
+                               or any(row.get(key) != scope.get(key) for key in ("ledger", "organization", "currency", "period", "scenario")
+                                      if row.get(key) not in (None, "") or scope.get(key) not in (None, ""))
+                               for row in rows):
+                continue
+            trusted.add(fact["id"])
+        except (FoundryError, KeyError, TypeError, ValueError):
+            continue
+    return trusted
 
 
 def normalize_background(
@@ -749,7 +1743,7 @@ def _external_reference(spec: dict, parent: dict, basis: str) -> dict | None:
     return json_value(cleaned)
 
 
-def _facts_for_run(run: dict, materiality: dict) -> list[dict]:
+def _facts_for_run(run: dict, materiality: dict, *, analysis=None) -> list[dict]:
     result = run.get("result", {})
     rows = result.get("rows", [])
     column_defs = _column_defs(result)
@@ -764,7 +1758,7 @@ def _facts_for_run(run: dict, materiality: dict) -> list[dict]:
             value = row.get(column)
             if not _is_fact_value(value, column):
                 continue
-            fact = _make_fact(run, row_index, row, column, value, materiality, column_defs)
+            fact = _make_fact(run, row_index, row, column, value, materiality, column_defs, analysis=analysis)
             facts.append(fact)
     return facts
 
@@ -821,10 +1815,18 @@ def _run_diagnostics(run: dict) -> list[dict]:
     return rows
 
 
+def _adjustment_fact_unavailable(fact: dict | None) -> bool:
+    return bool(fact and fact.get("column") == "adjusted_total" and
+                {"adjustment_approval_superseded", "adjustment_dependency_unavailable"}
+                & set(fact.get("evidence_eligibility", {}).get("reason_codes", [])))
+
+
 def _required_fact_ids(facts: list[dict]) -> list[str]:
     selected = {}
     for fact in facts:
         if fact["semantics"].get("required_for_explanation") is not True:
+            continue
+        if _adjustment_fact_unavailable(fact):
             continue
         key = (
             fact["run_id"],
@@ -877,6 +1879,7 @@ def _make_fact(
     value: Any,
     materiality: dict,
     column_defs: dict[str, dict],
+    *, analysis=None,
 ) -> dict:
     exact = _exact(value)
     fact_id = _hash(
@@ -892,11 +1895,29 @@ def _make_fact(
     unit = _fact_unit(row, column, column_defs, run)
     display = _display_value(exact, column, unit)
     semantics = _semantics(row, column, exact, materiality)
+    if (run.get('result') or {}).get('template_id'):
+        semantics['model_scope'] = 'management_forecast'
+        semantics['metric'] = row.get('metric_key') or row.get('driver')
+        semantics['required_for_explanation'] = bool(row.get('template_id') and semantics.get('required_for_explanation'))
     refs = row.get("evidence", {}).get(column, row.get("source_rows", []))
     scope = run.get("finance_scope", {})
     if run.get("engine") == "structured_aggregate":
         dimensions = [*run.get("aggregate_plan", {}).get("group_by", []), "currency", "unit"]
         scope = {**scope, **{key: row[key] for key in dimensions if key in row}}
+    from foundry.finance_professional import cell_evidence_eligibility
+    eligibility = cell_evidence_eligibility(run, row, column, analysis=analysis)
+    identity = {"metric_key": semantics["metric"], "role": semantics["role"], "unit": unit}
+    for key in ("organization", "ledger", "period", "scenario", "currency", "statement", "statement_line",
+                "value_kind", "template_id", "template_version", "scenario_id"):
+        identity_value = row.get(key)
+        if identity_value is None and key in {"template_id", "template_version", "scenario_id"}:
+            identity_value = (run.get("result") or {}).get(key)
+        if identity_value is None and isinstance(scope, dict):
+            values = [entry[key] for entry in scope.values() if isinstance(entry, dict) and entry.get(key) is not None]
+            if values and all(item == values[0] for item in values):
+                identity_value = values[0]
+        if identity_value is not None:
+            identity[key] = identity_value
     return {
         "id": fact_id,
         "run_id": run["id"],
@@ -908,8 +1929,18 @@ def _make_fact(
         "label": _label(row, column),
         "unit": unit,
         "scope": scope,
+        # Script row labels alone must not auto-cite values the draft did not claim.
+        # The deterministic finance engine establishes this canonical result scope.
+        "result_scope": _row_scope(row) if run.get("engine") == "finance" else {},
         "semantics": semantics,
+        "metric_identity": identity,
+        "reference_template": {
+            "body_token": "{{fact:" + fact_id + "}}",
+            "claim": {"basis": "calculation", "fact_id": fact_id, "run_id": run["id"],
+                      "row": row_index, "column": column, "value": exact},
+        },
         "state": _fact_state(value),
+        "evidence_eligibility": eligibility,
         "source_trace": {
             "output_hash": run.get("output_hash"),
             "input_hashes": run.get("input_hashes", {}),
@@ -920,7 +1951,7 @@ def _make_fact(
             "provenance_status": (
                 run.get("result", {}).get("provenance", {}).get("status", "unverified")
                 if run.get("engine") == "structured_aggregate" else
-                "available_for_verification" if run.get("engine") == "finance" else "unverified"
+                "available_for_verification" if eligibility["counts_as_amount_evidence"] else "unverified"
             ),
         },
     }
@@ -1102,10 +2133,17 @@ def _named_money_unit(column: str) -> str | None:
 
 
 def _amount_unit(row: dict, column: str, column_defs: dict[str, dict], run: dict | None) -> Any:
+    row_unit = _row_unit(row)
+    if str(row_unit or "").strip().lower() in FRACTION_UNITS | PERCENT_UNITS | POINT_UNITS:
+        # In long-form rate results, row.unit describes value, not its money
+        # numerator/denominator. Their explicit units or the run's money scope
+        # remain authoritative; an unknown amount unit stays unknown.
+        row_unit = None
     return (
         row.get(f"{column}_unit")
         or _named_money_unit(column)
-        or _row_unit(row)
+        or row.get("amount_unit")
+        or row_unit
         or column_defs.get(column, {}).get("unit")
         or _run_scope_unit(run)
     )
@@ -1400,7 +2438,7 @@ def _evidence_groups_for_run(run: dict, facts: list[dict]) -> list[dict]:
             for index, row in enumerate(rows)
             if isinstance(row, dict)
         ]
-    if method in {"quantity_then_price", "base_weights_with_interaction"}:
+    if method in {"quantity_then_price", "base_weights_with_interaction", "volume_mix_price"}:
         return [
             _row_evidence_group(
                 run,
@@ -1409,7 +2447,9 @@ def _evidence_groups_for_run(run: dict, facts: list[dict]) -> list[dict]:
                 columns,
                 by_cell,
                 group_type="price_quantity_bridge",
-                member_columns=[
+                member_columns=([
+                    "total_variance", "volume_contribution", "mix_contribution", "price_contribution", "residual", "actual", "baseline"
+                ] if method == "volume_mix_price" else [
                     "total_variance",
                     "quantity_contribution",
                     "price_contribution",
@@ -1417,7 +2457,7 @@ def _evidence_groups_for_run(run: dict, facts: list[dict]) -> list[dict]:
                     "residual",
                     "actual",
                     "baseline",
-                ],
+                ]),
             )
             for index, row in enumerate(rows)
             if isinstance(row, dict)
@@ -1568,6 +2608,7 @@ def _evidence_member(
         "source_row_count": (
             fact.get("source_trace", {}).get("source_row_count") if fact else 0
         ),
+        "evidence_eligibility": fact.get("evidence_eligibility", {}) if fact else {},
     }
     if state in {"missing", "not_applicable"}:
         payload["reason"] = (
@@ -1749,6 +2790,21 @@ def _ratio_closure(members: list[dict]) -> dict:
 
 def _price_quantity_closure(members: list[dict]) -> dict:
     by_column = {member.get("column"): member for member in members}
+    if "volume_contribution" in by_column:
+        required = ("volume_contribution", "mix_contribution", "price_contribution", "residual", "total_variance")
+        if any(by_column.get(key, {}).get("value") is None for key in required):
+            return {"status": "missing_data", "equation": "total_variance = volume + mix + price; residual = 0"}
+        consistency = _member_consistency([by_column[key] for key in required])
+        if consistency:
+            return consistency
+        values = {key: Decimal(str(by_column[key]["value"])) for key in required}
+        expected = sum(values[key] for key in required[:3])
+        passed = expected == values["total_variance"] and values["residual"] == 0
+        return {"status": "passed" if passed else "closure_mismatch",
+                "equation": "total_variance = volume + mix + price; residual = 0",
+                "expected": format(expected, "f"), "actual": format(values["total_variance"], "f"),
+                "difference": format(values["total_variance"] - expected, "f"),
+                "inputs": {key: format(value, "f") for key, value in values.items()}}
     required = ("quantity_contribution", "price_contribution", "interaction", "residual", "total_variance")
     missing = [
         column for column in required if by_column.get(column, {}).get("value") is None
@@ -1870,16 +2926,84 @@ def _closure_label(closure: dict) -> str:
     }.get(str(status), str(status))
 
 
-def _fact_context_issues(body: str, facts: list[dict], evidence_groups: list[dict] | None = None) -> list[dict]:
+def _currency_context_issue(prefix: str, candidates: list[dict], facts: list[dict], position: int,
+                            *, monetary_unit=False, after=""):
+    """Bind explicit amount currency labels, including aggregate scope, to facts."""
+    aggregate = r"(?:合计|总计|共计|加总|总额|合并金额|合并余额)"
+    is_aggregate = bool(re.search(aggregate, prefix))
+    caution = re.search(
+        rf"(?:不能|不应|不得|不可|不宜|不要|禁止|并非|不是)\s*(?:直接|简单)?\s*{aggregate}", prefix)
+    if caution and not re.search(
+        r"不是|并非|并不|未必", prefix[:caution.start()]
+    ):
+        return None
+    currencies = {str(fact.get("metric_identity", {}).get("currency", "")).upper()
+                  for fact in facts if fact.get("unit") in MONEY_UNIT_SEGMENTS} - {""}
+    aliases = {"CNY": ("人民币", "RMB"), "USD": ("美元", "美金"), "HKD": ("港元", "港币"),
+               "EUR": ("欧元",), "GBP": ("英镑",), "JPY": ("日元",), "AUD": ("澳元",),
+               "CAD": ("加元",), "CHF": ("瑞郎",)}
+    named = {currency for currency in currencies | aliases.keys() if any(
+        re.search(r"(?<![A-Za-z])" + re.escape(label) + r"(?![A-Za-z])", prefix, re.I)
+        for label in (currency, *aliases.get(currency, ())))}
+    named.update(currency for currency in currencies | aliases.keys() if any(
+        re.match(r"\s*(?:亿元|万元|元)?\s*" + re.escape(label) + r"(?![A-Za-z])", after, re.I)
+        for label in (currency, *aliases.get(currency, ()))))
+    matched = {str(fact.get("metric_identity", {}).get("currency", "")).upper() for fact in candidates}
+    multi_scope = re.search(r"(?:跨|多|两|各|全部|所有)(?:个|种)?币种", prefix)
+    if not named and not multi_scope and (not is_aggregate or not monetary_unit or len(currencies) < 2):
+        return None
+    if not multi_scope and len(named) == 1 and named <= matched:
+        return None
+    return {"code": "fact_currency_mismatch", "severity": "warning", "position": position,
+            "message": "正文金额的币种必须匹配引用事实；其他币种的同值金额不能替代，也不能证明跨币种总额。",
+            "referenced_currencies": sorted(currencies), "named_currencies": sorted(named)}
+
+
+def _fact_context_issues(
+    body: str, facts: list[dict], evidence_groups: list[dict] | None = None, *, runs=(), body_template=None,
+    trusted_fact_ids=(), performance_facts=(), qualification_facts=(),
+) -> list[dict]:
     """Match complete numeric tokens to a compatible fact within their clause.
 
     A shared number is not an identity: select by the nearest financial label,
     then validate its unit and change semantics. Never match 5 inside 15.
     """
-    issues = []
+    from foundry.finance_claim_semantics import check_claim_semantics
+
+    issues = check_claim_semantics(body, facts, runs=runs, body_template=body_template, trusted_fact_ids=trusted_fact_ids,
+                                   performance_facts=performance_facts, qualification_facts=qualification_facts,
+                                   referenced_fact_ids=[fact["id"] for fact in facts])
     closure_check = _body_closure_check(body, facts, evidence_groups or [])
     issues.extend(closure_check["issues"])
     closure_token_positions = closure_check["token_positions"]
+    unit_pattern = (r"(?:百万元|亿元|万元|千元|元)(?:\s*[/／·⋅×*]\s*\w+)*(?:\s*人民币)?"
+                    r"|[%％]|个?\s*百分点|百分比|pct|条|件")
+    # A verified template occurrence binds one exact fact, even when another
+    # currency has the same number. Handwritten numbers keep candidate matching.
+    bound_currency_facts = {}
+    if isinstance(body_template, str):
+        rendered, _ = render_fact_template(body_template, facts)
+        offset = body.find(rendered.strip())
+        leading = len(rendered) - len(rendered.lstrip())
+        by_id = {fact["id"]: fact for fact in facts}
+        if offset >= 0:
+            for match in FACT_TOKEN.finditer(body_template):
+                fact = by_id.get(match[1])
+                if fact:
+                    before, _ = render_fact_template(body_template[:match.start()], facts)
+                    position = offset + len(before) - leading
+                    bound_currency_facts[position] = fact
+                    # Rendering inserts the fact's own unit before a conflicting
+                    # suffix. Check the authored suffix against this exact token.
+                    # A complete word boundary keeps 元旦/元素 out of unit syntax.
+                    written = re.match(
+                        rf"\s*(?:人民币\s*)?([%％](?![/／·⋅×*])|(?:{unit_pattern})(?![\w/／·⋅×*]))",
+                        body_template[match.end():], re.I,
+                    )
+                    if written and not _body_unit_fits_fact(written[1], fact):
+                        issues.append({"code": "fact_unit_mismatch", "severity": "warning",
+                                       "message": "正文单位与引用事实单位不一致。",
+                                       "fact_id": fact["id"], "position": position})
     for token in _body_numbers(body):
         if token["start"] in closure_token_positions:
             continue
@@ -1889,14 +3013,49 @@ def _fact_context_issues(body: str, facts: list[dict], evidence_groups: list[dic
             continue
         start = token["start"]
         end = start + len(token["text"])
-        prefix = re.split(r"[，,；;。\n|]", body[:start])[-1][-60:]
+        clause_prefix = re.split(r"[，,；;。\n|]", body[:start])[-1]
+        unit_match = re.match(rf"\s*(?:人民币\s*)?({unit_pattern})", body[end:], re.I)
+        if (not unit_match and not re.match(r"\s*(项|行|种|天|日|年|月)", body[end:])) or (
+            unit_match and unit_match[1] in MONEY_UNIT_SEGMENTS
+        ):
+            currency_issue = _currency_context_issue(
+                clause_prefix, [bound_currency_facts[start]] if start in bound_currency_facts else candidates,
+                facts, start, after=body[end:],
+                monetary_unit=bool(unit_match and unit_match[1] in MONEY_UNIT_SEGMENTS))
+            if currency_issue:
+                issues.append(currency_issue)
+        prefix = clause_prefix[-60:]
+        equation_parts = re.split(r"[=＝]", clause_prefix)
+        is_equation_total = len(equation_parts) > 2 and not equation_parts[-1].strip()
+        if is_equation_total:
+            # In "利润差异 = 收入影响 20 + ... 费用影响 -5 = 5",
+            # the final value belongs to the left-hand target, not the last
+            # component. Keep checking each intermediate component normally.
+            prefix = equation_parts[0][-60:]
         metric_matches = [(prefix.rfind(label), key) for key, label in METRIC_LABELS.items() if label in prefix]
         metric = max(metric_matches)[1] if metric_matches else None
-        # In '成本利润影响', profit denotes the effect, not a different line item.
-        impact = bool(re.search(r"利润.{0,3}(?:影响|贡献)|profit.{0,3}(?:impact|effect)", prefix, re.I))
+        # '成本贡献'/'费用贡献' also name the profit effect, rather than the
+        # underlying cost/expense change whose sign is reversed below.
+        last_metric_position = max((at for at, _ in metric_matches), default=-1)
+        impact = any(match.end() > last_metric_position for match in re.finditer(
+            r"利润.{0,3}(?:影响|贡献|拖累|拉动)|(?:成本|费用)\s*贡献|profit.{0,3}(?:impact|effect)", prefix, re.I))
+        # An explicitly labelled profit bridge/effect equation scopes every
+        # component. Its last cost label must not flip that component into a
+        # cost movement or steal the final profit-total label.
+        bridge_impact = bool(re.search(
+            r"利润(?:差异)?桥[^:：=＝]{0,12}[:：]|利润(?:影响|贡献)(?:合计)?\s*[=＝]",
+            re.split(r"[；;。\n|]", body[:start])[-1]))
+        # A bridge title supplies context only when the local component has
+        # no explicit movement verb. "成本减少" still describes cost movement,
+        # whose sign is opposite to its profit impact.
+        movement = r"(?:增加|增长|上升|提升|减少|下降|降低)"
+        local_movement = metric in {"cost", "expense"} and (
+            bool(re.search(movement, prefix[last_metric_position:])) or
+            bool(re.search(movement + r"(?:了)?\s*" + re.escape(METRIC_LABELS[metric]), prefix)))
+        impact = impact or (bridge_impact and not local_movement)
         if impact:
             non_profit = [(at, key) for at, key in metric_matches if key != 'profit']
-            metric = max(non_profit)[1] if non_profit else None
+            metric = max(non_profit)[1] if non_profit else 'profit' if is_equation_total else None
         labelled = [f for f in candidates if not metric or f['semantics'].get('metric') == metric or f['semantics'].get('metric') not in METRIC_LABELS]
         if not labelled:
             issues.append({
@@ -1915,18 +3074,18 @@ def _fact_context_issues(body: str, facts: list[dict], evidence_groups: list[dic
         alternatives = []
         for fact in labelled:
             found = []
-            unit_match = re.match(r"\s*(亿元|万元|元/件|元|[%％]|个?\s*百分点|条|件)", body[end:])
-            if unit_match and not _body_unit_fits_fact(unit_match[1], fact):
+            if start not in bound_currency_facts and unit_match and not _body_unit_fits_fact(unit_match[1], fact):
                 found.append({'code': 'fact_unit_mismatch', 'severity': 'warning', 'message': '正文单位与引用事实单位不一致。'})
             semantic = fact['semantics']
             if semantic.get('role') == 'profit_impact' or fact['column'] in {'amount_change', 'total_variance', 'quantity_contribution', 'price_contribution', 'interaction'}:
                 exact = Decimal(str(fact['value']))
                 if semantic.get('role') == 'profit_impact' and semantic.get('metric') in {'cost', 'expense'} and metric in {'cost', 'expense'} and not impact:
                     exact = -exact
-                sign_words = [(prefix.rfind(w), -1) for w in NEGATIVE_WORDS if w in prefix] + [(prefix.rfind(w), 1) for w in POSITIVE_WORDS if w in prefix]
+                positive_words = (*POSITIVE_WORDS, "拉动") if impact else POSITIVE_WORDS
+                sign_words = [(prefix.rfind(w), -1) for w in NEGATIVE_WORDS if w in prefix] + [(prefix.rfind(w), 1) for w in positive_words if w in prefix]
                 direction = max(sign_words)[1] if sign_words else None
                 stated = abs(value) * direction if direction else value
-                if stated and exact and (stated > 0) != (exact > 0):
+                if (direction == 1 and value < 0) or (stated and exact and (stated > 0) != (exact > 0)):
                     found.append({'code': 'fact_direction_mismatch', 'severity': 'warning', 'message': '正文增减方向与所引用财务影响不一致。'})
             alternatives.append([{**issue, 'fact_id': fact['id'], 'position': start} for issue in found])
         # Another fact with the same value and matching label may be the correct reference.
@@ -1937,12 +3096,15 @@ def _fact_context_issues(body: str, facts: list[dict], evidence_groups: list[dic
 def _body_unit_fits_fact(written: str, fact: dict) -> bool:
     """Whether the unit written after a number fits the fact: 个百分点 only a 百分点 fact, % any percentage unit
     (%, ％, pct, 百分比; a ratio column's facts read % too), anything else the fact's own unit."""
-    unit = re.sub(r"\s+", "", str(fact.get("unit") or "")).lower()
-    if "百分点" in written:
+    unit = re.sub(r"\s+", "", str(fact.get("unit") or "")).lower().replace("／", "/")
+    written = re.sub(r"\s+", "", written).lower().replace("／", "/")
+    unit = unit.removeprefix("人民币").removesuffix("人民币")
+    written = written.removeprefix("人民币").removesuffix("人民币")
+    if written in {POINTS_UNIT, "个百分点"}:
         return unit == POINTS_UNIT
-    if written in {"%", "％"}:
+    if written in PERCENT_UNITS:
         return unit in PERCENT_UNITS
-    return written == str(fact.get("unit") or "")
+    return written == unit
 
 
 def _body_closure_check(body: str, facts: list[dict], evidence_groups: list[dict]) -> dict:
@@ -1950,6 +3112,9 @@ def _body_closure_check(body: str, facts: list[dict], evidence_groups: list[dict
     issues: list[dict] = []
     if not facts:
         return {"token_positions": token_positions, "issues": issues}
+    labelled = _labeled_profit_closure_check(body, facts, evidence_groups)
+    token_positions.update(labelled["token_positions"])
+    issues.extend(labelled["issues"])
     for match in CLOSURE_EXPR.finditer(body):
         span_start, span_end = match.span("expr")
         context = body[max(0, span_start - 40): min(len(body), span_end + 30)]
@@ -1958,6 +3123,20 @@ def _body_closure_check(body: str, facts: list[dict], evidence_groups: list[dict
         if not _has_closure_expression_boundaries(body, span_start, span_end):
             continue
         target_group_types = _closure_target_group_types(body, span_start)
+        if not target_group_types:
+            prefix = re.split(r"[。；;\n]", body[max(0, span_start - 80):span_start])[-1]
+            # An unlabelled closure may borrow identity from exactly one
+            # complete referenced group. Never override an explicit metric.
+            if not any(label in prefix for label in METRIC_LABELS.values()):
+                referenced = {fact.get("id") for fact in facts}
+                eligible = [group for group in evidence_groups
+                            if group.get("status") == "complete"
+                            and group.get("closure", {}).get("status") == "passed"
+                            and _ordered_closure_members(group)
+                            and all(member.get("fact_id") in referenced
+                                    for member in _ordered_closure_members(group))]
+                if len(eligible) == 1:
+                    target_group_types = {eligible[0]["group_type"]}
         if not target_group_types:
             continue
         parsed = _parse_signed_closure_expression(match.group("expr"))
@@ -1984,9 +3163,55 @@ def _body_closure_check(body: str, facts: list[dict], evidence_groups: list[dict
     return {"token_positions": token_positions, "issues": issues}
 
 
-def _has_closure_expression_boundaries(body: str, start: int, end: int) -> bool:
-    before = body[:start].rstrip()[-1:]
-    after = body[end:].lstrip()[:1]
+def _labeled_profit_closure_check(body: str, facts: list[dict], evidence_groups: list[dict]) -> dict:
+    """Bind a same-clause labelled equation to one fully cited source bridge.
+
+    Only the four signed contributions gain profit-impact meaning. Actual or
+    budget prose, another sentence and other arithmetic remain ordinary claims.
+    """
+    positions: set[int] = set()
+    issues: list[dict] = []
+    by_id = {fact.get("id"): fact for fact in facts}
+    for match in LABELED_PROFIT_CLOSURE_EXPR.finditer(body):
+        start, end = match.span("expr")
+        if not _has_closure_expression_boundaries(body, start, end, preserve_lines=True):
+            continue
+        labels = [match.group(f"label{i}") for i in range(4)]
+        values = [re.sub(r"\s+", "", match.group(f"value{i}")) for i in range(4)]
+        parsed = _parse_signed_closure_expression("+".join(values[:3]) + "=" + values[3])
+        matching = []
+        if labels == ["收入", "成本", "费用", "利润"] and parsed and parsed["balanced"]:
+            for group in evidence_groups:
+                if not _matching_body_closure_group(parsed, facts, [group], {"profit_bridge"}):
+                    continue
+                members = _ordered_closure_members(group)
+                if len([member for member in group.get("members", [])
+                        if member.get("column") == "contribution"]) != 4:
+                    continue
+                if all(
+                    by_id[member["fact_id"]].get("evidence_eligibility", {}).get("counts_as_amount_evidence")
+                    and by_id[member["fact_id"]].get("column") == "contribution"
+                    and by_id[member["fact_id"]].get("semantics", {}).get("metric") == metric
+                    and _body_unit_fits_fact(match.group(f"unit{i}"), by_id[member["fact_id"]])
+                    for i, (member, metric) in enumerate(zip(members, ("revenue", "cost", "expense", "profit")))
+                ):
+                    matching.append(group)
+        if len(matching) == 1:
+            positions.update(start + token["start"] for token in _body_numbers(body[start:end]))
+        else:
+            issues.append({
+                "code": "body_closure_mismatch", "severity": "warning",
+                "message": "带科目与单位的利润闭合算式必须匹配唯一完整且已引用的来源证据组。",
+                "position": start, "text": match.group("expr"),
+                "body_excerpt": _body_excerpt(body, start), "target_group_types": ["profit_bridge"],
+            })
+    return {"token_positions": positions, "issues": issues}
+
+
+def _has_closure_expression_boundaries(body: str, start: int, end: int, *, preserve_lines=False) -> bool:
+    whitespace = " \t\r\u00a0\u2009\u202f\u3000" if preserve_lines else None
+    before = body[:start].rstrip(whitespace)[-1:]
+    after = body[end:].lstrip(whitespace)[:1]
     valid_before = before in {"", "（", "(", "[", ":", "：", " ", "，", ",", "；", ";", "。", "\n"}
     valid_after = after in {"", "）", ")", "]", "，", ",", "；", ";", "。", "\n"}
     return valid_before and valid_after
@@ -2077,7 +3302,9 @@ def _ordered_closure_members(group: dict) -> list[dict]:
             for member in members
             if isinstance(member, dict)
         }
-        order = ("quantity_contribution", "price_contribution", "interaction", "residual", "total_variance")
+        order = (("volume_contribution", "mix_contribution", "price_contribution", "residual", "total_variance")
+                 if "mix_contribution" in by_column else
+                 ("quantity_contribution", "price_contribution", "interaction", "residual", "total_variance"))
         return [by_column[key] for key in order if key in by_column]
     return []
 
@@ -2360,7 +3587,10 @@ def _legacy_points_prepared(prepared: dict) -> dict | None:
 def _trusted_appendix_regions_as(
     analysis, body: str, spec: dict, appendix: str, meta: dict, prepared: dict, recipe_report: dict | None
 ) -> list[dict]:
-    rebuilt_base = render_evidence_appendix(prepared).get("body", "")
+    render_version = meta.get("render_version")
+    if meta.get("schema_version") != 1 or type(render_version) is not int or render_version not in {1, 2, 3, 4}:
+        return []
+    rebuilt_base = _render_evidence_appendix(prepared, render_version=render_version).get("body", "")
     if not isinstance(rebuilt_base, str) or not rebuilt_base:
         return []
     rebuilt_requirement = _rebuilt_input_gap_appendix(analysis, spec, prepared, recipe_report)
@@ -2368,10 +3598,8 @@ def _trusted_appendix_regions_as(
         return []
     rebuilt_gap, references = rebuilt_requirement
     rebuilt = rebuilt_base + rebuilt_gap
-    expected = evidence_appendix_metadata(rebuilt, base_body=rebuilt_base)
+    expected = evidence_appendix_metadata(rebuilt, base_body=rebuilt_base, render_version=render_version)
     if any(meta.get(key) != expected[key] for key in ("body_sha256", "base_body_sha256")):
-        return []
-    if meta.get("schema_version") != 1 or meta.get("render_version") != EVIDENCE_APPENDIX_RENDER_VERSION:
         return []
     if appendix != rebuilt:
         return []
@@ -2455,7 +3683,7 @@ def _rebuilt_input_gap_appendix(
 
 
 def _readability_suggestions(body: str, generated_regions: list[dict]) -> dict:
-    issues: list[dict] = []
+    issues: list[dict] = _ar_wording_suggestions(body, generated_regions)
     for block in _manager_readability_blocks(body, generated_regions):
         text = block["text"]
         stripped = text.strip()
@@ -2482,6 +3710,99 @@ def _readability_suggestions(body: str, generated_regions: list[dict]) -> dict:
         "status": "suggestions" if located else "clear",
         "issues": located,
     }
+
+
+def _ar_wording_suggestions(body: str, generated_regions: list[dict]) -> list[dict]:
+    """Advise on bounded ambiguous relations, without asserting an accounting error.
+
+    Unlike paragraph density, these relations also matter in bullets and table
+    cells. Mask code and trusted generated text with spaces to retain offsets.
+    """
+    masked = list(body)
+    in_code = False
+    offset = 0
+    for line in body.splitlines(keepends=True):
+        fence = line.strip().startswith(("```", "~~~"))
+        if fence or in_code:
+            masked[offset:offset + len(line)] = " " * len(line)
+        if fence:
+            in_code = not in_code
+        offset += len(line)
+    for match in re.finditer(r"(`+)[^\n]*?\1", body):
+        masked[match.start():match.end()] = " " * len(match.group())
+    for region in generated_regions:
+        masked[region["start"]:region["end"]] = " " * (region["end"] - region["start"])
+
+    patterns = (
+        ("receipt_recognition_pairing_ambiguous", re.compile(
+            r"收入(?:与|和|及)(?:其)?(?:对应)?收款分别按履约(?:条件)?确认"
+            r"(?:与|和|及)债权形成(?:追踪|说明|确认)|"
+            r"(?P<receipt_subject>(?<![应预未])收款(?:按|依据|依)履约(?:假设|条件)?确认)"
+            r"(?![ \t*_~]*的)(?=$|[，,。；;！？!?、）)」”\"\s*_~])"
+        ), "收入与收款的确认依据配对不清。建议分开写：收入按履约假设确认；"
+           "对已识别债权的收款属于清偿并写明对象；部分清偿不能写成结清。"
+           "来源追踪另述，不从汇总数推定交易分配。"),
+        ("receipt_offset_object_ambiguous", re.compile(
+            r"(?<![应预未])收款(?:用于)?冲抵[^，,。；;！？!?\n|]{0,64}?"
+            r"(?<![应预未])收款(?=$|[，,。；;！？!?、）)」”\"\s])"
+        ), "收款与冲抵对象重复，清偿对象不清。建议按来源写明被清偿的已识别债权；"
+           "部分清偿不能写成结清。若来源只给汇总数，保留分配缺口，不假定所有收款都经过赊销应收。"),
+        ("receipt_balance_modifier_ambiguous", re.compile(
+            r"(?<![应预未])收款[ \t]*(?:（[ \t]*(?:形成|产生)(?:了)?未收(?:款)?余额[ \t]*）|"
+            r"\([ \t]*(?:形成|产生)(?:了)?未收(?:款)?余额[ \t]*\))"
+        ), "括号中余额形成的主语不清。建议按来源写明未收价款形成余额；"
+           "对已识别债权的收款属于清偿或冲减，不从汇总数推定具体收款归属。"),
+    )
+    issues = []
+    for segment in re.finditer(r"[^。！？!?；;\n|]+[。！？!?；;]?", "".join(masked)):
+        text = segment.group()
+        for code, pattern, message in patterns:
+            for match in pattern.finditer(text):
+                if not _ar_wording_asserted(
+                    text, match.start(), match.end(),
+                    receipt_subject=bool(match.groupdict().get("receipt_subject")),
+                ):
+                    continue
+                position = segment.start() + match.start()
+                issues.append({"code": code, "severity": "suggestion", "message": message,
+                               "position": position, "text": body[position:position + len(match.group())]})
+    return issues
+
+
+def _ar_wording_asserted(text: str, start: int, end: int, *, receipt_subject: bool = False) -> bool:
+    """Only local denial, questions and explicit editorial context exempt a match."""
+    prefix, suffix = text[:start], text[end:]
+    if text.endswith(("?", "？")):
+        return False
+    local = re.split(r"[，,]", prefix)[-1]
+    if receipt_subject:
+        # Only the new collection-subject relation opts into these qualifiers.
+        if re.search(r"(?:如果|若(?!干))", local):
+            return False
+        if re.search(
+            r"(?:并非|不是)[\s“「『\"]*(?:本期|当期|本月)?(?:履约)?(?:服务)?$", local,
+        ):
+            return False
+    if re.search(r"(?:是否|能否|可否|若出现|如果出现|假设|假如)", local):
+        return False
+    if re.search(r"(?:不能|不应|不要|不得|不可|避免)(?:把|将|说|写|表述|描述)", local):
+        return False
+    if re.search(r"(?:并非|不是)[\s“「『\"]*(?:本期|当期)?(?:履约)?$", local):
+        return False
+    # A quoted example may include commas after the matched relation. Its own
+    # explicit correction/denial applies; an endorsed quotation still advises.
+    for opening, closing in (("“", "”"), ("「", "」"), ("『", "』"), ('"', '"')):
+        quoted = (prefix.count(opening) % 2 == 1 if opening == closing else
+                  prefix.rfind(opening) > prefix.rfind(closing))
+        if quoted and closing in suffix:
+            suffix = suffix.split(closing, 1)[1]
+            break
+    return not re.match(
+        r"[\s”」』\"]*(?:[，,]与(?:本期|当期)?收入确认分别对应)?"
+        r"(?:[，,]\s*(?:这一|该)(?:说法|表述)|(?:的|这一)?(?:说法|表述)?)"
+        r"(?:是)?(?:并)?(?:不成立|不正确|不准确|非正确|错误|有歧义|不清|只是(?:假设|示例))",
+        suffix,
+    )
 
 
 def _manager_readability_blocks(body: str, generated_regions: list[dict]) -> list[dict]:
@@ -2643,17 +3964,42 @@ def _non_body_issue_origin(issue: dict) -> str:
     return "manager_body"
 
 
-def _generated_appendix_heading_number_spans(body: str, prepared: dict) -> list[tuple[int, int]]:
-    # An appendix saved before 百分点 had its own display is found as it was written (_legacy_points_prepared).
-    for candidate in (prepared, _legacy_points_prepared(prepared)):
-        spans = _heading_number_spans_as(body, candidate) if candidate is not None else []
-        if spans:
-            return spans
+def _generated_aging_audit_number_spans(
+    body: str, generated_regions: list[dict], prepared: dict
+) -> list[tuple[int, int]]:
+    """Only exact source-rebuilt audit metadata inside a trusted appendix.
+
+    This does not bind a financial claim or qualify detail amounts. Manager
+    prose and notes keep the ordinary citation and claim checks.
+    """
+    from foundry.finance_native_drafts import render_aging_audit_appendix
+
+    audit = render_aging_audit_appendix(prepared.get("aging_audit_metadata"))
+    if not audit:
+        return []
+    for region in generated_regions:
+        for candidate in (audit, _canonical_report_markdown(audit)):
+            if not candidate:
+                continue
+            start = body.find(candidate, region["start"], region["end"])
+            if start >= 0:
+                return [(start, start + len(candidate))]
     return []
 
 
-def _heading_number_spans_as(body: str, prepared: dict) -> list[tuple[int, int]]:
-    appendix = render_evidence_appendix(prepared).get("body", "")
+def _generated_appendix_heading_number_spans(body: str, prepared: dict) -> list[tuple[int, int]]:
+    # An appendix saved before 百分点 had its own display is found as it was written (_legacy_points_prepared).
+    for candidate in (prepared, _legacy_points_prepared(prepared)):
+        if candidate is not None:
+            for render_version in (4, EVIDENCE_APPENDIX_RENDER_VERSION, 2, 1):
+                spans = _heading_number_spans_as(body, candidate, render_version=render_version)
+                if spans:
+                    return spans
+    return []
+
+
+def _heading_number_spans_as(body: str, prepared: dict, *, render_version: int) -> list[tuple[int, int]]:
+    appendix = _render_evidence_appendix(prepared, render_version=render_version).get("body", "")
     if not appendix:
         return []
     rendered = appendix
@@ -2750,6 +4096,67 @@ def _period_segment_spans(name: str, base: int) -> list[tuple[int, int]]:
     return spans
 
 
+def _inline_ordinal_heading(prose: str) -> bool:
+    """A prose section label is positive role evidence, not an arbitrary unit."""
+    heading = re.match(r"([^：:\n。；;！？!?]{1,64})[：:][ \t]*(\S)", prose)
+    if not heading:
+        return False
+    title = heading[1].strip()
+    return bool(re.fullmatch(
+        r"[\u4e00-\u9fff]*(?:范围|说明|区别|背景|概况|摘要|目的|目标|原则|方法|步骤|条件|限制|"
+        r"假设|风险|提示|结论|建议|事项|依据|来源|口径|对照|比较|差异|边界|结果|顺序)", title)
+        or re.fullmatch(r"(?:[A-Za-z]+[ -]+)*(?:scope|notes?|background|summary|purpose|method|steps?|"
+                        r"conditions?|limitations?|assumptions?|risks?|conclusions?|comparison|results?)",
+                        title, re.IGNORECASE))
+
+
+def _inline_ordinal_quantified_clause(prose: str) -> bool:
+    """A quantified subject with its own predicate can continue a headed list."""
+    return bool(re.match(
+        r"(?:[一二三四五六七八九十百千万零〇两]+|[1-9]\d*|各|每|若干|数|多)"
+        r"(?:项|条|类|组|个)[\u4e00-\u9fff]{1,32}?(?:均|都|皆)"
+        r"(?:有|需|须|应|可|已|是|为|不)[^\s。；;！？!?]", prose))
+
+
+def _inline_ordinal_spans(body: str) -> list[tuple[int, int]]:
+    """Only consecutive, prefixed prose enumeration markers have an ordinal role."""
+    marker = re.compile(r"(?P<opening>[（(])(?P<number>[1-9]\d?)(?P<closing>[）)])")
+    spans, offset = [], 0
+    for paragraph in re.split(r"(\n[ \t]*\n)", body):
+        matches = list(marker.finditer(paragraph))
+        if len(matches) >= 2 and [m['number'] for m in matches] == [str(i) for i in range(1, len(matches) + 1)]:
+            prose_items = [paragraph[m.end():matches[i + 1].start() if i + 1 < len(matches)
+                                     else len(paragraph)].lstrip(' \t') for i, m in enumerate(matches)]
+            headings = [_inline_ordinal_heading(prose) for prose in prose_items]
+            prefix = paragraph[:matches[0].start()].strip()
+            valid = not prefix or re.fullmatch(
+                r"(?:定性)?(?:说明|范围|限制|风险|注意事项|要点|事项|步骤|建议|结论|核查|检查|复核)"
+                r"(?:(?:与|及|和)(?:说明|范围|限制|风险|要点|事项|建议|结论))*[：:]", prefix)
+            if not valid and headings[0] and re.search(r"\n[ \t]*$", paragraph[:matches[0].start()]):
+                valid = True
+            for index, match in enumerate(matches):
+                if {"(": ")", "（": "）"}[match['opening']] != match['closing']:
+                    valid = False
+                if index and not re.search(r"[。；;！？!?\n][ \t]*$", paragraph[:match.start()]):
+                    valid = False
+                prose = prose_items[index]
+                # Require an explicit prose/action opening. Arbitrary nouns may
+                # be units or currencies; their spelling is not an exemption.
+                if not re.match(
+                    r"(?:(?:本|该)(?:期|次|例|结果|模型|项)|"
+                    r"(?:先|再|随后|最后)?(?:核对|复核|检查|核查|确认|记录|说明|完成|保留)|"
+                    r"(?:现金|应收|检查差额|收入|成本|利润|金额|边界|范围|风险)(?:为|是|有|需|应|须)|"
+                    r"(?:Review|Check|Confirm|Record|First|Next)\b)", prose
+                ) and not headings[index] and not (
+                    any(headings[:index]) and _inline_ordinal_quantified_clause(prose)
+                ):
+                    valid = False
+            if valid:
+                spans.extend((offset + m.start('number'), offset + m.end('number')) for m in matches)
+        offset += len(paragraph)
+    return spans
+
+
 def _body_numbers(body: str, *, ignored_spans: list[tuple[int, int]] | None = None) -> list[dict]:
     ignored_spans = ignored_spans or []
     footnote_spans = [
@@ -2759,7 +4166,7 @@ def _body_numbers(body: str, *, ignored_spans: list[tuple[int, int]] | None = No
         match.span("number")
         for match in re.finditer(r"(?m)^\[\^(?P<number>\d+)\]:", body)
     ]
-    ignored_spans = ignored_spans + footnote_spans + footnote_definition_spans
+    ignored_spans = ignored_spans + footnote_spans + footnote_definition_spans + _inline_ordinal_spans(body)
     date_spans = [match.span() for match in DATE_SPAN.finditer(body)]
     # 「1–8 月」「1 至 8 月」是期间；「差异–500」「5–8 亿元」「——21086」仍是金额。
     date_spans += [match.span() for match in PERIOD_RANGE.finditer(body)]
@@ -2803,7 +4210,7 @@ def _numbers_from_text(text: str) -> set[str]:
 
 
 def _normalize_number(text: str) -> str:
-    text = str(text).strip().replace(",", "").replace("％", "%")
+    text = str(text).strip().replace(",", "").replace("％", "%").replace("−", "-").replace("－", "-")
     if text.endswith("%"):
         try:
             return format((Decimal(text[:-1]) / Decimal(100)).normalize(), "f")

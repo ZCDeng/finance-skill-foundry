@@ -1,0 +1,41 @@
+{
+  "case_id": "E01--base",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "budget_volume",
+      "value": "100"
+    },
+    {
+      "name": "budget_prices",
+      "value": "10,20"
+    },
+    {
+      "name": "budget_mix",
+      "value": "0.5,0.5"
+    },
+    {
+      "name": "actual_volume",
+      "value": "120"
+    },
+    {
+      "name": "actual_prices",
+      "value": "12,18"
+    },
+    {
+      "name": "actual_mix",
+      "value": "0.6,0.4"
+    },
+    {
+      "name": "quantity_unit",
+      "value": "件"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "按量→结构→价顺序分解收入差异，保存可复算说明。"
+}

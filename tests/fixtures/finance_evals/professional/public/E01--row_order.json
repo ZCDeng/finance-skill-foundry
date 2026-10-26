@@ -1,0 +1,25 @@
+{
+  "case_id": "E01--row_order",
+  "context": {
+    "assumptions": "仅包含明确提供的交易；未给税、息、汇兑等不擅自补充，适用性不足时说明限制",
+    "currency": "CNY",
+    "purpose": "management unless explicitly stated in data",
+    "unit": "元"
+  },
+  "data": [
+    {
+      "name": "budget",
+      "value": "B:50@20;A:50@10"
+    },
+    {
+      "name": "actual",
+      "value": "B:48@18;A:72@12"
+    },
+    {
+      "name": "quantity_unit",
+      "value": "件"
+    }
+  ],
+  "schema_version": "professional-development-v1-20261023",
+  "task": "以输入产品顺序分解收入差异。"
+}

@@ -38,6 +38,11 @@ KINDS = frozenset({"subtotal", "tie_out", "formula"})
 FORMULAS = {
     # Σ sign × input: a roll-forward (年初 + 新增 − 收回 − 核销 = 期末) whose signs the declarer states.
     "signed_sum": {"label": "加减勾稽", "required": (), "optional": ()},
+    # Closure of source-reported contributions, not a reperformance of their decomposition.
+    "volume_mix_price_closure": {
+        "label": "量结构价贡献闭合",
+        "required": ("volume_contribution", "mix_contribution", "price_contribution"), "optional": (),
+    },
     "dso": {
         "label": "应收天数重算",
         "required": ("ar_end",),
@@ -280,6 +285,8 @@ def _formula_value(control: dict[str, Any], values: dict[str, Decimal]) -> Decim
     formula = control["formula"]
     if formula == "signed_sum":
         return sum((values[name] * int(side.get("sign", "1")) for name, side in control["inputs"].items()), Decimal(0))
+    if formula == "volume_mix_price_closure":
+        return sum((values[name] for name in FORMULAS[formula]["required"]), Decimal(0))
     params = resolve_params(control["params"])
     if formula == "dso":
         computed = _m_dso(values, params)
@@ -690,6 +697,10 @@ def applies_to(disposition: dict[str, Any], result: dict[str, Any] | None) -> bo
         disposition.get("status") == result.get("status")
         and disposition.get("difference") == result.get("difference")
         and disposition.get("source_hashes") == result.get("source_hashes")
+        and ((not (disposition.get("professional_identity") or {}).get("rule_dependencies")
+              and not (result.get("professional_identity") or {}).get("rule_dependencies"))
+             or (disposition.get("professional_identity") or {}).get("rule_fingerprint")
+             == (result.get("professional_identity") or {}).get("rule_fingerprint"))
     )
 
 
@@ -703,6 +714,8 @@ def control_issue(row: dict[str, Any], disposition: dict[str, Any] | None, *, re
     Only a reviewed (where review is required) acceptance clears a difference. A difference
     that changed since it was decided is open again; the old decision is shown, not applied.
     """
+    if row.get("professional_reconfirmation_required") and row.get("state") != "retired":
+        return {"state": "professional_reconfirmation_required", "blocking": True}
     if row.get("state") != CONFIRMED:
         return None
     result = row.get("result")

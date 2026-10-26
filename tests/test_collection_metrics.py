@@ -63,7 +63,7 @@ def test_break_even_collection_rate_and_gap():
     assert gap["unit"] == "百分点"
     assert gap["display_value"] == "-0.98 个百分点"
     assert (gap["level"], gap["level_label"]) == ("red", "红")
-    assert "倒贴现金" in gap["note"]
+    assert "经营支出筛查存在缺口" in gap["note"]
     assert rows["collection_gap_total"]["level"] == "green"
     assert rows["collection_gap_total"]["display_value"] == "+6.80 个百分点"
 

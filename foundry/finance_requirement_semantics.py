@@ -40,14 +40,23 @@ def requirement_semantics(analysis, record):
             **({'grain_basis': item['grain_basis']} if item.get('grain_basis') else {}),
         } for item in record.get('items', [])], key=lambda item: item['id']),
     }
-    return {'semantic_version': SEMANTIC_VERSION, 'semantic_basis': basis,
+    from foundry.finance_professional import requirement_rule_identity
+    identity = requirement_rule_identity(analysis, record, historical=bool(record.get('seq')))
+    version = 2 if identity else SEMANTIC_VERSION
+    if identity:
+        basis.update(version=version, professional_identity=identity)
+    return {'semantic_version': version, 'semantic_basis': basis,
             'semantic_fingerprint': _hash(basis)}
 
 
 def verified_requirement_fingerprint(analysis, record):
-    if not record or record.get('semantic_version') != SEMANTIC_VERSION:
+    if not record or record.get('semantic_version') not in {1, 2}:
         return None
     computed = requirement_semantics(analysis, record)
+    from foundry.finance_professional import valid_rule_identity
+    identity = (computed.get('semantic_basis') or {}).get('professional_identity')
+    if identity and not valid_rule_identity(identity):
+        return None
     fingerprint = computed['semantic_fingerprint']
     return fingerprint if (fingerprint and record.get('semantic_fingerprint') == fingerprint
                            and record.get('semantic_basis') == computed['semantic_basis']) else None
@@ -64,8 +73,15 @@ def capture_requirements(analysis, authorize=None, *, allowed=None):
             authorize(record.get('bindings', {}))
         except FoundryError:
             record = None
+    from foundry.finance_professional import validate_requirement_identity, valid_rule_identity
+    identity = validate_requirement_identity(analysis, record, allowed=allowed) if record else None
+    if identity and (not valid_rule_identity((record.get('semantic_basis') or {}).get('professional_identity'))
+                     or not verified_requirement_fingerprint(analysis, record)):
+        raise FoundryError('professional_identity_invalid: revise the original requirements with their real context '
+                           'and complete required_bindings before recalculating; historical records stay unchanged')
     return {'requirements_id': record['id'] if record else None,
-            'requirements_semantic_fingerprint': analysis.fingerprint_in_view(record, allowed)}
+            'requirements_semantic_fingerprint': analysis.fingerprint_in_view(record, allowed),
+            **({'requirements_rule_identity': identity} if identity else {})}
 
 
 def run_has_equivalent_requirements(analysis, run, current, *, allowed=None, cache=None):

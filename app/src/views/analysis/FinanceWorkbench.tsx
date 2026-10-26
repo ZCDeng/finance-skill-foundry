@@ -125,6 +125,8 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
   const [openingCash, setOpeningCash] = useState('');
   const [delayDays, setDelayDays] = useState('14');
   const [baselineScenarioId, setBaselineScenarioId] = useState('');
+  const [boundaryScenarioId, setBoundaryScenarioId] = useState('');
+  const [boundaryPreview, setBoundaryPreview] = useState<{ scenario_id: string; period: string; boundaries: Record<string, { value: string; source_rows: unknown[] }> } | null>(null);
   const hasSuccessfulResults = runs.some((row) => row.execution_status === 'succeeded' || row.execution_status === 'success');
   const settings = useSettingsPanel(!hasSuccessfulResults);
   const setSetupOpen = settings.setOpen;
@@ -250,6 +252,8 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
         name: `${actualScope.period || '本期'}${actualScope.organization ? ` ${actualScope.organization}` : ''} 经营范围`,
         bindings, scopes, ...(accountMapId ? { account_map_id: accountMapId } : {}),
         ...(Object.keys(policies).length ? { policies } : {}),
+        ...(base ? { parent_id: base.id } : {}),
+        ...(base?.reporting_profile ? { reporting_profile: base.reporting_profile } : {}),
       }) as Answer<FinanceContext>);
       setContextId(context.id);
       setFinance((value) => value ? {
@@ -424,6 +428,40 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
       {calculate(lead, 'default')}
     </div>
     {contextId && <div className="analysis-actions analysis-actions--end">{rerun(lead)}{rerun(second)}</div>}
+    {selectedContext?.reporting_profile && <details className="analysis-details"><DisclosureSummary>专业口径确认</DisclosureSummary>
+      <p>{selectedContext.reporting_profile.basis} · {selectedContext.reporting_profile.basis_version} · {selectedContext.reporting_profile.purpose === 'forecast' ? '管理预测' : selectedContext.reporting_profile.purpose === 'statutory' ? '法定列报（仅已支持方法可用）' : '管理分析'}</p>
+      <p>年度起始 {selectedContext.reporting_profile.fiscal_year_start}；有效期间 {selectedContext.reporting_profile.effective_period.start} 至 {selectedContext.reporting_profile.effective_period.end}；提前采用 {selectedContext.reporting_profile.early_adoption === 'unknown' ? '待核实' : selectedContext.reporting_profile.early_adoption ? '是' : '否'}。</p>
+      <p>主体 {selectedContext.reporting_profile.entity_scope}；本位币 {selectedContext.reporting_profile.functional_currency}；列报 {selectedContext.reporting_profile.presentation_currency} / {selectedContext.reporting_profile.presentation_unit}。</p>
+      {Object.entries(selectedContext.reporting_profile.policies ?? {}).map(([key, value]) => <p key={key}>{key === 'depreciation_start' ? '折旧起算' : '现金流量表方法'}：{({ in_service_month: '达到可使用状态当月', following_month: '达到可使用状态次月', direct: '直接法', indirect: '间接法' } as Record<string, string>)[String(value)] ?? String(value)}。</p>)}
+      <p>确认只适用于当前来源、期间和所列字段。换月或换资料需要重新确认。</p>
+      <Button variant="outline" type="button" disabled={locked} onClick={() => void track('finance.save', '正在确认专业口径…', async (done) => {
+        const api = bridge(); if (!api?.financeCall) throw new Error('此版本不支持专业口径确认。');
+        const profile = selectedContext.reporting_profile!;
+        const fields = Object.entries(profile).flatMap(([key, value]) => typeof value === 'object' && value !== null ? Object.keys(value).map((child) => `${key}.${child}`) : [key]);
+        unwrap(await api.financeCall(taskId, 'finance-profile-confirm', { context_id: selectedContext.id, confirmed_fields: fields }) as Answer<unknown>);
+        done('已确认当前专业口径。新增分析将按该口径校验；旧运行保留历史身份。');
+        await onRefresh();
+      })}>确认所列专业口径</Button>
+      <FieldShell label="管理预测模型"><NativeSelect aria-label="管理预测模型" value={boundaryScenarioId} onChange={(event) => { setBoundaryScenarioId(event.target.value); setBoundaryPreview(null); }}>
+        <option value="">选择需要确认边界的模型</option>
+        {(finance?.scenarios ?? []).filter((item) => item.context_id === selectedContext.id && (item.inputs as Record<string, unknown> | undefined)?.template_id === 'linked_three_statement_management_v1').map((item) => <option key={String(item.id)} value={String(item.id)}>{String(item.label ?? item.id)}</option>)}
+      </NativeSelect></FieldShell>
+      <Button variant="outline" type="button" disabled={locked || !boundaryScenarioId} onClick={() => void track('finance.save', '正在核验模型边界来源…', async (done) => {
+        const api = bridge(); if (!api?.financeCall) throw new Error('此版本不支持模型边界预览。');
+        const result = unwrap(await api.financeCall(taskId, 'finance-profile-status', { context_id: selectedContext.id, scenario_id: boundaryScenarioId }) as Answer<Record<string, unknown>>);
+        setBoundaryPreview(result.model_boundary_preview as typeof boundaryPreview);
+        done('已按归档来源核验模型边界，请复核下列假设。');
+      })}>预览八项模型边界</Button>
+      {boundaryPreview?.scenario_id === boundaryScenarioId && <div>
+        <p>本预测模型在 {boundaryPreview.period} 明确假设下列八项影响为零；这项批准仅适用于当前模型及来源，不代表历史交易不存在。</p>
+        <ul>{Object.entries(boundaryPreview.boundaries).map(([key, value]) => <li key={key}>{({ 'boundary.inventory_movement': '存货变动', 'boundary.tax_effect': '税项影响', 'boundary.interest_effect': '利息影响', 'boundary.vat_effect': '增值税影响', 'boundary.fx_effect': '汇率影响', 'boundary.oci_effect': '其他综合收益', 'boundary.noncash_investing_financing': '非现金投资筹资', 'boundary.other_balance_sheet_movements': '其他资产负债表变动' } as Record<string, string>)[key] ?? key}：{value.value}（{value.source_rows.length} 条来源）</li>)}</ul>
+        <Button variant="outline" type="button" disabled={locked} onClick={() => void track('finance.save', '正在确认模型边界…', async (done) => {
+          const api = bridge(); if (!api?.financeCall) throw new Error('此版本不支持模型边界确认。');
+          unwrap(await api.financeCall(taskId, 'finance-profile-confirm', { context_id: selectedContext.id, scenario_id: boundaryScenarioId, confirmed_model_boundaries: Object.keys(boundaryPreview.boundaries) }) as Answer<unknown>);
+          done('已确认当前预测模型的八项零值边界。'); await onRefresh();
+        })}>确认本模型八项边界均为零</Button>
+      </div>}
+    </details>}
     {reasonLines.some((line) => !line.quiet) ? <div className="analysis-actions-reasons">
       {reasonLines.filter((line) => !line.quiet).map((line) => <p key={line.id} id={line.id}>{line.text}</p>)}</div> : null}
     {reasonLines.filter((line) => line.quiet).map((line) => <span key={line.id} id={line.id} className="sr-only">{line.text}</span>)}

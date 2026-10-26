@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 from foundry.errors import FoundryError
@@ -14,7 +15,11 @@ BUNDLED_IDS = (
 )
 BUNDLED_PACKS = ("setup", "close", "bva", "cash")
 
-METHOD_RESOURCE_NAMES = ("FOUNDRY.md", "CONNECTORS.md", "report-visuals.md", "NOTICE", "LICENSE")
+METHOD_RESOURCE_NAMES = (
+    "FOUNDRY.md", "CONNECTORS.md", "report-visuals.md", "NOTICE", "LICENSE",
+    "accounting-basis.md", "close-checklist.md", "model-checks.md", "forecast-models.md",
+)
+METHOD_ENTRY_IDS = BUNDLED_IDS + BUNDLED_PACKS
 
 
 def method_root() -> Path:
@@ -36,6 +41,22 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _resource_manifest() -> dict[str, object]:
+    root = method_root()
+    resources: list[dict[str, object]] = []
+    for name in METHOD_RESOURCE_NAMES:
+        path = root / name
+        item: dict[str, object] = {"resource": name, "path": str(path), "exists": path.is_file()}
+        if path.is_file():
+            item.update(sha256=_sha256(path), bytes=path.stat().st_size)
+        resources.append(item)
+    matrix = root / "support-matrix.json"
+    support: dict[str, object] = {"path": str(matrix), "exists": matrix.is_file()}
+    if matrix.is_file():
+        support.update(sha256=_sha256(matrix), content=json.loads(matrix.read_text(encoding="utf-8")))
+    return {"resources": resources, "support_matrix": support}
 
 
 def bundled_skill_manifest() -> dict[str, object]:
@@ -62,6 +83,7 @@ def bundled_skill_manifest() -> dict[str, object]:
         "source": "repo" if root == Path(__file__).resolve().parents[1] / "method" else "package",
         "skills": skills,
         "missing": missing,
+        **_resource_manifest(),
     }
 
 
@@ -100,11 +122,12 @@ def bundled_pack_manifest() -> dict[str, object]:
         "packs": packs,
         "missing": missing,
         "registry": str(registry) if registry.is_file() else None,
+        **_resource_manifest(),
     }
 
 
 def read_method_resource(skill_id: str, resource_name: str) -> dict[str, object]:
-    if skill_id not in BUNDLED_IDS:
+    if skill_id not in METHOD_ENTRY_IDS:
         raise FoundryError(f"unknown method skill: {skill_id}")
     if resource_name not in METHOD_RESOURCE_NAMES:
         raise FoundryError(f"method resource is not allowed: {resource_name}")

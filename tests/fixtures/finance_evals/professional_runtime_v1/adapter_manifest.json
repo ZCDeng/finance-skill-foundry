@@ -1,0 +1,818 @@
+{
+  "additional_explicit_source_fields": [
+    "debt_drawdowns",
+    "dividends_paid",
+    "closing_restricted_cash"
+  ],
+  "artifact_hashes": {
+    "public/E18--base--closed-template/model_boundary.json": "770654d7501b632ef2d2a77e83c57fffb9e6e4bcb9acd21387b13d96d6b289ad",
+    "public/E18--base--closed-template/request.json": "aedcc22197680251dfb017c92a13e6ee5a1a03bb3b33e3d29b1f02008fa97025",
+    "public/E18--base--closed-template/template_inputs.json": "831acf756bc47f8b5bbb1c40e17c6132244a3a87b5a4ca32b845523880d3ee84",
+    "public/E19--new_cash_sale--closed-template/model_boundary.json": "770654d7501b632ef2d2a77e83c57fffb9e6e4bcb9acd21387b13d96d6b289ad",
+    "public/E19--new_cash_sale--closed-template/request.json": "f5c0e691206bd2fc9fd7904e920b75d07f8831ae711662a76081dc3340c37899",
+    "public/E19--new_cash_sale--closed-template/template_inputs.json": "3194d61ee9132101b3ff3ca50c242b19a76c677225df94e2c390eecd77716171",
+    "public/E19--old_ar_collected--closed-template/model_boundary.json": "770654d7501b632ef2d2a77e83c57fffb9e6e4bcb9acd21387b13d96d6b289ad",
+    "public/E19--old_ar_collected--closed-template/request.json": "aa108bd0b0bc575987575624c431e49dbad88845cd6f83f605303262afe9ed2a",
+    "public/E19--old_ar_collected--closed-template/template_inputs.json": "8e4dea2a5c3f61516543301e49d7cc3ea152e8b695d6ff202df9ff4425b851a9"
+  },
+  "cases": [
+    {
+      "authorization": "no manager approval or backend provenance asserted by this manifest",
+      "case_id": "E18--base--closed-template",
+      "model_boundary": {
+        "fx_effect": 0,
+        "interest_effect": 0,
+        "inventory_movement": 0,
+        "noncash_investing_financing": 0,
+        "oci_effect": 0,
+        "other_balance_sheet_movements": 0,
+        "tax_effect": 0,
+        "vat_effect": 0
+      },
+      "model_boundary_source": {
+        "alias": "model_boundary",
+        "column": "amount",
+        "selector_column": "boundary_name"
+      },
+      "original_case_id": "E18--base",
+      "original_private_oracle": {
+        "expected_values_changed": false,
+        "path": "tests/fixtures/finance_evals/professional/private/oracles/E18--base.json",
+        "sha256": "6a99c10cef0f894cd93de5d3105f5ebc318c7fbe4b3f76527ef168a4d44d27cc"
+      },
+      "original_public_input_sha256": "08800c682f5553b5a3f19c12e7a2c620cb46a6c9779ab99790db46673be37e86",
+      "public_files": [
+        "public/E18--base--closed-template/template_inputs.json",
+        "public/E18--base--closed-template/model_boundary.json",
+        "public/E18--base--closed-template/request.json"
+      ],
+      "runtime_status": "adapter_definition_only_not_executed",
+      "source_bindings": {
+        "capex": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "capex"
+          },
+          "unit": "元"
+        },
+        "closing_restricted_cash": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "closing_restricted_cash"
+          },
+          "unit": "元"
+        },
+        "customer_receipts": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "customer_receipts"
+          },
+          "unit": "元"
+        },
+        "debt_drawdowns": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "debt_drawdowns"
+          },
+          "unit": "元"
+        },
+        "debt_principal_repayments": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "debt_principal_repayments"
+          },
+          "unit": "元"
+        },
+        "depreciation": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "depreciation"
+          },
+          "unit": "元"
+        },
+        "dividends_paid": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "dividends_paid"
+          },
+          "unit": "元"
+        },
+        "opening_cash": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-08",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "opening_cash"
+          },
+          "unit": "元"
+        },
+        "opening_debt": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-08",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "opening_debt"
+          },
+          "unit": "元"
+        },
+        "opening_equity": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-08",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "opening_equity"
+          },
+          "unit": "元"
+        },
+        "opening_payables": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-08",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "opening_payables"
+          },
+          "unit": "元"
+        },
+        "opening_ppe": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-08",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "opening_ppe"
+          },
+          "unit": "元"
+        },
+        "opening_receivables": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-08",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "opening_receivables"
+          },
+          "unit": "元"
+        },
+        "operating_expense": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "operating_expense"
+          },
+          "unit": "元"
+        },
+        "revenue": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "revenue"
+          },
+          "unit": "元"
+        },
+        "supplier_payments": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "supplier_payments"
+          },
+          "unit": "元"
+        }
+      }
+    },
+    {
+      "authorization": "no manager approval or backend provenance asserted by this manifest",
+      "case_id": "E19--old_ar_collected--closed-template",
+      "model_boundary": {
+        "fx_effect": 0,
+        "interest_effect": 0,
+        "inventory_movement": 0,
+        "noncash_investing_financing": 0,
+        "oci_effect": 0,
+        "other_balance_sheet_movements": 0,
+        "tax_effect": 0,
+        "vat_effect": 0
+      },
+      "model_boundary_source": {
+        "alias": "model_boundary",
+        "column": "amount",
+        "selector_column": "boundary_name"
+      },
+      "original_case_id": "E19--old_ar_collected",
+      "original_private_oracle": {
+        "expected_values_changed": false,
+        "path": "tests/fixtures/finance_evals/professional/private/oracles/E19--old_ar_collected.json",
+        "sha256": "9998978821b1b684c45c26270d6f9f3a12fd8e4c529b240ce5e6846c0d8809ac"
+      },
+      "original_public_input_sha256": "0eb7d84089efcf6b31c4e40d801fdff98305f12eb3521fc3270247c325437498",
+      "public_files": [
+        "public/E19--old_ar_collected--closed-template/template_inputs.json",
+        "public/E19--old_ar_collected--closed-template/model_boundary.json",
+        "public/E19--old_ar_collected--closed-template/request.json"
+      ],
+      "runtime_status": "adapter_definition_only_not_executed",
+      "source_bindings": {
+        "capex": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "capex"
+          },
+          "unit": "元"
+        },
+        "closing_restricted_cash": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "closing_restricted_cash"
+          },
+          "unit": "元"
+        },
+        "customer_receipts": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "customer_receipts"
+          },
+          "unit": "元"
+        },
+        "debt_drawdowns": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "debt_drawdowns"
+          },
+          "unit": "元"
+        },
+        "debt_principal_repayments": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "debt_principal_repayments"
+          },
+          "unit": "元"
+        },
+        "depreciation": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "depreciation"
+          },
+          "unit": "元"
+        },
+        "dividends_paid": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "dividends_paid"
+          },
+          "unit": "元"
+        },
+        "opening_cash": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-08",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "opening_cash"
+          },
+          "unit": "元"
+        },
+        "opening_debt": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-08",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "opening_debt"
+          },
+          "unit": "元"
+        },
+        "opening_equity": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-08",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "opening_equity"
+          },
+          "unit": "元"
+        },
+        "opening_payables": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-08",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "opening_payables"
+          },
+          "unit": "元"
+        },
+        "opening_ppe": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-08",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "opening_ppe"
+          },
+          "unit": "元"
+        },
+        "opening_receivables": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-08",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "opening_receivables"
+          },
+          "unit": "元"
+        },
+        "operating_expense": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "operating_expense"
+          },
+          "unit": "元"
+        },
+        "revenue": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "revenue"
+          },
+          "unit": "元"
+        },
+        "supplier_payments": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "supplier_payments"
+          },
+          "unit": "元"
+        }
+      }
+    },
+    {
+      "authorization": "no manager approval or backend provenance asserted by this manifest",
+      "case_id": "E19--new_cash_sale--closed-template",
+      "model_boundary": {
+        "fx_effect": 0,
+        "interest_effect": 0,
+        "inventory_movement": 0,
+        "noncash_investing_financing": 0,
+        "oci_effect": 0,
+        "other_balance_sheet_movements": 0,
+        "tax_effect": 0,
+        "vat_effect": 0
+      },
+      "model_boundary_source": {
+        "alias": "model_boundary",
+        "column": "amount",
+        "selector_column": "boundary_name"
+      },
+      "original_case_id": "E19--new_cash_sale",
+      "original_private_oracle": {
+        "expected_values_changed": false,
+        "path": "tests/fixtures/finance_evals/professional/private/oracles/E19--new_cash_sale.json",
+        "sha256": "8275e10715b89246ad311f1b6cb1a7d3aca4017fa19b223d8c47db25fbf4d8c9"
+      },
+      "original_public_input_sha256": "35832d3128bd55a1b85bb3706ffddc0d520359d3b4d6285122aac3d23532f760",
+      "public_files": [
+        "public/E19--new_cash_sale--closed-template/template_inputs.json",
+        "public/E19--new_cash_sale--closed-template/model_boundary.json",
+        "public/E19--new_cash_sale--closed-template/request.json"
+      ],
+      "runtime_status": "adapter_definition_only_not_executed",
+      "source_bindings": {
+        "capex": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "capex"
+          },
+          "unit": "元"
+        },
+        "closing_restricted_cash": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "closing_restricted_cash"
+          },
+          "unit": "元"
+        },
+        "customer_receipts": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "customer_receipts"
+          },
+          "unit": "元"
+        },
+        "debt_drawdowns": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "debt_drawdowns"
+          },
+          "unit": "元"
+        },
+        "debt_principal_repayments": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "debt_principal_repayments"
+          },
+          "unit": "元"
+        },
+        "depreciation": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "depreciation"
+          },
+          "unit": "元"
+        },
+        "dividends_paid": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "dividends_paid"
+          },
+          "unit": "元"
+        },
+        "opening_cash": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-08",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "opening_cash"
+          },
+          "unit": "元"
+        },
+        "opening_debt": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-08",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "opening_debt"
+          },
+          "unit": "元"
+        },
+        "opening_equity": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-08",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "opening_equity"
+          },
+          "unit": "元"
+        },
+        "opening_payables": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-08",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "opening_payables"
+          },
+          "unit": "元"
+        },
+        "opening_ppe": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-08",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "opening_ppe"
+          },
+          "unit": "元"
+        },
+        "opening_receivables": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-08",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "opening_receivables"
+          },
+          "unit": "元"
+        },
+        "operating_expense": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "operating_expense"
+          },
+          "unit": "元"
+        },
+        "revenue": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "revenue"
+          },
+          "unit": "元"
+        },
+        "supplier_payments": {
+          "aggregation": "single",
+          "alias": "template_inputs",
+          "column": "amount",
+          "currency": "CNY",
+          "period": "2026-09",
+          "scope": {
+            "organization": "Synthetic Fixture Co"
+          },
+          "selector": {
+            "input_name": "supplier_payments"
+          },
+          "unit": "元"
+        }
+      }
+    }
+  ],
+  "formal_planned_slots_added": [],
+  "input_mapping": {
+    "cash_capex": "capex",
+    "cash_expense_incurred": "operating_expense",
+    "collections": "customer_receipts",
+    "depreciation": "depreciation",
+    "expense_paid": "supplier_payments",
+    "opening_ap": "opening_payables",
+    "opening_ar": "opening_receivables",
+    "opening_cash": "opening_cash",
+    "opening_debt": "opening_debt",
+    "opening_equity": "opening_equity",
+    "opening_ppe": "opening_ppe",
+    "principal_paid": "debt_principal_repayments",
+    "revenue": "revenue"
+  },
+  "new_support_claim": false,
+  "original_exclusion_note": "tax_interest_dividends_fx is an exclusion note, not a numeric driver; expanded explicit scenario boundaries do not treat omissions as observed zero",
+  "original_frozen_manifest_sha256": "54f91a277c669e33329d2aaa48728a7db551ed80810e750bb5856f7c91d4ad4d",
+  "original_planned_slots_changed": false,
+  "purpose": "engineering end-to-end synthetic closed-template samples",
+  "reason": "原v1叙述不足以满足新封闭模板，未依据被测输出调整expected",
+  "schema_version": "professional-runtime-augmentation-v1-20261023",
+  "visibility": "controller_only; never send this manifest or private oracle references to model"
+}
