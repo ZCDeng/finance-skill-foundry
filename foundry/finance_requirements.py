@@ -1009,15 +1009,35 @@ def _scope_matches(run, row, scope):
                 if expected['baseline'] or isinstance(baseline_scope, dict)
                 else True
             )
-            return (
+            matched = (
                 _scope_dict_matches(actual_candidate, expected['actual'])
                 and baseline_matches
             )
+            if matched:
+                # A side scope that already matches stays matched. A native price/quantity
+                # proof may still reject a positive contradiction (wrong currency, hash, or
+                # a corroborating alias). A missing hash on an older row does not.
+                proof = _native_price_quantity_scope_proof(run, row, expected)
+                if proof is not None and _native_proof_rejects_generic_match(proof):
+                    return False
+                return True
+            proof = _native_price_quantity_scope_proof(run, row, expected)
+            if proof is not None:
+                return proof['proven']
+            return False
         if isinstance(source_scope, dict):
             return _scope_dict_matches(_merge_scope_with_row(source_scope, row, expected['source']), expected['source'])
         bound_scopes = [scope for scope in scopes.values() if isinstance(scope, dict)]
         if bound_scopes:
-            return _bound_scopes_match(bound_scopes, expected, row, comparison=_comparison_run(run))
+            generic = _bound_scopes_match(bound_scopes, expected, row, comparison=_comparison_run(run))
+            proof = _native_price_quantity_scope_proof(run, row, expected)
+            if generic:
+                if proof is not None and _native_proof_rejects_generic_match(proof):
+                    return False
+                return True
+            if proof is not None:
+                return proof['proven']
+            return False
     return _scope_dict_matches(row, expected['actual']) or (
         isinstance(scopes, dict) and _scope_dict_matches(scopes, expected['source'])
     )
@@ -1090,6 +1110,121 @@ def _bound_scopes_match(candidates, expected, row=None, *, comparison=False):
     if not candidates or (comparison and len(candidates) != 1):
         return False
     return all(_bound_scope_matches(candidate, expected, row) for candidate in candidates)
+
+
+_PQ_SCOPE_FIELDS = ('ledger', 'organization', 'period', 'currency', 'unit')
+_PQ_PROOF_REJECTIONS = frozenset({
+    'source_hash_mismatch', 'scope_field_mismatch', 'row_field_mismatch',
+    'corroborating_scope_conflict', 'dataset_alias_ambiguous',
+})
+
+
+def _native_proof_rejects_generic_match(proof):
+    """A contradiction beats an older single-alias match. A hash the run never stored does not."""
+    return any(conflict.get('reason') in _PQ_PROOF_REJECTIONS for conflict in proof.get('conflicts') or [])
+
+
+def _native_price_quantity_scope_proof(run, row, expected):
+    """Scope proof for a native price/quantity comparison, or None when this row is not one.
+
+    Participating actual/baseline source rows must agree with the requirement on
+    period, entity, currency and unit, and must carry the run's source hash.
+    A corroborating alias that did not enter the bridge stays bound. It does not
+    become a second comparison side, and it is not deleted. A generic comparison
+    with several unnamed aliases still falls through to `_bound_scopes_match`.
+    """
+    if not isinstance(run, dict) or not isinstance(row, dict):
+        return None
+    if not _comparison_run(run) or _run_method(run) not in PRICE_QUANTITY_METHODS:
+        return None
+    bindings = run.get('bindings') if isinstance(run.get('bindings'), dict) else {}
+    scopes = _finance_scopes(run)
+    hashes = run.get('source_hashes') if isinstance(run.get('source_hashes'), dict) else {}
+    sources = row.get('source_rows')
+    conflicts = []
+    participating = []
+    by_dataset = {}
+    for alias, dataset_id in bindings.items():
+        if isinstance(alias, str) and isinstance(dataset_id, str):
+            by_dataset.setdefault(dataset_id, []).append(alias)
+    if not isinstance(sources, list) or not sources or any(
+            not isinstance(source, dict) or not isinstance(source.get('dataset_id'), str) or not source.get('dataset_id')
+            for source in sources):
+        conflicts.append({'field': 'source_rows', 'role': 'participating', 'reason': 'participating_source_unproven'})
+    else:
+        for source in sources:
+            aliases = by_dataset.get(source['dataset_id'], [])
+            if len(aliases) != 1:
+                conflicts.append({
+                    'field': 'dataset_id', 'dataset_id': source['dataset_id'], 'role': 'participating',
+                    'reason': 'source_not_bound' if not aliases else 'dataset_alias_ambiguous',
+                })
+                continue
+            alias = aliases[0]
+            participating.append(alias)
+            recorded = hashes.get(alias)
+            if not isinstance(recorded, str) or not recorded:
+                conflicts.append({
+                    'alias': alias, 'field': 'source_hash', 'dataset_id': source['dataset_id'],
+                    'role': 'participating', 'reason': 'source_hash_missing',
+                })
+            elif isinstance(source.get('source_hash'), str) and source['source_hash'] != recorded:
+                conflicts.append({
+                    'alias': alias, 'field': 'source_hash', 'dataset_id': source['dataset_id'],
+                    'expected': recorded, 'observed': source['source_hash'],
+                    'role': 'participating', 'reason': 'source_hash_mismatch',
+                })
+    participating = list(dict.fromkeys(participating))
+    corroborating = [alias for alias in bindings if alias not in participating]
+    comparison = (run.get('result') or {}).get('comparison')
+    if not isinstance(comparison, dict) or not comparison.get('actual_scenario') or not comparison.get('baseline_scenario'):
+        conflicts.append({'field': 'comparison', 'role': 'participating', 'reason': 'comparison_unproven'})
+    if _run_method(run) != 'volume_mix_price':
+        product = row.get('product')
+        if not isinstance(product, (str, int)) or isinstance(product, bool) or (isinstance(product, str) and not product.strip()):
+            conflicts.append({'field': 'product', 'role': 'participating', 'reason': 'product_grain_missing'})
+    expected_fields = {}
+    for side in ('actual', 'baseline'):
+        for field, value in (expected.get(side) or {}).items():
+            if field in _PQ_SCOPE_FIELDS and field not in expected_fields:
+                expected_fields[field] = value
+    for alias in participating:
+        bound = scopes.get(alias)
+        if not isinstance(bound, dict):
+            conflicts.append({'alias': alias, 'field': 'scope', 'role': 'participating', 'reason': 'scope_missing'})
+            continue
+        for field, value in expected_fields.items():
+            if bound.get(field) != value:
+                conflicts.append({
+                    'alias': alias, 'field': field, 'expected': value, 'observed': bound.get(field),
+                    'role': 'participating', 'reason': 'scope_field_mismatch',
+                })
+    for field, value in expected_fields.items():
+        if row.get(field) not in (None, '') and row.get(field) != value:
+            conflicts.append({
+                'field': field, 'expected': value, 'observed': row.get(field),
+                'role': 'row', 'reason': 'row_field_mismatch',
+            })
+    for alias in corroborating:
+        bound = scopes.get(alias)
+        if not isinstance(bound, dict):
+            continue
+        for other in participating:
+            other_scope = scopes.get(other) if isinstance(scopes.get(other), dict) else {}
+            for field in _PQ_SCOPE_FIELDS:
+                left, right = bound.get(field), other_scope.get(field)
+                if left not in (None, '') and right not in (None, '') and left != right:
+                    conflicts.append({
+                        'alias': alias, 'field': field, 'expected': right, 'observed': left,
+                        'role': 'corroborating', 'participating_alias': other,
+                        'reason': 'corroborating_scope_conflict',
+                    })
+    return {
+        'proven': not conflicts,
+        'conflicts': conflicts,
+        'participating_aliases': participating,
+        'corroborating_aliases': corroborating,
+    }
 
 
 def _bound_scope_matches(bound, expected, row=None):
@@ -2728,6 +2863,57 @@ def _result_set_candidate_fixups(analysis, item, latest, runs, checks, evidence,
     return fixups
 
 
+def _native_scope_conflict(run, row, item, latest):
+    proof = _native_price_quantity_scope_proof(
+        run, row, _comparison_scopes(_item_scope(item, latest.get('scope') or {})))
+    if proof is None or proof['proven']:
+        return None
+    return proof
+
+
+_PQ_GAP_CODES = frozenset({
+    'price_quantity_missing', 'volume_mix_price_unmatched_products', 'volume_mix_price_side_missing',
+    'volume_mix_price_nonpositive_quantity', 'volume_mix_price_zero_actual_volume',
+})
+
+
+def _price_quantity_input_gaps(item, runs):
+    """Products the native bridge could not close. A's closed row does not answer B."""
+    dimensions = item.get('dimensions') if isinstance(item.get('dimensions'), dict) else {}
+    pinned = dimensions.get('product') if isinstance(dimensions.get('product'), str) else None
+    metric = _canonical_metric_name(item.get('metric'))
+    method = _canonical_method_name(dimensions.get('method'))
+    if metric not in {'amount', 'revenue', 'price_quantity'} and method not in PRICE_QUANTITY_METHODS:
+        return []
+    gaps = []
+    for run in runs.values():
+        if _run_method(run) not in PRICE_QUANTITY_METHODS:
+            continue
+        for diagnostic in (run.get('result') or {}).get('diagnostics') or []:
+            if not isinstance(diagnostic, dict) or diagnostic.get('code') not in _PQ_GAP_CODES:
+                continue
+            group = diagnostic.get('group') if isinstance(diagnostic.get('group'), dict) else {}
+            product = diagnostic.get('product') or group.get('product')
+            products = [product] if product else []
+            for key in ('actual_only', 'baseline_only'):
+                named = diagnostic.get(key)
+                if isinstance(named, list):
+                    products.extend(item for item in named if isinstance(item, (str, int)) and not isinstance(item, bool))
+            if pinned and products and pinned not in products:
+                continue
+            if pinned and not products:
+                continue
+            gaps.append({
+                'run_id': run.get('id'),
+                'code': diagnostic.get('code'),
+                **({'product': product} if product is not None else {}),
+                **({'products': products} if products else {}),
+                **({'side': diagnostic['side']} if diagnostic.get('side') else {}),
+                **({'message': diagnostic['message']} if diagnostic.get('message') else {}),
+            })
+    return gaps
+
+
 def _price_quantity_candidate_fixups(item, latest, runs, checks, evidence, claimed):
     fixups = []
     for run in runs.values():
@@ -2738,6 +2924,18 @@ def _price_quantity_candidate_fixups(item, latest, runs, checks, evidence, claim
         for index, row in enumerate(run.get('result', {}).get('rows', [])):
             group = evidence['groups'].get((run['id'], index))
             if not _requirement_scope_matches(run, row, item, latest):
+                proof = _native_scope_conflict(run, row, item, latest)
+                if proof is not None and _price_quantity_requirement_matches(item, run, row, group):
+                    fixups.append({
+                        'code': 'native_price_quantity_scope_conflict',
+                        'requirement_item_id': item['id'],
+                        'run_id': run['id'],
+                        'row': index,
+                        'conflicts': proof['conflicts'],
+                        'participating_aliases': proof['participating_aliases'],
+                        'corroborating_aliases': proof['corroborating_aliases'],
+                        'reason': 'native_price_quantity_scope_conflict',
+                    })
                 continue
             if not _price_quantity_requirement_matches(item, run, row, group):
                 continue
@@ -2979,8 +3177,24 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
                 _price_quantity_requirement_matches(item, run, row, group)
                 and (run_id, index) not in processed_groups
                 and set(_price_quantity_columns(group)).issubset(claimed_by_row.get((run_id, index), set()))
-                and _requirement_scope_matches(run, row, item, latest)
             ):
+                if not _requirement_scope_matches(run, row, item, latest):
+                    proof = _native_scope_conflict(run, row, item, latest)
+                    if proof is not None:
+                        processed_groups.add((run_id, index))
+                        locations.append({
+                            'run_id': run_id, 'row': index, 'column': column,
+                            'output_hash': run.get('output_hash'),
+                            'evidence': {
+                                'evidence_basis': None,
+                                'not_counted_reason': 'native_price_quantity_scope_conflict',
+                                'conflicts': proof['conflicts'],
+                                'participating_aliases': proof['participating_aliases'],
+                                'corroborating_aliases': proof['corroborating_aliases'],
+                            },
+                            'status': 'pending',
+                        })
+                    continue
                 processed_groups.add((run_id, index))
                 for member in _price_quantity_required_members(group):
                     location = {'run_id': run_id, 'row': index, 'column': member['column'], 'output_hash': run.get('output_hash')}
@@ -3065,12 +3279,24 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
                 else 'inputs_verified' if estimate_inputs
                 else 'pending'
             )
+        input_gaps = _price_quantity_input_gaps(item, fixup_runs)
+        if input_gaps and item_status == 'answered':
+            # A closed product does not complete a basket that still has a named input gap.
+            item_status = 'pending'
         fixups = _requirement_fixups(analysis, item, latest, fixup_runs, checks, evidence, claimed, environment)
         if item_status == 'answered':
             fixups = [fixup for fixup in fixups if fixup.get('code') in SOURCE_FIXUP_CODES]
+        if input_gaps:
+            fixups = [*fixups, {
+                'code': 'price_quantity_input_gap',
+                'requirement_item_id': item['id'],
+                'gaps': input_gaps[:12],
+                'reason': 'price_quantity_input_gap',
+            }]
         item_record = {**item, 'status': item_status, 'locations': locations,
                        'source_read_failure': source_failures.get(item['id']),
-                       'provenance_status': provenance_status}
+                       'provenance_status': provenance_status,
+                       **({'price_quantity_input_gaps': input_gaps} if input_gaps else {})}
         paths = _evidence_paths(item, environment)
         if paths['accepted'] or paths['blocked']:
             item_record['evidence_paths'] = paths
@@ -3087,6 +3313,9 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
                 item, item_record, fixups, latest, runs, claimed_cells, evidence, grain_states, paths, acceptances,
                 result_set is not None,
             )
+        if input_gaps:
+            # The same sentence coverage and revalidation read, so a closed product is not the whole question.
+            item_record['message'] = _unanswered_message(item_record)
         source_fixups = [fixup for location in locations
                          for fixup in [_source_fixup(item, location, checks, runs.get(location['run_id']),
                                                      required=result_set is not None)] if fixup]
@@ -4106,6 +4335,8 @@ NOT_COUNTED_TEXT = {
     'estimate_factor_declared_not_reproducible': '该组合已声明系数无法复算，引用的估算不计入，等经理决定口径',
     'run_bindings_differ': '运行绑定的资料与本要求的绑定不一致，这个运行的结果不计入',
     'run_scope_differs': '财务引擎运行的 finance_scope 里有绑定输入的口径与本要求的范围不一致，这个运行的结果不计入',
+    'native_price_quantity_scope_conflict': ('原生量价桥的参与来源与要求范围不一致；冲突写明字段和来源，'
+                                             '未参与计算的旁证来源不构成比较侧冲突，也不能被删掉'),
     'metric_filters_differ': ('run_metric 的 filters 只取了该科目的一部分行（如某张凭证、某个产品或来源行），不是该科目在要求范围内的合计；'
                               '去掉这些 filters 重跑，filters 只能写要求本身的组织、期间、情景或维度'),
     'comparison_filters_differ': ('explain_variance 的 actual_filters 或 baseline_filters 只取了一部分行（按来源行、凭证或分录挑选，'
@@ -4254,6 +4485,12 @@ def _unanswered_message(item):
         if beside:
             message += (_grain_count(beside, '另引用了数值不同、已计入的数') + '：文稿为这些组合同时给出估算和另一个数，'
                         '估算经理确认前不计为已回答，已计入的数也不能替估算作证。')
+    input_gaps = item.get('price_quantity_input_gaps') or []
+    if input_gaps:
+        named = '；'.join(
+            ' '.join(str(part) for part in (gap.get('code'), gap.get('product'), gap.get('side'), gap.get('message')) if part)
+            for gap in input_gaps[:6])
+        message += f'量价输入缺口未闭合，不能把已算出的产品当成全部问题：{named}。'
     for grain in item.get('declared_grains') or []:
         example = _grain_example(grain) or '本项'
         if grain['state'] == 'estimate_factor_not_reproducible':
