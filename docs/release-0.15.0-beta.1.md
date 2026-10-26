@@ -46,4 +46,51 @@ R3 正常返回的失败包括 E01 三次及 E02 的 `zero_actual_volume` 第三
 
 ## 发布回执
 
-构建、签名、公证和公开下载验证正在执行；完成后填入实际结果。当前段落不构成已发布声明。
+本版本产品及构建输入来自提交 `8ebb8e35bf2b942ce135a04570299ff0f25260cb`；487 个嵌入输入逐项比对一致。完整构建快照另含验证支持文件和非嵌入元数据，不能宣称整个快照与该提交相同。最终发布标签后的文档提交不改变包内产品输入。
+
+| 当前版本实测 | 结果 |
+| --- | --- |
+| 应用测试 | 108 文件、1548 测试通过 |
+| 发布聚焦 Python 回归 | 43 项通过；不替代完整 Python 回归 |
+| 相关文件静态检查、应用类型检查与构建 | 通过 |
+| macOS arm64 独立分发检查 | 7/7 通过，341 个 Mach-O 均为 arm64 |
+| 实际界面 | 候选 10/10、安装 10/10；初始三次验证脚本失败已保留并诊断 |
+| 安装和压缩一致性 | 候选、Beta 安装、ZIP 解压共 22,152 项文件/链接/权限一致 |
+| Developer ID、严格签名与公证票据 | 通过；Apple Accepted，staple/validate 成功 |
+| 隔离启动 | 实际使用独立 profile/var，运行时 ready，未调用 provider |
+
+公证提交 ID：`887c0452-9a21-4e69-8968-d64e5d38717c`。签名方为 Maverick Technologies Company Limited（TJEZ8WLWUB）。本机 Gatekeeper 原已关闭，设置未改变；显式 spctl 返回 `Notarized Developer ID` 并注明 `security disabled`，不能据此宣称已验证开启 Gatekeeper 的全新 Mac 首次下载启动。
+
+[本次源提交 CI](https://github.com/ZCDeng/finance-skill-foundry/actions/runs/40376311438) 因 45 分钟作业上限被取消，未完成。固定 harness 准备耗时 16 分 30 秒，pytest 末次进度为 45%，日志含 3 个失败标记，未生成失败名称和完整汇总；不能将它们认定为历史 M02/M06 两项，也不能报告完整通过/失败/跳过总数。云端 renderer 构建随后跳过；本地类型检查与构建有独立通过证据。该 CI 运行对应产品提交 8ebb8e35，发布标签仅增加文档，未另称在文档提交上重跑全套。
+
+独立核对按本机同版 pytest 收集顺序给出的条件性候选为 `test_standing_analysis_preset_projects_current_saved_reply`、mutation M02 和 M06；CI 的 Ubuntu/Python 与本机环境不同且没有精确收集清单，因此三项身份仍为未确证，第一项尤其不能归入历史两项失败。CI 补充步骤已经独立工程复核。
+
+### 本次 CI 暴露的后续工程事项
+
+以下补充属于软件交付改进，不改变原财务评测和 420 秒预算：
+
+1. **先取得精确失败身份。** 保留这次日志、步骤时间和三个失败标记；在同一源提交、同一 Linux 环境及固定运行时上获得 nodeid 与断言。若收集顺序无法证明一致，只能登记候选身份，不能把本地重跑推测当成该次 CI 的确证。每项定位后做最小重现、正负例和独立审查；原 CI 仍为 cancelled。
+2. **让超时前的结果可定位。** 在既有 pytest 流程使用逐测试名称、未缓冲日志、耗时统计及结构化报告，失败与普通退出保留报告；同时保留 GitHub 流式日志，避免仅依赖正常结束才写出的汇总文件。报告只包含合成测试和必要诊断，不公开真实会话、凭据或私有答案。
+3. **拆开重型准备与测试预算。** 依据实测冷/热耗时，评估独立的固定 harness 准备/缓存作业，让成功准备结果在测试前保存；命中缓存仍刷新本次 checkout 的本地 bundle，并校验版本和源身份。完整 Python、vitest、typecheck 与共享文件系统的跨语言一致性测试需保留，不能简单拆散现有耦合测试或以删题/跳过换取按时完成。是否调整 CI 作业预算须由完整耗时证据决定，与原题 420 秒无关。
+4. **重新验收整条流水线。** 新候选上执行冷缓存与热缓存路径，完整收集全部测试身份、实际通过/失败/跳过及构建结果，验证失败可定位和缓存未带入旧源码。G3 继续要求本候选完整工程回归；当前 cancelled 记录和历史 6879/2 均保留，任何新失败不能归入历史冲突豁免。
+
+
+安装路径为 `/Applications/FA Foundry Beta.app`，稳定版 `/Applications/FA Foundry.app` 仍为 0.14.4，版本、可执行文件、app.asar 与签名锚点保持原值。仅改名不能隔离数据：本版本内部产品名和 bundle id 与稳定版相同，普通 Finder 双击可能共用稳定版数据。必须使用发布附件 `launch-beta.command`，或以下已实测的等效命令：
+
+```sh
+BETA_STATE="$HOME/Library/Application Support/FA Foundry Beta/0.15.0-beta.1"
+/usr/bin/env -u FOUNDRY_BIN -u FOUNDRY_DSH_INSTALL -u FOUNDRY_FORMULATOR_BIN \
+  FOUNDRY_VAR="$BETA_STATE/var" \
+  "/Applications/FA Foundry Beta.app/Contents/MacOS/FA Foundry" \
+  "--user-data-dir=$BETA_STATE/profile"
+```
+
+ZIP 文件：`FA-Foundry-0.15.0-beta.1-macOS-arm64.zip`，563,475,999 字节；SHA-256：`fb3c4b94fb9944d5185b7fc366e1471bedd3da9fbc0ff83e8697a9336a693e1c`。
+
+<!-- PUBLIC_DOWNLOAD_RESULT -->
+发布草稿四项附件已上传，GitHub 摘要和本地一致；尚待公开后匿名下载核验，当前不宣称已公开发布。
+<!-- PUBLIC_DOWNLOAD_RESULT_END -->
+
+后续方案已完成独立工程及财务方法 AI 审查；最终计划 SHA-256 为 `bb5f3b727a85a477b0bf1b6ebf5086c3423b5d9a468fd677fc37c835f29d38cb`。工程 E1–E6 与专业 P-01/P-02 规划问题均已关闭，未授予实现完成、原模型验收或人工签收。
+
+本地分发证据见 `build/release-0.15.0-beta.1/artifact-receipt.json`、`source-to-commit.json`、`install-receipt.json`、`archive-receipt.json`、`safe-beta-launch.json` 和两个 `root-*-visual-review.json`。工程完整性、真实模型成绩与专业结论始终分别报告。
