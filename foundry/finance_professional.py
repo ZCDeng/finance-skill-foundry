@@ -166,6 +166,40 @@ def confirmation_basis(context):
     return {key: context.get(key) for key in ("task_id", "bindings", "source_hashes", "scopes")}
 
 
+def profile_gap(service, context, required, *, max_seq=None):
+    """Show the manager what this basis has approved, what the rule still needs, and the current values.
+
+    Existence of a profile value is not approval. A seven-field event stays readable and does not
+    cover an eleven-field rule. Revocation drops current approval without rewriting the old event.
+    Partial approvals from a different confirmation basis are not merged in.
+    """
+    required = frozenset(required or ())
+    fields = profile_fields(context.get("reporting_profile") or {})
+    basis = confirmation_basis(context)
+    records = [record for record in service._list("profile_confirmations")
+               if (max_seq is None or record.get("seq", 0) < max_seq)
+               and record.get("confirmation_basis") == basis
+               and not record.get("confirmed_model_boundaries")]
+    current = max(records, key=lambda record: record.get("seq", 0)) if records else None
+    confirmed = set()
+    stored = {}
+    if current and current.get("status") == "confirmed" and current.get("confirmed_by") == "manager":
+        confirmed = set(current.get("confirmed_fields") or [])
+        stored = current.get("field_values") or {}
+    approved = sorted(key for key in required if key in confirmed and stored.get(key) == fields.get(key))
+    stale = sorted(key for key in required if key in confirmed and stored.get(key) != fields.get(key))
+    return {
+        "approved_fields": approved,
+        "required_fields": sorted(required),
+        "missing_fields": sorted(required - set(approved)),
+        "stale_fields": stale,
+        "current_values": {key: fields.get(key) for key in sorted(required)},
+        "approval_basis": current.get("confirmation_basis") if current else None,
+        "confirmation_id": current.get("id") if current else None,
+        "confirmation_status": current.get("status") if current else None,
+    }
+
+
 def profile_confirmation(service, context, required, *, max_seq=None):
     fields = profile_fields(context.get("reporting_profile") or {})
     records = [record for record in service._list("profile_confirmations")

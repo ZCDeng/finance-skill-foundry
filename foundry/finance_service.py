@@ -482,13 +482,15 @@ class FinanceStore:
                            confirmed_by=self.actor, session_id=self.session_id, reason=reason)
 
     def finance_profile_status(self, spec):
-        from foundry.finance_professional import rule_identity, boundary_basis
+        from foundry.finance_professional import boundary_basis, profile_gap, rule_identity
         context = self._read("contexts", spec.get("context_id"))
         scenario_ids = [spec["scenario_id"]] if spec.get("scenario_id") else []
+        identity = rule_identity(self, context, ["driver.source_binding", "statements.linked_management"] if scenario_ids else ["driver.source_binding"],
+                                 scenario_ids=scenario_ids)
         return {"context_id": context["id"], "reporting_profile": context.get("reporting_profile"),
                 **({"model_boundary_preview": boundary_basis(self, context, spec["scenario_id"])} if scenario_ids else {}),
-                **rule_identity(self, context, ["driver.source_binding", "statements.linked_management"] if scenario_ids else ["driver.source_binding"],
-                                scenario_ids=scenario_ids)}
+                **identity,
+                "profile_gap": profile_gap(self, context, identity.get("required_profile_fields") or ())}
 
     def _normalize(self, context):
         self._authorize(context["bindings"])
