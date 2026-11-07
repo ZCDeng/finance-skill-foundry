@@ -1017,11 +1017,11 @@ def _scope_matches(run, row, scope):
                 # A side scope that already matches stays matched. A native price/quantity
                 # proof may still reject a positive contradiction (wrong currency, hash, or
                 # a corroborating alias). A missing hash on an older row does not.
-                proof = _native_price_quantity_scope_proof(run, row, expected)
+                proof = _native_price_quantity_scope_proof(run, row, expected, scope.get('scenario'))
                 if proof is not None and _native_proof_rejects_generic_match(proof):
                     return False
                 return True
-            proof = _native_price_quantity_scope_proof(run, row, expected)
+            proof = _native_price_quantity_scope_proof(run, row, expected, scope.get('scenario'))
             if proof is not None:
                 return proof['proven']
             return False
@@ -1030,7 +1030,7 @@ def _scope_matches(run, row, scope):
         bound_scopes = [scope for scope in scopes.values() if isinstance(scope, dict)]
         if bound_scopes:
             generic = _bound_scopes_match(bound_scopes, expected, row, comparison=_comparison_run(run))
-            proof = _native_price_quantity_scope_proof(run, row, expected)
+            proof = _native_price_quantity_scope_proof(run, row, expected, scope.get('scenario'))
             if generic:
                 if proof is not None and _native_proof_rejects_generic_match(proof):
                     return False
@@ -1124,12 +1124,15 @@ def _native_proof_rejects_generic_match(proof):
     return any(conflict.get('reason') in _PQ_PROOF_REJECTIONS for conflict in proof.get('conflicts') or [])
 
 
-def _native_price_quantity_scope_proof(run, row, expected):
+def _native_price_quantity_scope_proof(run, row, expected, flat_scenario=None):
     """Scope proof for a native price/quantity comparison, or None when this row is not one.
 
-    Participating actual/baseline source rows must agree with the requirement on
-    period, entity, currency and unit, and must carry the run's source hash.
-    A corroborating alias that did not enter the bridge stays bound. It does not
+    Every participating input must itself state each field the requirement
+    states, and a stated scenario must be one the run compared. Row text does not
+    stand in for an input's scope. Source rows carry no side, so this proof cannot
+    settle a field the sides state differently or only one side states: those stay
+    unproven and the side-aware generic match decides. A corroborating alias that
+    did not enter the bridge stays bound. It does not
     become a second comparison side, and it is not deleted. A generic comparison
     with several unnamed aliases still falls through to `_bound_scopes_match`.
     """
@@ -1179,25 +1182,52 @@ def _native_price_quantity_scope_proof(run, row, expected):
     comparison = (run.get('result') or {}).get('comparison')
     if not isinstance(comparison, dict) or not comparison.get('actual_scenario') or not comparison.get('baseline_scenario'):
         conflicts.append({'field': 'comparison', 'role': 'participating', 'reason': 'comparison_unproven'})
+    else:
+        for side in ('actual', 'baseline'):
+            stated = (expected.get(side) or {}).get('scenario')
+            if stated not in (None, '') and comparison.get(f'{side}_scenario') != stated:
+                conflicts.append({
+                    'field': f'{side}_scenario', 'expected': stated, 'observed': comparison.get(f'{side}_scenario'),
+                    'role': 'participating', 'reason': 'comparison_scenario_unproven',
+                })
+        if flat_scenario not in (None, '') and flat_scenario not in (
+                comparison.get('actual_scenario'), comparison.get('baseline_scenario')):
+            conflicts.append({
+                'field': 'scenario', 'expected': flat_scenario,
+                'role': 'participating', 'reason': 'comparison_scenario_unproven',
+            })
     if _run_method(run) != 'volume_mix_price':
         product = row.get('product')
         if not isinstance(product, (str, int)) or isinstance(product, bool) or (isinstance(product, str) and not product.strip()):
             conflicts.append({'field': 'product', 'role': 'participating', 'reason': 'product_grain_missing'})
     expected_fields = {}
-    for side in ('actual', 'baseline'):
-        for field, value in (expected.get(side) or {}).items():
-            if field in _PQ_SCOPE_FIELDS and field not in expected_fields:
-                expected_fields[field] = value
+    one_sided = set()
+    actual_fields, baseline_fields = expected.get('actual') or {}, expected.get('baseline') or {}
+    source_fields = expected.get('source') or {}
+    for field in {**actual_fields, **baseline_fields, **source_fields}:
+        if field == 'scenario':
+            continue
+        stated = [fields[field] for fields in (actual_fields, baseline_fields, source_fields) if field in fields]
+        if any(value != stated[0] for value in stated):
+            conflicts.append({'field': field, 'expected': stated, 'role': 'participating',
+                              'reason': 'comparison_side_unproven'})
+            continue
+        expected_fields[field] = stated[0]
+        if (field in actual_fields) != (field in baseline_fields):
+            one_sided.add(field)
     for alias in participating:
         bound = scopes.get(alias)
         if not isinstance(bound, dict):
             conflicts.append({'alias': alias, 'field': 'scope', 'role': 'participating', 'reason': 'scope_missing'})
             continue
         for field, value in expected_fields.items():
-            if bound.get(field) != value:
+            observed = bound.get(field)
+            if observed != value:
+                # The other side of a one-sided field may legitimately differ, and a silent input is no contradiction.
+                unproven = observed in (None, '') or field in one_sided
                 conflicts.append({
-                    'alias': alias, 'field': field, 'expected': value, 'observed': bound.get(field),
-                    'role': 'participating', 'reason': 'scope_field_mismatch',
+                    'alias': alias, 'field': field, 'expected': value, 'observed': observed,
+                    'role': 'participating', 'reason': 'scope_field_unproven' if unproven else 'scope_field_mismatch',
                 })
     for field, value in expected_fields.items():
         if row.get(field) not in (None, '') and row.get(field) != value:
@@ -2864,9 +2894,10 @@ def _result_set_candidate_fixups(analysis, item, latest, runs, checks, evidence,
 
 
 def _native_scope_conflict(run, row, item, latest):
-    proof = _native_price_quantity_scope_proof(
-        run, row, _comparison_scopes(_item_scope(item, latest.get('scope') or {})))
-    if proof is None or proof['proven']:
+    """A named contradiction among several bound inputs. A single-input run keeps the plain not-in-scope path."""
+    scope = _item_scope(item, latest.get('scope') or {})
+    proof = _native_price_quantity_scope_proof(run, row, _comparison_scopes(scope), scope.get('scenario'))
+    if proof is None or len(run.get('bindings') or {}) < 2 or not _native_proof_rejects_generic_match(proof):
         return None
     return proof
 
@@ -2877,28 +2908,47 @@ _PQ_GAP_CODES = frozenset({
 })
 
 
-def _price_quantity_input_gaps(item, runs):
-    """Products the native bridge could not close. A's closed row does not answer B."""
+def _states_other_value(record, expected):
+    return any(record.get(key) not in (None, '') and record[key] != value for key, value in expected.items())
+
+
+def _price_quantity_input_gaps(item, runs, locations, latest):
+    """Products the native bridge could not close. A's closed row does not answer B.
+
+    A price/quantity item answers for its whole basket. A plain revenue item only
+    inherits the gaps of a bridge it actually cites.
+    """
     dimensions = item.get('dimensions') if isinstance(item.get('dimensions'), dict) else {}
-    pinned = dimensions.get('product') if isinstance(dimensions.get('product'), str) else None
+    expected = _comparison_scopes(_item_scope(item, latest.get('scope') or {}))['actual']
+    pinned = next((value for value in (dimensions.get('product'), expected.get('product'))
+                   if isinstance(value, str)), None)
     metric = _canonical_metric_name(item.get('metric'))
     method = _canonical_method_name(dimensions.get('method'))
-    if metric not in {'amount', 'revenue', 'price_quantity'} and method not in PRICE_QUANTITY_METHODS:
+    native_item = metric == 'price_quantity' or (isinstance(method, str) and method in PRICE_QUANTITY_METHODS)
+    if not native_item and metric != 'revenue':
         return []
+    cited = {location.get('run_id') for location in locations}
     gaps = []
     for run in runs.values():
-        if _run_method(run) not in PRICE_QUANTITY_METHODS:
+        run_method = _run_method(run)
+        bound = [scope for scope in _finance_scopes(run).values() if isinstance(scope, dict)]
+        if run_method not in PRICE_QUANTITY_METHODS or (
+                bound and all(_states_other_value(scope, expected) for scope in bound)):
+            continue
+        if (not native_item and run.get('id') not in cited) or (isinstance(method, str) and run_method != method):
             continue
         for diagnostic in (run.get('result') or {}).get('diagnostics') or []:
             if not isinstance(diagnostic, dict) or diagnostic.get('code') not in _PQ_GAP_CODES:
                 continue
             group = diagnostic.get('group') if isinstance(diagnostic.get('group'), dict) else {}
+            if _states_other_value(group, expected):
+                continue
             product = diagnostic.get('product') or group.get('product')
             products = [product] if product else []
             for key in ('actual_only', 'baseline_only'):
                 named = diagnostic.get(key)
                 if isinstance(named, list):
-                    products.extend(item for item in named if isinstance(item, (str, int)) and not isinstance(item, bool))
+                    products.extend(name for name in named if isinstance(name, (str, int)) and not isinstance(name, bool))
             if pinned and products and pinned not in products:
                 continue
             if pinned and not products:
@@ -3279,7 +3329,7 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
                 else 'inputs_verified' if estimate_inputs
                 else 'pending'
             )
-        input_gaps = _price_quantity_input_gaps(item, fixup_runs)
+        input_gaps = _price_quantity_input_gaps(item, fixup_runs, locations, latest)
         if input_gaps and item_status == 'answered':
             # A closed product does not complete a basket that still has a named input gap.
             item_status = 'pending'

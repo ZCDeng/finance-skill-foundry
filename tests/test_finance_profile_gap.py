@@ -38,6 +38,16 @@ def test_status_shows_the_seven_field_gap_and_a_new_eleven_field_event_keeps_the
     assert current["profile_gap"]["confirmation_id"] == fresh["id"]
 
 
+def test_a_narrower_later_event_does_not_hide_the_approval_the_rule_still_uses(tmp_path):
+    service, context = _profile_case(tmp_path)
+    full = service.finance_profile_confirm({"context_id": context["id"], "confirmed_fields": FULL})
+    service.finance_profile_confirm({"context_id": context["id"], "confirmed_fields": sorted(BASE_FIELDS)})
+    status = service.finance_profile_status({"context_id": context["id"]})
+    assert status["professional_status"] == "supported"
+    assert status["profile_gap"]["missing_fields"] == []
+    assert status["profile_gap"]["confirmation_id"] == full["id"]
+
+
 def test_value_change_scope_expansion_and_revocation_drop_current_approval_only(tmp_path):
     service, context = _profile_case(tmp_path)
     approval = service.finance_profile_confirm({"context_id": context["id"], "confirmed_fields": FULL})

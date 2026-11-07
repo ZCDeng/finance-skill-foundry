@@ -172,6 +172,8 @@ def profile_gap(service, context, required, *, max_seq=None):
     Existence of a profile value is not approval. A seven-field event stays readable and does not
     cover an eleven-field rule. Revocation drops current approval without rewriting the old event.
     Partial approvals from a different confirmation basis are not merged in.
+    The approval the rule itself uses decides first, so a narrower later event
+    cannot report a gap the rule does not have.
     """
     required = frozenset(required or ())
     fields = profile_fields(context.get("reporting_profile") or {})
@@ -180,7 +182,8 @@ def profile_gap(service, context, required, *, max_seq=None):
                if (max_seq is None or record.get("seq", 0) < max_seq)
                and record.get("confirmation_basis") == basis
                and not record.get("confirmed_model_boundaries")]
-    current = max(records, key=lambda record: record.get("seq", 0)) if records else None
+    current = profile_confirmation(service, context, required, max_seq=max_seq) or (
+        max(records, key=lambda record: record.get("seq", 0)) if records else None)
     confirmed = set()
     stored = {}
     if current and current.get("status") == "confirmed" and current.get("confirmed_by") == "manager":
