@@ -19,8 +19,8 @@
 
 import { execFileSync } from 'node:child_process';
 import { adaptClient } from './adapt-harness-client.mjs';
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -33,6 +33,9 @@ const PIN_FILE = join(STAGE, 'PIN');
 const kit = JSON.parse(readFileSync(join(PLUGIN_DIR, 'package.json'), 'utf8'));
 const harness = kit.dsh.foundry.harness;
 const PIN = `${harness.package}@${harness.version}`;
+// The rc.2 boot calls Cordis 4.0's HMR/config-watch APIs. Its published ^
+// ranges also admit the incompatible 4.1/1.1 plugin family on a cold install.
+const HARNESS_OVERRIDES = harness.overrides ?? {};
 
 /*
  * Companions that ride in the same tree.
@@ -57,6 +60,38 @@ function pinOnDisk() {
   return line ? line.slice(4).trim() : null;
 }
 
+function checkDependencyPins(modules, problems, visited = new Set()) {
+  if (!existsSync(modules)) return;
+  const canonical = realpathSync(modules);
+  if (visited.has(canonical)) return;
+  visited.add(canonical);
+  const packageDirs = [];
+  for (const entry of readdirSync(modules, { withFileTypes: true })) {
+    if (entry.name.startsWith('.') || (!entry.isDirectory() && !entry.isSymbolicLink())) continue;
+    if (entry.name.startsWith('@')) {
+      for (const scoped of readdirSync(join(modules, entry.name), { withFileTypes: true })) {
+        if (scoped.isDirectory() || scoped.isSymbolicLink()) {
+          packageDirs.push([`${entry.name}/${scoped.name}`, join(modules, entry.name, scoped.name)]);
+        }
+      }
+    } else packageDirs.push([entry.name, join(modules, entry.name)]);
+  }
+  for (const [directoryName, packageDir] of packageDirs) {
+    const manifest = join(packageDir, 'package.json');
+    if (existsSync(manifest)) {
+      const installed = JSON.parse(readFileSync(manifest, 'utf8'));
+      const name = Object.hasOwn(HARNESS_OVERRIDES, installed.name) ? installed.name : directoryName;
+      const version = HARNESS_OVERRIDES[name];
+      if (version && installed.version !== version) {
+        problems.push(`harness dependency ${name} at ${relative(STAGE, packageDir)} is staged at ${installed.version}, the kit pins ${version}`);
+      }
+    }
+    // npm may retain a nested copy even when the staging-root version is right.
+    // Node resolves that consumer-local copy first, so check the whole tree.
+    checkDependencyPins(join(packageDir, 'node_modules'), problems, visited);
+  }
+}
+
 function check(validateAdapter = true) {
   const problems = [];
   if (!existsSync(join(STAGE, harness.entry))) {
@@ -64,6 +99,14 @@ function check(validateAdapter = true) {
   }
   const staged = pinOnDisk();
   if (staged !== PIN) problems.push(`staged pin is ${staged ?? 'absent'}, the kit declares ${PIN}`);
+  for (const [name, version] of Object.entries(HARNESS_OVERRIDES)) {
+    const manifest = join(STAGE, 'node_modules', name, 'package.json');
+    if (!existsSync(manifest)) {
+      problems.push(`harness dependency ${name} is absent, the kit pins ${version}`);
+      continue;
+    }
+  }
+  checkDependencyPins(join(STAGE, 'node_modules'), problems);
   /*
    * The bundle has to be inside the runtime's own tree, not only in the
    * profile. Measured in U10: under `ELECTRON_RUN_AS_NODE` the loader does not
@@ -116,7 +159,7 @@ if (refreshLocal) {
 mkdirSync(STAGE, { recursive: true });
 writeFileSync(
   join(STAGE, 'package.json'),
-  `${JSON.stringify({ name: 'foundry-harness-stage', private: true, type: 'module' }, null, 2)}\n`,
+  `${JSON.stringify({ name: 'foundry-harness-stage', private: true, type: 'module', overrides: HARNESS_OVERRIDES }, null, 2)}\n`,
 );
 
 console.log([`staging ${PIN}`, ...COMPANION_PINS].join(' + ') + ' into extra/dsh …');
@@ -151,6 +194,7 @@ writeFileSync(
   [
     `pin: ${PIN}`,
     `entry: ${harness.entry}`,
+    ...Object.entries(HARNESS_OVERRIDES).map(([name, version]) => `override: ${name}@${version}`),
     `bundle: node_modules/${kit.name} (copied from ../../dsh-plugin)`,
     ...COMPANION_PINS.map((pin) => `companion: ${pin}`),
     'staged-by: scripts/fetch-harness.mjs',
