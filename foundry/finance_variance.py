@@ -283,6 +283,23 @@ def _declared_scope(label, filters):
     return {"scenario": label, "filters": filters or {}}
 
 
+def _explicit_zero_actual_volume(observations):
+    """Every actual quantity is an explicit zero and every baseline quantity is positive.
+
+    Prices stay the ones supplied. This is not a missing price and not a licence
+    to divide by the actual volume or to publish mix and price effects as zero.
+    """
+    actuals = observations.get("actual") or {}
+    baselines = observations.get("baseline") or {}
+    if not actuals or set(actuals) != set(baselines):
+        return False
+    if any(item is None for side in (actuals, baselines) for item in side.values()):
+        return False
+    if not all(item[0] == 0 and item[1] >= 0 for item in actuals.values()):
+        return False
+    return all(item[0] > 0 and item[1] >= 0 for item in baselines.values())
+
+
 def _side_scope(rows, *, label, filters):
     scope = _declared_scope(label, filters)
     for key in ("ledger", "organization", "period", "currency", "unit"):
@@ -582,7 +599,11 @@ def _volume_mix_price_bridge(rows, spec):
                 except FoundryError:
                     issue("volume_mix_price_invalid_number", "数量、价格及声明金额必须是有限数值。", side=side, product=product)
                     continue
-                if quantity <= 0:
+                if quantity < 0 or (quantity == 0 and side != "actual"):
+                    # Explicit actual zeros stay on the row. A whole actual side of
+                    # zeros is a limited total below; it is not a missing price and
+                    # it is not an invented unit price. Baseline zero and negatives
+                    # still cannot enter the comparable basket.
                     issue("volume_mix_price_nonpositive_quantity", "零量或负数量需单独处理，不能用于本可比篮子模型。", side=side, product=product)
                 if price < 0:
                     issue("volume_mix_price_negative_price", "负价格需单独解释退货或调整，不能用于本可比篮子模型。", side=side, product=product)
@@ -595,6 +616,11 @@ def _volume_mix_price_bridge(rows, spec):
             issue("volume_mix_price_unmatched_products", "实际与基准的商品集合不一致；新旧商品不能按零数量配对。",
                   actual_only=sorted(set(observations["actual"]) - set(observations["baseline"]), key=repr),
                   baseline_only=sorted(set(observations["baseline"]) - set(observations["actual"]), key=repr))
+        if not _explicit_zero_actual_volume(observations):
+            for product, observation in observations["actual"].items():
+                if observation is not None and observation[0] == 0:
+                    issue("volume_mix_price_nonpositive_quantity", "零量或负数量需单独处理，不能用于本可比篮子模型。",
+                          side="actual", product=product)
 
         output = {
             **context, **{name: None for name in _VMP_AMOUNTS},
@@ -618,7 +644,24 @@ def _volume_mix_price_bridge(rows, spec):
                     if declared is not None and quantity * price != declared:
                         issue("price_quantity_amount_mismatch", "声明金额与数量乘单价不一致，不能作为可比金额桥。",
                               side=side, product=product, declared=_text(declared), computed=_text(quantity * price))
-            if not reasons:
+            blocking = [code for code in reasons if code != "volume_mix_price_quantity_unit_missing"]
+            if _explicit_zero_actual_volume(observations) and not blocking:
+                # Money total is q×p on both sides. Actual mix is 0/0, so volume,
+                # mix and price attribution stay unset rather than becoming 0.
+                issue("volume_mix_price_zero_actual_volume",
+                      "实际销量为零，实际结构占比和价格归因未定义；保留金额总差异，不构造单价，也不把未定义结构当成零。")
+                actuals, baselines = observations["actual"], observations["baseline"]
+                actual_amount = sum((q * p for q, p, _ in actuals.values()), Decimal(0))
+                baseline_amount = sum((q * p for q, p, _ in baselines.values()), Decimal(0))
+                output.update({
+                    "actual": _text(actual_amount),
+                    "baseline": _text(baseline_amount),
+                    "total_variance": _text(actual_amount - baseline_amount),
+                    "actual_volume": _text(sum((item[0] for item in actuals.values()), Decimal(0))),
+                    "baseline_volume": _text(sum((item[0] for item in baselines.values()), Decimal(0))),
+                })
+                output.update(comparison_status="limited", applicability="zero_actual_volume")
+            elif not reasons:
                 actuals, baselines = observations["actual"], observations["baseline"]
                 va = sum((item[0] for item in actuals.values()), Decimal(0))
                 vb = sum((item[0] for item in baselines.values()), Decimal(0))

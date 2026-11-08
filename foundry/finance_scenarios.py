@@ -1110,3 +1110,43 @@ def create_child_scenario(
         ],
     }
     return record
+
+
+def assess_target_feasibility(
+    year_target: Any,
+    actual_ytd: Any,
+    remaining_minimum: Any,
+    *,
+    periods_remaining: Any = None,
+    weights: Any = None,
+    cutoff: Any = None,
+) -> dict:
+    """Compare a remaining annual target with its floor.
+
+    The public E30 facts are enough to name the gap. They are not enough to
+    allocate the remainder across months. This function does not clamp a
+    negative remainder to zero, does not rewrite the actual, and does not
+    treat every negative driver as impossible.
+    """
+    target = _decimal(year_target, "year_target")
+    actual = _decimal(actual_ytd, "actual_ytd")
+    floor = _decimal(remaining_minimum, "remaining_minimum")
+    remaining = target - actual
+    short = remaining < floor
+    violation = floor - remaining if short else Decimal(0)
+    return {
+        "remaining_target": _money(remaining),
+        "actual_ytd": _money(actual),
+        "remaining_minimum": _money(floor),
+        "feasible": not short,
+        "infeasible_reason": "remaining_target_below_minimum" if short else None,
+        "bound_violation": _money(violation),
+        "monthly_allocation": None,
+        "allocation_status": "not_allocated",
+        "allocation_withheld_because": (
+            "cutoff, month count and weights do not authorize a monthly split"
+            if any(value is not None for value in (periods_remaining, weights, cutoff))
+            else "public facts do not name a cutoff, a month count or weights"
+        ),
+        "clamped": False,
+    }

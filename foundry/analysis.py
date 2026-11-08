@@ -63,6 +63,12 @@ ANALYSIS_UNAVAILABLE = "saved analysis is unavailable or outside this session co
 INHERITED_FIELDS = ("title", "body", "claims", "fact_ids", "materiality", "limitations", "source_read_failures",
                     "evidence_appendix", "evidence_appendix_meta", "evidence_recipes", "consistency_rules",
                     "consistency_sources")
+# Frozen legal-workflow identity. Service-owned required_check_authorship stays
+# on the record and inside _integrity_hash; it is not part of this hash.
+DRAFT_CONTENT_FIELDS = (
+    "title", "requirements_id", "materiality", "body", "body_template", "document",
+    "run_ids", "fact_ids", "claims", "limitations",
+)
 DEFAULT_DRAFT_TITLE = "分析报告"
 
 
@@ -132,6 +138,11 @@ def _bytes(value: Any) -> bytes:
 
 def _hash(value: Any) -> str:
     return hashlib.sha256(_bytes(value)).hexdigest()
+
+
+def _draft_content_hash(**fields) -> str:
+    """Hash the frozen ten-field draft identity, excluding optional authorship."""
+    return _hash({key: fields[key] for key in DRAFT_CONTENT_FIELDS})
 
 
 def _hash_bytes(value: bytes) -> str:
@@ -2418,20 +2429,17 @@ class AnalysisStore:
             review_status=review,
             publication_status=publication,
             limitations=limitations,
-            content_hash=_hash(
-                {
-                    "title": title,
-                    "requirements_id": requirements_id,
-                    "materiality": materiality,
-                    "body": body,
-                    "body_template": body_template,
-                    "document": document,
-                    "run_ids": list(runs),
-                    "fact_ids": fact_ids,
-                    "claims": claims,
-                    "limitations": limitations,
-                    **({"required_check_authorship": required_check_authorship} if required_check_authorship is not None else {}),
-                }
+            content_hash=_draft_content_hash(
+                title=title,
+                requirements_id=requirements_id,
+                materiality=materiality,
+                body=body,
+                body_template=body_template,
+                document=document,
+                run_ids=list(runs),
+                fact_ids=fact_ids,
+                claims=claims,
+                limitations=limitations,
             ),
         )
         return self._write(self._object_path("drafts", record["id"]), record)

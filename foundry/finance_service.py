@@ -447,15 +447,17 @@ class FinanceStore:
         context = self._read("contexts", spec.get("context_id"))
         if "confirmed_model_boundaries" in spec:
             from foundry.finance_driver_templates import BOUNDARY_INPUTS
-            from foundry.finance_professional import boundary_basis
+            from foundry.finance_professional import boundary_basis, management_template_scope
             named = spec["confirmed_model_boundaries"]
             if (not isinstance(named, list) or not all(isinstance(name, str) for name in named)
                     or sorted(named) != sorted(BOUNDARY_INPUTS)):
                 raise FoundryError("explicit confirmation must name all eight registered model boundaries")
             proof = boundary_basis(self, context, spec.get("scenario_id"))
+            scope = management_template_scope(self, context, spec.get("scenario_id"), proof)
             return self._write("profile_confirmations", context_id=context["id"], bindings=context["bindings"],
                                confirmation_basis=confirmation_basis(context), confirmed_fields=[], field_values={},
                                fields_hash=_hash(proof), confirmed_model_boundaries=named, boundary_basis=proof, status="confirmed",
+                               **({"management_template_scope": scope} if scope else {}),
                                confirmed_by=self.actor, session_id=self.session_id)
         if not context.get("reporting_profile"):
             raise FoundryError("legacy context has no reporting profile to confirm")
@@ -477,18 +479,21 @@ class FinanceStore:
         return self._write("profile_confirmations", context_id=record["context_id"], bindings=record["bindings"],
                            confirmation_basis=record["confirmation_basis"], confirmed_fields=record["confirmed_fields"],
                            **({"boundary_basis": record["boundary_basis"]} if record.get("boundary_basis") else {}),
+                           **({"management_template_scope": record["management_template_scope"]} if record.get("management_template_scope") else {}),
                            field_values=record["field_values"], fields_hash=record["fields_hash"], status="revoked",
                            confirmation_root=record.get("confirmation_root") or record["id"], parent_id=record["id"],
                            confirmed_by=self.actor, session_id=self.session_id, reason=reason)
 
     def finance_profile_status(self, spec):
-        from foundry.finance_professional import rule_identity, boundary_basis
+        from foundry.finance_professional import boundary_basis, profile_gap, rule_identity
         context = self._read("contexts", spec.get("context_id"))
         scenario_ids = [spec["scenario_id"]] if spec.get("scenario_id") else []
+        identity = rule_identity(self, context, ["driver.source_binding", "statements.linked_management"] if scenario_ids else ["driver.source_binding"],
+                                 scenario_ids=scenario_ids)
         return {"context_id": context["id"], "reporting_profile": context.get("reporting_profile"),
                 **({"model_boundary_preview": boundary_basis(self, context, spec["scenario_id"])} if scenario_ids else {}),
-                **rule_identity(self, context, ["driver.source_binding", "statements.linked_management"] if scenario_ids else ["driver.source_binding"],
-                                scenario_ids=scenario_ids)}
+                **identity,
+                "profile_gap": profile_gap(self, context, identity.get("required_profile_fields") or ())}
 
     def _normalize(self, context):
         self._authorize(context["bindings"])
