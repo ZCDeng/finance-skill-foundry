@@ -282,16 +282,32 @@ def rule_identity(service, context, rule_ids, *, max_seq=None, scenario_ids=()):
     status = ("awaiting_profile_confirmation" if required and not confirmation else route["status"])
     if "statements.linked_management" in rule_ids:
         approvals = {}
+        limited_scope = None
         for scenario_id in sorted(set(scenario_ids)):
             try:
                 proof = boundary_basis(service, context, scenario_id)
                 approval = boundary_confirmation(service, proof, max_seq=max_seq)
                 approvals[scenario_id] = {"basis_hash": _hash(proof), "confirmation_id": approval["id"] if approval else None}
+                scope = management_template_scope(service, context, scenario_id, proof)
+                if scope and approval and approval.get("management_template_scope") == scope:
+                    limited_scope = scope
             except (FoundryError, KeyError, TypeError, ValueError, OSError):
                 approvals[scenario_id] = {"basis_hash": None, "confirmation_id": None}
         basis["model_boundaries"] = approvals
         if status == "supported" and (not approvals or any(not item["confirmation_id"] for item in approvals.values())):
             status = "awaiting_model_boundary_confirmation"
+        # This fixed arithmetic qualification does not use the standard route's
+        # result. Only a new, explicit boundary decision grants its limited scope.
+        # Historical seven-field approvals and failed runs keep their identity.
+        if (not confirmation and set(rule_ids) == {"driver.source_binding", "statements.linked_management"}
+                and required == BASE_FIELDS | STANDARD_FIELDS and len(approvals) == 1 and limited_scope):
+            limited_confirmation = profile_confirmation(service, context, BASE_FIELDS, max_seq=max_seq)
+            if limited_confirmation:
+                required = BASE_FIELDS
+                basis.update(fields={key: fields.get(key) for key in sorted(required)},
+                             confirmation_id=limited_confirmation["id"], management_template_scope=limited_scope)
+                route = {"status": "supported", "standard": None, "scope": "registered_management_template"}
+                status = "supported"
     return {"rule_dependencies": dependencies, "rule_basis": basis,
             "rule_fingerprint": _hash({"version": 1, "dependencies": dependencies, "basis": basis}),
             "professional_status": status, "required_profile_fields": sorted(required), "professional_route": route}
@@ -400,6 +416,38 @@ def boundary_confirmation(service, basis, *, max_seq=None):
     return None
 
 
+def management_template_scope(service, context, scenario_id, proof):
+    """Describe a fixed management calculation, without approving standard fields.
+
+    Stored only by a new trusted boundary confirmation and compared verbatim on
+    use. Binding the entire profile also invalidates scope when an unrouted field
+    changes; no approval is synthesized or copied into confirmed_fields.
+    """
+    from foundry.finance_driver_templates import TEMPLATE_VERSION
+    profile = context.get("reporting_profile") or {}
+    if (profile.get("basis") != "management" or profile.get("basis_version") != "management-v1"
+            or profile.get("purpose") not in {"management", "forecast"} or profile.get("policies")
+            or TEMPLATE_VERSION != 1):
+        return None
+    scenario = service._read("scenarios", scenario_id)
+    inputs = scenario.get("inputs") or {}
+    scope = inputs.get("scope") or {}
+    period = proof.get("period")
+    effective = profile.get("effective_period") or {}
+    if (scenario.get("kind") != "driver_model" or scenario.get("context_id") != context.get("id")
+            or inputs.get("template_id") != TEMPLATE_ID
+            or proof.get("confirmation_basis") != confirmation_basis(context)
+            or not isinstance(period, str) or not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", period)
+            or not effective.get("start", "~") <= period <= effective.get("end", "")
+            or scope.get("organization") != profile.get("entity_scope")
+            or scope.get("currency") != profile.get("functional_currency")
+            or scope.get("currency") != profile.get("presentation_currency")
+            or scope.get("unit") != profile.get("presentation_unit")):
+        return None
+    return {"version": 1, "template_id": TEMPLATE_ID, "template_version": TEMPLATE_VERSION,
+            "context_id": context["id"], "profile_hash": _hash(profile), "boundary_basis_hash": _hash(proof)}
+
+
 def artifact_rules_match(run, expected):
     """A basket and a model may answer one question without sharing irrelevant rules."""
     captured = run.get("professional_identity") if run.get("engine") == "finance" else run.get("requirements_rule_identity")
@@ -411,6 +459,8 @@ def artifact_rules_match(run, expected):
     if any(versions.get(item["id"]) != (item["version"], item.get("epoch", 0)) for item in dependencies):
         return False
     basis, wanted = captured.get("rule_basis") or {}, expected.get("rule_basis") or {}
+    if basis.get("management_template_scope") != wanted.get("management_template_scope"):
+        return False
     if any(wanted.get("fields", {}).get(key) != value for key, value in basis.get("fields", {}).items()):
         return False
     if "confirmation_id" in basis and basis["confirmation_id"] != wanted.get("confirmation_id"):
